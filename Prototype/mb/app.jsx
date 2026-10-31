@@ -1,4 +1,4 @@
-// app.jsx — composes MidiBrowser: state, theme tokens, layout modes, playback, tweaks.
+// app.jsx — composes MidiToolkit: state, theme tokens, layout modes, playback, tweaks.
 const { FOLDERS, SAVED_DIRS, emptyEdit, editIsClean, resolveClip, editBadges, emptyEdgeBars } = window.MB_DATA;
 
 // ── Theme + accent token maps ────────────────────────────────────────────────

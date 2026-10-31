@@ -19,6 +19,7 @@ public:
     void mouseDoubleClick(const juce::MouseEvent&) override;
 
     void setPlaying(bool);
+    void setRecording(bool);
     void setSynced(bool, juce::NotificationType notify = juce::dontSendNotification);
     void setHostBpm(double);
     void setBpmMultiplier(double);
@@ -31,9 +32,18 @@ public:
     void setClipName(const juce::String& name);
     /** Standalone macOS reserves a traffic-light gutter; plugins must not. */
     void setReserveTrafficLights(bool reserve);
+    /** Measured right edge of the zoom button, including the gap before the logo.
+        0 collapses the zone to 16 px (fullscreen or no lights). */
+    void setLightsZoneWidth(int px);
+    juce::Rectangle<int> getTitleBounds() const { return titleBounds; }
+    /** Glyph + gap + “MIDI Toolkit”, independent of the current squeeze. */
+    int logoIdealWidth() const;
+    /** 2 = MIDI Toolkit, 1 = MIDI, 0 = glyph only. */
+    int logoWordmarkLevel() const { return logoLevel; }
 
     std::function<void()> onPlayPause;
     std::function<void()> onStop;
+    std::function<void()> onToggleRecord;
     std::function<void()> onToggleEditor;
     std::function<void()> onToggleEffects;
     std::function<void()> onTogglePassthrough;
@@ -43,9 +53,13 @@ public:
     std::function<void()> onCopyToFolder;
 
 private:
+    void applyHeaderCaptions(bool withText);
     void refreshBpm();
     void timerCallback() override;
     bool hitInteractive(juce::Point<int> p) const;
+    void paintLogo(juce::Graphics&, juce::Rectangle<int> area, float alpha) const;
+    void paintLogoGlyph(juce::Graphics&, juce::Point<float> origin, float alpha) const;
+    int logoMidiWidth() const;
 
     class StatusPill : public juce::Component,
                        private juce::Timer
@@ -120,10 +134,11 @@ private:
 
     IconBtn btnPlay { icons::play, "Play preview" };
     IconBtn btnStop { icons::stop, "Stop preview" };
+    IconBtn btnRecord { icons::record, "Record" };
     StatusPill statusPill;
     IconBtn btnSync { icons::sync, "Sync to host tempo" };
     DragChip btnDragToDaw { "Drag to DAW" };
-    IconBtn btnPassthrough { icons::midi, "Passthrough" };
+    IconBtn btnPassthrough { icons::midi, "Through" };
     IconBtn btnEditor { icons::noteKeys, "Piano Roll" };
     IconBtn btnEffects { icons::sliders, "Effects" };
 
@@ -141,6 +156,8 @@ private:
     double freeBpm = 124.0;
     double multiplier = 1.0;
     int lightsZoneW = 16;
+    int measuredLightsZone = 0;
+    int logoLevel = 2;
     juce::ComponentDragger windowDragger;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(TransportBar)

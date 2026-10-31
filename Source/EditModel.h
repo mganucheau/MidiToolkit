@@ -45,6 +45,8 @@ struct StepClip
     int    noteCount = 0;
     int    difNotes = 0;    // distinct pitches
     int    complexity = 1;  // 1..100 density x variety score
+    /** True after a full parse. Browse scans leave this false and keep `notes` empty. */
+    bool   notesResident = false;
     std::vector<RollNote> notes;
 };
 
@@ -189,10 +191,15 @@ struct ClipEdit
 
 bool editIsClean(const ClipEdit& e);
 
-/** Copy only the pitch-shaping fields (octave, fit-to-scale, map-to-root,
-    root, mode) from `locked` into `target`, leaving the target's per-note
-    moves and trim untouched. Drives the browse-lock feature. */
+/** Copy pitch-shaping fields (octave, fit-to-scale, map-to-root, root, mode,
+    note filter) from `locked` into `target`. Per-note moves, trim, and extend
+    stay on the target — those belong to Playback lock. */
 void applyPitchLock(const ClipEdit& locked, ClipEdit& target);
+
+/** Stamp locked Playback onto `target`: extend, and either re-trim this clip's
+    empty bars (`autoTrim`) or clear trim so a previous visit cannot turn it back on. */
+void applyPlaybackLock(const ClipEdit& locked, ClipEdit& target, bool autoTrim,
+                       const StepClip& clip);
 
 // ── Transform pipeline ───────────────────────────────────────────────────────
 
@@ -232,5 +239,8 @@ std::vector<EditBadge> editBadges(const StepClip& clip, const ClipEdit& edit);
 /** Beats→steps view of a parsed MIDI file (1 beat = 4 steps). Assigns stable
     sequential note ids in file order; estimates root and kind from content. */
 StepClip makeStepClip(const MidiClip& clip);
+
+/** Browse metadata only: bpm, bars, kind, complexity. Does not retain note events. */
+StepClip scanMidiBrowseMeta(const juce::File& file);
 
 } // namespace pflow

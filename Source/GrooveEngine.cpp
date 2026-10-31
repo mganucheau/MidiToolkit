@@ -99,6 +99,11 @@ void applyGrooveSectionLock(const GrooveParams& locked, GrooveParams& target, ui
         target.velocityRangeLo = locked.velocityRangeLo;
         target.velocityRangeHi = locked.velocityRangeHi;
         target.sustainPedalMode = locked.sustainPedalMode;
+        // Articulation rewrites Length, which lives in Timing. Keep that length
+        // with a locked Performance section unless Timing is locked on its own.
+        if ((locks & toolkitLock::Timing) == 0
+            && locked.articulationIndex != (int) Articulation::Off)
+            target.length = locked.length;
     }
     if ((locks & toolkitLock::Effects) != 0)
     {
@@ -117,9 +122,12 @@ void applyGrooveSectionLock(const GrooveParams& locked, GrooveParams& target, ui
     }
 }
 
-void captureGrooveSectionLock(const GrooveParams& src, GrooveParams& locked, uint32_t locks)
+void captureGrooveSectionLock(const GrooveParams& src, GrooveParams& locked, uint32_t locks,
+                              int clipComplexity)
 {
     applyGrooveSectionLock(src, locked, locks);
+    if ((locks & toolkitLock::Effects) != 0 && locked.complexityTarget < 0 && clipComplexity >= 0)
+        locked.complexityTarget = juce::jlimit(0, 100, clipComplexity);
 }
 
 void GrooveParams::applyArticulationToKnobs()

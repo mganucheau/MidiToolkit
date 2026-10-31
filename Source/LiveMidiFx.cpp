@@ -249,6 +249,37 @@ void LiveMidiFx::scheduleDelayTaps(const GrooveParams& groove, juce::MidiBuffer&
     }
 }
 
+void LiveMidiFx::syncSustain(const GrooveParams& groove, juce::MidiBuffer& out, int numSamples)
+{
+    const auto mode = groove.sustainMode();
+    for (int ch = 0; ch < 16; ++ch)
+    {
+        bool held = false;
+        for (int n = 0; n < 128; ++n)
+        {
+            if (held_[(size_t) ch][(size_t) n].active)
+            {
+                held = true;
+                break;
+            }
+        }
+
+        if (mode == SustainPedalMode::StartOfClip && held)
+            sustainLatched_[(size_t) ch] = true;
+        if (mode == SustainPedalMode::Off)
+            sustainLatched_[(size_t) ch] = false;
+
+        const bool wantDown = (mode == SustainPedalMode::StartOfClip)
+                                  ? sustainLatched_[(size_t) ch]
+                                  : (mode == SustainPedalMode::Auto ? held : false);
+        if (wantDown == sustainDown_[(size_t) ch])
+            continue;
+        sustainDown_[(size_t) ch] = wantDown;
+        emitOrQueue(out, juce::MidiMessage::controllerEvent(ch + 1, 64, wantDown ? 127 : 0),
+                    0, numSamples);
+    }
+}
+
 void LiveMidiFx::flush(juce::MidiBuffer& out, int samplePosition)
 {
     for (int ch = 0; ch < 16; ++ch)
@@ -264,10 +295,13 @@ void LiveMidiFx::flush(juce::MidiBuffer& out, int samplePosition)
         out.addEvent(juce::MidiMessage::allNotesOff(ch + 1), samplePosition);
     }
     pending_.clear();
+    freeBeat_ = 0.0;
+    sustainDown_.fill(false);
+    sustainLatched_.fill(false);
 }
 
 void LiveMidiFx::process(juce::MidiBuffer& midi, double sampleRate, double hostBpm,
-                         double hostBeatPos, int numSamples)
+                         double hostBeatPos, int numSamples, bool hostIsPlaying)
 {
     LiveFxState snap;
     {
@@ -275,9 +309,19 @@ void LiveMidiFx::process(juce::MidiBuffer& midi, double sampleRate, double hostB
         snap = state_;
     }
 
-    const double mult = juce::jlimit(0.25, 4.0, snap.bpmMultiplier);
-    const double bpm = juce::jmax(1.0, hostBpm * mult);
-    const double beatPos = hostBeatPos * mult;
+    // Half/double tempo belongs to Playback, which does not apply to a live stream.
+    const double bpm = juce::jmax(1.0, hostBpm);
+    double beatPos = hostBeatPos;
+    if (!hostIsPlaying)
+    {
+        beatPos = freeBeat_;
+        if (sampleRate > 0.0)
+            freeBeat_ += (double) numSamples * (bpm / 60.0) / sampleRate;
+        if (freeBeat_ > 1.0e6)
+            freeBeat_ = std::fmod(freeBeat_, 16.0);
+    }
+    else
+        freeBeat_ = 0.0;
     const double lenMul = std::max(0.05, snap.groove.length / 100.0);
 
     juce::MidiBuffer out;
@@ -346,7 +390,10 @@ void LiveMidiFx::process(juce::MidiBuffer& midi, double sampleRate, double hostB
             const int inPitch = juce::jlimit(0, 127, msg.getNoteNumber());
             auto& slot = held_[(size_t) (ch - 1)][(size_t) inPitch];
             if (!slot.active)
+            {
+                out.addEvent(msg, samplePos);
                 continue;
+            }
 
             const double beatsIntoBlock = (sampleRate > 0.0)
                 ? ((double) samplePos / sampleRate) * (bpm / 60.0) : 0.0;
@@ -367,6 +414,7 @@ void LiveMidiFx::process(juce::MidiBuffer& midi, double sampleRate, double hostB
         out.addEvent(msg, samplePos);
     }
 
+    syncSustain(snap.groove, out, numSamples);
     midi.swapWith(out);
 }
 

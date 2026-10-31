@@ -291,8 +291,11 @@ namespace toolkitLock
 
 /** Overlay Timing / Performance / Effects fields from `locked` when those bits are set. */
 void applyGrooveSectionLock(const GrooveParams& locked, GrooveParams& target, uint32_t locks);
-/** Copy those section fields from `src` into `locked` (for updating the snapshot). */
-void captureGrooveSectionLock(const GrooveParams& src, GrooveParams& locked, uint32_t locks);
+/** Copy those section fields from `src` into `locked`.
+    clipComplexity >= 0 freezes a follow-clip complexity (-1) to that absolute value
+    so a locked Effects section does not track each file. */
+void captureGrooveSectionLock(const GrooveParams& src, GrooveParams& locked, uint32_t locks,
+                              int clipComplexity = -1);
 
 /** Timing + generative transforms. sourceComplexity is the clip's baseline (1..100). */
 std::vector<RollNote> applyGroove(const std::vector<RollNote>& notes, const GrooveParams& k,

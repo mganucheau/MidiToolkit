@@ -38,9 +38,11 @@ public:
     void setState(const LiveFxState& state);
     LiveFxState getState() const;
 
-    /** Process host MIDI in-place with Toolkit transforms. */
+    /** Process host MIDI in-place with Toolkit transforms.
+        When the host transport is stopped, timing follows an internal clock so
+        swing and quantize still land on offbeats. */
     void process(juce::MidiBuffer& midi, double sampleRate, double hostBpm,
-                 double hostBeatPos, int numSamples);
+                 double hostBeatPos, int numSamples, bool hostIsPlaying = true);
 
     /** Release every held / pending live note into `out`. */
     void flush(juce::MidiBuffer& out, int samplePosition = 0);
@@ -68,12 +70,17 @@ private:
     void scheduleDelayTaps(const GrooveParams& groove, juce::MidiBuffer& out, bool isNoteOn,
                            int channel, int outPitch, int velocity, int samplePos, int numSamples,
                            double sampleRate, double bpm);
+    void syncSustain(const GrooveParams& groove, juce::MidiBuffer& out, int numSamples);
 
     mutable juce::CriticalSection lock_;
     LiveFxState state_;
     std::array<std::array<Held, 128>, 16> held_ {};
     std::vector<Pending> pending_;
     int nextNoteId_ = 1;
+    /** Beat clock used while the host transport is stopped. */
+    double freeBeat_ = 0.0;
+    std::array<bool, 16> sustainDown_ {};
+    std::array<bool, 16> sustainLatched_ {};
 };
 
 } // namespace pflow

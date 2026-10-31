@@ -23,6 +23,7 @@ bool LibraryStore::searchesEqual(const BrowserSearch& a, const BrowserSearch& b)
         && a.complexityMin == b.complexityMin
         && a.complexityMax == b.complexityMax
         && a.kindMask == b.kindMask
+        && a.timeSigMask == b.timeSigMask
         && a.subdirs == b.subdirs
         && a.removeDuplicates == b.removeDuplicates;
 }
@@ -40,6 +41,7 @@ BrowserSearch LibraryStore::browserSearchFromXml(const juce::XmlElement& el)
     s.complexityMin = juce::jmax(0, el.getIntAttribute("complexityMin", 0));
     s.complexityMax = juce::jmax(0, el.getIntAttribute("complexityMax", 0));
     s.kindMask = (uint8_t) juce::jlimit(0, 0x1F, el.getIntAttribute("kindMask", 0));
+    s.timeSigMask = (uint16_t) juce::jlimit(0, 0xFFFF, el.getIntAttribute("timeSigMask", 0));
 
     if (el.hasAttribute("bpmMin") || el.hasAttribute("bpmMax"))
     {
@@ -82,8 +84,28 @@ void LibraryStore::browserSearchToXml(juce::XmlElement& el, const BrowserSearch&
     el.setAttribute("complexityMin", s.complexityMin);
     el.setAttribute("complexityMax", s.complexityMax);
     el.setAttribute("kindMask", (int) s.kindMask);
+    el.setAttribute("timeSigMask", (int) s.timeSigMask);
     el.setAttribute("subdirs", s.subdirs ? 1 : 0);
     el.setAttribute("removeDuplicates", s.removeDuplicates ? 1 : 0);
+}
+
+SavedLibraryFolder LibraryStore::savedLibraryFromXml(const juce::XmlElement& el)
+{
+    SavedLibraryFolder f;
+    f.path = el.getStringAttribute("path");
+    f.scanSubdirs = el.getIntAttribute("scanSubdirs", 0) != 0;
+    if (el.getIntAttribute("hasFilter", 0) != 0)
+        f.filter = browserSearchFromXml(el);
+    f.filter.subdirs = f.scanSubdirs;
+    return f;
+}
+
+void LibraryStore::savedLibraryToXml(juce::XmlElement& el, const SavedLibraryFolder& folder)
+{
+    el.setAttribute("path", folder.path);
+    el.setAttribute("scanSubdirs", folder.scanSubdirs ? 1 : 0);
+    el.setAttribute("hasFilter", 1);
+    browserSearchToXml(el, folder.filter);
 }
 
 SharedUiSession LibraryStore::uiSessionFromXml(const juce::XmlElement& el)
@@ -96,6 +118,7 @@ SharedUiSession LibraryStore::uiSessionFromXml(const juce::XmlElement& el)
     s.selectedClipPath = el.getStringAttribute("selectedClipPath");
     s.activeSavedSearchIdx = el.getIntAttribute("activeSavedSearchIdx", -1);
     s.nameColumnWidth = juce::jlimit(120, 2400, el.getIntAttribute("nameColumnWidth", 140));
+    s.browserPaneW = juce::jmax(0, el.getIntAttribute("browserPaneW", 0));
     s.editorOpen = el.getIntAttribute("editorOpen", 0) != 0;
     s.effectsOpen = el.getIntAttribute("effectsOpen", 0) != 0;
     s.previewOpen = el.getIntAttribute("previewOpen", 1) != 0;
@@ -114,15 +137,39 @@ SharedUiSession LibraryStore::uiSessionFromXml(const juce::XmlElement& el)
     s.tweakTextScalePct = juce::jlimit(60, 150, el.getIntAttribute("tweakTextScalePct", 100));
     s.tweakAppearance = juce::jlimit(0, 2, el.getIntAttribute("tweakAppearance", 0));
     s.tweakShowTooltips = el.getIntAttribute("tweakShowTooltips", 1) != 0 ? 1 : 0;
+    s.hasDefaultView = el.getIntAttribute("hasDefaultView", 0) != 0;
+    s.defEditorOpen = el.getIntAttribute("defEditorOpen", 0) != 0;
+    s.defEffectsOpen = el.getIntAttribute("defEffectsOpen", 0) != 0;
+    s.defPreviewOpen = el.getIntAttribute("defPreviewOpen", 1) != 0;
+    s.defSidebarCollapsed = el.getIntAttribute("defSidebarCollapsed", 0) != 0;
+    s.defPassthrough = el.getIntAttribute("defPassthrough", 0) != 0;
+    s.defColumns.key = el.getIntAttribute("defColKey", 1) != 0;
+    s.defColumns.tempo = el.getIntAttribute("defColTempo", 1) != 0;
+    s.defColumns.bars = el.getIntAttribute("defColBars", 1) != 0;
+    s.defColumns.kind = el.getIntAttribute("defColKind", 1) != 0;
+    s.defColumns.complexity = el.getIntAttribute("defColComplexity", 0) != 0;
+    s.defColumns.difNotes = el.getIntAttribute("defColDifNotes", 0) != 0;
+    s.defColumns.timeSig = el.getIntAttribute("defColTimeSig", 0) != 0;
+    s.defColumns.notes = el.getIntAttribute("defColNotes", 0) != 0;
+    s.defNameColumnWidth = juce::jlimit(120, 2400, el.getIntAttribute("defNameW", 140));
+    s.defWindowW = el.getIntAttribute("defWindowW", 0);
+    s.defWindowH = el.getIntAttribute("defWindowH", 700);
+    s.defTweakSize = juce::jlimit(0, 2, el.getIntAttribute("defTweakSize", 1));
+    s.defTweakTextScalePct = juce::jlimit(60, 150, el.getIntAttribute("defTweakText", 100));
+    s.defTweakDensity = juce::jlimit(0, 1, el.getIntAttribute("defTweakDensity", 1));
+    s.defTweakAppearance = juce::jlimit(0, 2, el.getIntAttribute("defTweakAppearance", 0));
     s.browserSessionSearch = browserSearchFromXml(el);
 
     for (auto* child : el.getChildIterator())
     {
         if (child->hasTagName("SavedFolder"))
         {
-            const auto path = child->getStringAttribute("path");
-            if (path.isNotEmpty() && !s.savedBrowserDirs.contains(path))
-                s.savedBrowserDirs.add(path);
+            auto folder = savedLibraryFromXml(*child);
+            if (folder.path.isNotEmpty() && !s.savedBrowserDirs.contains(folder.path))
+            {
+                s.savedBrowserDirs.add(folder.path);
+                s.savedLibraries.push_back(std::move(folder));
+            }
         }
         else if (child->hasTagName("Result"))
         {
@@ -143,6 +190,7 @@ void LibraryStore::uiSessionToXml(juce::XmlElement& el, const SharedUiSession& s
     el.setAttribute("selectedClipPath", s.selectedClipPath);
     el.setAttribute("activeSavedSearchIdx", s.activeSavedSearchIdx);
     el.setAttribute("nameColumnWidth", s.nameColumnWidth);
+    el.setAttribute("browserPaneW", s.browserPaneW);
     el.setAttribute("editorOpen", s.editorOpen ? 1 : 0);
     el.setAttribute("effectsOpen", s.effectsOpen ? 1 : 0);
     el.setAttribute("previewOpen", s.previewOpen ? 1 : 0);
@@ -161,13 +209,46 @@ void LibraryStore::uiSessionToXml(juce::XmlElement& el, const SharedUiSession& s
     el.setAttribute("tweakTextScalePct", s.tweakTextScalePct);
     el.setAttribute("tweakAppearance", s.tweakAppearance);
     el.setAttribute("tweakShowTooltips", s.tweakShowTooltips);
+    el.setAttribute("hasDefaultView", s.hasDefaultView ? 1 : 0);
+    el.setAttribute("defEditorOpen", s.defEditorOpen ? 1 : 0);
+    el.setAttribute("defEffectsOpen", s.defEffectsOpen ? 1 : 0);
+    el.setAttribute("defPreviewOpen", s.defPreviewOpen ? 1 : 0);
+    el.setAttribute("defSidebarCollapsed", s.defSidebarCollapsed ? 1 : 0);
+    el.setAttribute("defPassthrough", s.defPassthrough ? 1 : 0);
+    el.setAttribute("defColKey", s.defColumns.key ? 1 : 0);
+    el.setAttribute("defColTempo", s.defColumns.tempo ? 1 : 0);
+    el.setAttribute("defColBars", s.defColumns.bars ? 1 : 0);
+    el.setAttribute("defColKind", s.defColumns.kind ? 1 : 0);
+    el.setAttribute("defColComplexity", s.defColumns.complexity ? 1 : 0);
+    el.setAttribute("defColDifNotes", s.defColumns.difNotes ? 1 : 0);
+    el.setAttribute("defColTimeSig", s.defColumns.timeSig ? 1 : 0);
+    el.setAttribute("defColNotes", s.defColumns.notes ? 1 : 0);
+    el.setAttribute("defNameW", s.defNameColumnWidth);
+    el.setAttribute("defWindowW", s.defWindowW);
+    el.setAttribute("defWindowH", s.defWindowH);
+    el.setAttribute("defTweakSize", s.defTweakSize);
+    el.setAttribute("defTweakText", s.defTweakTextScalePct);
+    el.setAttribute("defTweakDensity", s.defTweakDensity);
+    el.setAttribute("defTweakAppearance", s.defTweakAppearance);
     browserSearchToXml(el, s.browserSessionSearch);
 
-    for (const auto& folder : s.savedBrowserDirs)
+    if (!s.savedLibraries.empty())
     {
-        if (folder.isEmpty()) continue;
-        auto* child = el.createNewChildElement("SavedFolder");
-        child->setAttribute("path", folder);
+        for (const auto& folder : s.savedLibraries)
+        {
+            if (folder.path.isEmpty()) continue;
+            auto* child = el.createNewChildElement("SavedFolder");
+            savedLibraryToXml(*child, folder);
+        }
+    }
+    else
+    {
+        for (const auto& folder : s.savedBrowserDirs)
+        {
+            if (folder.isEmpty()) continue;
+            auto* child = el.createNewChildElement("SavedFolder");
+            child->setAttribute("path", folder);
+        }
     }
     int n = 0;
     for (const auto& path : s.browserResultPaths)
@@ -193,7 +274,7 @@ void LibraryStore::load()
 
     if (auto xml = juce::XmlDocument::parse(file))
     {
-        if (!xml->hasTagName("MidiBrowserLibrary"))
+        if (!xml->hasTagName("MidiToolkitLibrary") && !xml->hasTagName("MidiBrowserLibrary"))
             return;
 
         for (auto* child : xml->getChildIterator())
@@ -256,7 +337,7 @@ juce::StringArray LibraryStore::readStarsFromDisk()
 
     if (auto xml = juce::XmlDocument::parse(file))
     {
-        if (!xml->hasTagName("MidiBrowserLibrary"))
+        if (!xml->hasTagName("MidiToolkitLibrary") && !xml->hasTagName("MidiBrowserLibrary"))
             return stars;
         for (auto* child : xml->getChildIterator())
         {
@@ -276,7 +357,7 @@ void LibraryStore::writeLibraryFile(juce::StringArray stars,
                                     SharedUiSession session,
                                     bool writeSession)
 {
-    juce::XmlElement xml("MidiBrowserLibrary");
+    juce::XmlElement xml("MidiToolkitLibrary");
     xml.setAttribute("version", 2);
 
     for (const auto& star : stars)

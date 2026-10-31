@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>MidiBrowser — States & Layouts</title>
+  <title>MidiToolkit — States & Layouts</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     html, body { margin: 0; padding: 0; height: 100%; background: #f0eee9; }
@@ -26,23 +26,23 @@
       return (
         <DesignCanvas>
           <DCSection id="states"
-            title="MidiBrowser redesign"
+            title="MidiToolkit redesign"
             subtitle="The app is a resizable window. Opening the editor dock grows the whole window by the dock's width — the browser pane keeps its size. The bottom piano roll folds for more files; both panels can be open at once.">
 
             <DCArtboard id="compact" label="A · Default window — browse + bottom roll" width={660} height={812}>
-              <F src="MidiBrowser.html?roll=1&editor=0&theme=charcoal&accent=blue&grid=lanes" />
+              <F src="MidiToolkit.html?roll=1&editor=0&theme=charcoal&accent=blue&grid=lanes" />
             </DCArtboard>
 
             <DCArtboard id="folded" label="B · Roll folded — more files" width={660} height={812}>
-              <F src="MidiBrowser.html?roll=0&editor=0&theme=charcoal&accent=blue&grid=lanes" />
+              <F src="MidiToolkit.html?roll=0&editor=0&theme=charcoal&accent=blue&grid=lanes" />
             </DCArtboard>
 
             <DCArtboard id="both" label="C · Editor open — window grows (recommended)" width={1268} height={812}>
-              <F src="MidiBrowser.html?editor=1&inst=1&roll=1&demo=edits&theme=charcoal&accent=blue&grid=lanes" />
+              <F src="MidiToolkit.html?editor=1&inst=1&roll=1&demo=edits&theme=charcoal&accent=blue&grid=lanes" />
             </DCArtboard>
 
             <DCArtboard id="editorfocus" label="D · Editor open, roll folded" width={1268} height={812}>
-              <F src="MidiBrowser.html?editor=1&inst=1&roll=0&demo=edits&theme=graphite&accent=amber&grid=minimal" />
+              <F src="MidiToolkit.html?editor=1&inst=1&roll=0&demo=edits&theme=graphite&accent=amber&grid=minimal" />
             </DCArtboard>
 
           </DCSection>

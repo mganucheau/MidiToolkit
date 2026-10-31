@@ -82,7 +82,7 @@ TEST_CASE("Processor loads library stars on construction", "[Library][qa]")
         store.save();
     }
 
-    MidiBrowserProcessor processor;
+    MidiToolkitProcessor processor;
     REQUIRE(processor.isStarred("/tmp/starred-clip.mid"));
 
     file.deleteFile();
@@ -99,7 +99,7 @@ TEST_CASE("Shared UI session reloads on a new processor instance", "[Library][qa
     file.deleteFile();
 
     {
-        MidiBrowserProcessor a;
+        MidiToolkitProcessor a;
         a.lastBrowserDir = "/tmp/shared-midi-lib";
         a.browseMode = 2;
         a.includeSubdirs = true;
@@ -118,7 +118,7 @@ TEST_CASE("Shared UI session reloads on a new processor instance", "[Library][qa
     }
 
     {
-        MidiBrowserProcessor b;
+        MidiToolkitProcessor b;
         // No host state — must still restore workspace from the app library.
         b.setStateInformation(nullptr, 0);
         REQUIRE(b.lastBrowserDir == "/tmp/shared-midi-lib");
@@ -175,7 +175,7 @@ TEST_CASE("Favorites accrue across sessions and host state loads", "[Library][qa
 
     // Host state with a subset must not wipe the accrued library.
     {
-        MidiBrowserProcessor processor;
+        MidiToolkitProcessor processor;
         REQUIRE(processor.isStarred("/tmp/fav-a.mid"));
         REQUIRE(processor.isStarred("/tmp/fav-b.mid"));
         REQUIRE(processor.isStarred("/tmp/fav-c.mid"));
@@ -183,7 +183,7 @@ TEST_CASE("Favorites accrue across sessions and host state loads", "[Library][qa
         juce::MemoryBlock state;
         // Simulate a project that only remembered one favorite.
         {
-            juce::XmlElement xml("MidiBrowserState");
+            juce::XmlElement xml("MidiToolkitState");
             auto* star = xml.createNewChildElement("StarredFile");
             star->setAttribute("path", "/tmp/fav-a.mid");
             juce::AudioProcessor::copyXmlToBinary(xml, state);

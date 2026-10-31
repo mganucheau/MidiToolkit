@@ -1,4 +1,4 @@
-// data.jsx — MidiBrowser mock data, music theory, and non-destructive transforms.
+// data.jsx — MidiToolkit mock data, music theory, and non-destructive transforms.
 // No mutation of source clips: every edit lives in a separate edit record.
 
 // ── Music theory ────────────────────────────────────────────────────────────

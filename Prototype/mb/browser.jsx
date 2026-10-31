@@ -14,7 +14,7 @@ function Transport({ playing, onPlay, onStop, bpm, synced, folder, onToggleSync,
         <div style={{ width: 22, height: 22, borderRadius: 6, background: 'var(--mb-accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: '0 0 auto' }}>
           <MBIcon name="waveform" weight="bold" size={13} style={{ color: 'var(--mb-accent-ink)' }} />
         </div>
-        {!compact && <span style={{ fontSize: 13.5, fontWeight: 700, letterSpacing: '-0.02em', color: 'var(--mb-text)' }}>MidiBrowser</span>}
+        {!compact && <span style={{ fontSize: 13.5, fontWeight: 700, letterSpacing: '-0.02em', color: 'var(--mb-text)' }}>MidiToolkit</span>}
       </div>
 
       <div style={{ width: 1, height: 20, background: 'var(--mb-line)' }} />

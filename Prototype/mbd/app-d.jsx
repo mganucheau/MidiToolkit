@@ -1,4 +1,4 @@
-// app-d.jsx — MidiBrowser "D" focused variant: compact file browser + full-height
+// app-d.jsx — MidiToolkit "D" focused variant: compact file browser + full-height
 // piano roll + folding Groove knob panel. Editor is always open (no right-dock toggle).
 const { FOLDERS: FOLDERS_D, SAVED_DIRS: SAVED_DIRS_D, emptyEdit: emptyEditD, resolveClip: resolveClipD, editBadges: editBadgesD, emptyEdgeBars: emptyEdgeBarsD } = window.MB_DATA;
 

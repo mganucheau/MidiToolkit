@@ -1,10 +1,13 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include "EditModel.h"
 #include "BrowserPanels.h"
 #include "EffectsInspector.h"
 #include "EffectsInspectorWidgets.h"
+#include "TransportBar.h"
 #include "TestHelpers.h"
 #include <catch2/catch_approx.hpp>
+#include <CoreFoundation/CoreFoundation.h>
 
 using namespace pflow;
 
@@ -55,17 +58,17 @@ TEST_CASE("Trim button trims and restores through the real editor UI", "[editoru
     tweaks().appearance.store((int) Appearance::Light);
     tweaks().density.store((int) Density::Compact);
 
-    const auto dir = makeLeadBarFolder("MidiBrowserUiTest");
+    const auto dir = makeLeadBarFolder("MidiToolkitUiTest");
     const auto path = dir.getChildFile("lead.mid").getFullPathName();
 
-    MidiBrowserProcessor proc;
+    MidiToolkitProcessor proc;
     proc.effectsOpen = true;
     proc.passthrough = false;
     proc.passthroughActive.store(false);
 
     std::unique_ptr<juce::AudioProcessorEditor> ed(proc.createEditor());
     REQUIRE(ed != nullptr);
-    auto* browser = dynamic_cast<MidiBrowserEditor*>(ed.get());
+    auto* browser = dynamic_cast<MidiToolkitEditor*>(ed.get());
     REQUIRE(browser != nullptr);
     browser->ensureAndSelectFile(dir.getChildFile("lead.mid"));
     ed->setVisible(true);   // hit-testing requires a visible component tree
@@ -114,15 +117,15 @@ TEST_CASE("Fold and pitch-lock buttons are reachable; lock persists a template",
 {
     juce::ScopedJuceInitialiser_GUI gui;
 
-    const auto dir = makeLeadBarFolder("MidiBrowserUiTest2");
+    const auto dir = makeLeadBarFolder("MidiToolkitUiTest2");
 
-    MidiBrowserProcessor proc;
+    MidiToolkitProcessor proc;
     proc.effectsOpen = true;
     proc.passthrough = false;
     proc.passthroughActive.store(false);
 
     std::unique_ptr<juce::AudioProcessorEditor> ed(proc.createEditor());
-    auto* browser = dynamic_cast<MidiBrowserEditor*>(ed.get());
+    auto* browser = dynamic_cast<MidiToolkitEditor*>(ed.get());
     REQUIRE(browser != nullptr);
     browser->ensureAndSelectFile(dir.getChildFile("lead.mid"));
     browser->toggleEditorFold(); // startup leaves the piano roll folded
@@ -147,6 +150,215 @@ TEST_CASE("Fold and pitch-lock buttons are reachable; lock persists a template",
 
     ed = nullptr;
     dir.deleteRecursively();
+}
+
+TEST_CASE("Locked toolkit sections keep their settings on the next file", "[editorui]")
+{
+    juce::ScopedJuceInitialiser_GUI gui;
+    tweaks().size.store((int) ContentSize::Medium);
+
+    auto dir = juce::File::getSpecialLocation(juce::File::tempDirectory)
+                   .getChildFile("MidiToolkitLockBrowse");
+    dir.deleteRecursively();
+    dir.createDirectory();
+
+    const auto sparseFile = dir.getChildFile("sparse.mid");
+    const auto denseFile = dir.getChildFile("dense.mid");
+    writeMidiFile(test::makeClipWithNotes({ { 60, 100, 0.0, 1.0, 1 } }, 4.0), sparseFile, 120.0);
+    {
+        std::vector<NoteEvent> notes;
+        for (int i = 0; i < 32; ++i)
+            notes.push_back({ 48 + (i % 12), 40 + (i % 50), i * 0.25, 0.2, 1 });
+        MidiClip dense;
+        dense.name = "Dense";
+        dense.notes = notes;
+        dense.lengthBeats = 8.0;
+        writeMidiFile(dense, denseFile, 120.0);
+    }
+
+    const auto sparse = makeStepClip(parseMidiFile(sparseFile));
+    const auto dense = makeStepClip(parseMidiFile(denseFile));
+    REQUIRE(sparse.complexity != dense.complexity);
+
+    MidiToolkitProcessor proc;
+    proc.effectsOpen = true;
+    proc.passthrough = false;
+    proc.passthroughActive.store(false);
+
+    std::unique_ptr<juce::AudioProcessorEditor> ed(proc.createEditor());
+    auto* browser = dynamic_cast<MidiToolkitEditor*>(ed.get());
+    REQUIRE(browser != nullptr);
+    browser->ensureAndSelectFile(sparseFile);
+
+    const auto sparsePath = sparseFile.getFullPathName();
+    auto& groove = proc.grooveFor(sparsePath);
+    groove.delayAmount = 60;
+    groove.complexityTarget = -1;
+
+    auto* lock = dynamic_cast<juce::Button*>(findById(ed.get(), "btnLock"));
+    REQUIRE(lock != nullptr);
+    lock->onClick();
+
+    CHECK(proc.sectionLocks == toolkitLock::All);
+    CHECK(proc.lockedGroove.delayAmount == 60);
+    CHECK(proc.lockedGroove.complexityTarget == sparse.complexity);
+
+    browser->ensureAndSelectFile(denseFile);
+    const auto densePath = denseFile.getFullPathName();
+    CHECK(proc.sectionLocks == toolkitLock::All);
+    REQUIRE(proc.clipGrooves.count(densePath) == 1);
+    CHECK(proc.clipGrooves[densePath].delayAmount == 60);
+    CHECK(proc.clipGrooves[densePath].complexityTarget == sparse.complexity);
+    CHECK(proc.clipGrooves[densePath].complexityTarget != dense.complexity);
+
+    ed = nullptr;
+    dir.deleteRecursively();
+}
+
+TEST_CASE("Reopening the editor restores the scanned folder", "[editorui]")
+{
+    juce::ScopedJuceInitialiser_GUI gui;
+    tweaks().size.store((int) ContentSize::Medium);
+
+    auto dir = juce::File::getSpecialLocation(juce::File::tempDirectory)
+                   .getChildFile("MidiToolkitRestoreFolder");
+    dir.deleteRecursively();
+    dir.createDirectory();
+    const auto midi = dir.getChildFile("phrase.mid");
+    writeMidiFile(test::makeClipWithNotes({ { 60, 100, 0.0, 1.0, 1 } }, 4.0), midi, 120.0);
+
+    MidiToolkitProcessor proc;
+    proc.browseMode = 0;
+    proc.includeSubdirs = false;
+    proc.browserSessionSearch = {};
+    proc.lastBrowserDir = dir.getFullPathName();
+    proc.selectedClipPath = midi.getFullPathName();
+
+    {
+        std::unique_ptr<juce::AudioProcessorEditor> ed(proc.createEditor());
+        const auto deadline = juce::Time::getMillisecondCounter() + 4000;
+        while (juce::Time::getMillisecondCounter() < deadline)
+            CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.05, false);
+    }
+
+    CHECK(proc.lastBrowserDir == dir.getFullPathName());
+    CHECK(proc.selectedClipPath == midi.getFullPathName());
+    dir.deleteRecursively();
+}
+
+TEST_CASE("Opening a folder lists its MIDI files", "[editorui]")
+{
+    juce::ScopedJuceInitialiser_GUI gui;
+    tweaks().size.store((int) ContentSize::Medium);
+
+    auto parent = juce::File::getSpecialLocation(juce::File::tempDirectory)
+                      .getChildFile("MidiToolkitOpenFolder");
+    parent.deleteRecursively();
+    parent.createDirectory();
+    const auto top = parent.getChildFile("top.mid");
+    const auto childDir = parent.getChildFile("inner");
+    childDir.createDirectory();
+    const auto nested = childDir.getChildFile("nested.mid");
+    writeMidiFile(test::makeClipWithNotes({ { 60, 100, 0.0, 1.0, 1 } }, 4.0), top, 120.0);
+    writeMidiFile(test::makeClipWithNotes({ { 64, 100, 0.0, 1.0, 1 } }, 4.0), nested, 120.0);
+
+    MidiToolkitProcessor proc;
+    proc.browseMode = 0;
+    proc.includeSubdirs = false;
+    proc.browserSessionSearch = {};
+    proc.lastBrowserDir = {};
+    proc.selectedClipPath = {};
+
+    std::unique_ptr<juce::AudioProcessorEditor> ed(proc.createEditor());
+    auto* browser = dynamic_cast<MidiToolkitEditor*>(ed.get());
+    REQUIRE(browser != nullptr);
+
+    auto pumpUntil = [](auto pred)
+    {
+        const auto deadline = juce::Time::getMillisecondCounter() + 4000;
+        while (juce::Time::getMillisecondCounter() < deadline && !pred())
+            CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.05, false);
+    };
+
+    browser->setRootDirectory(parent, false, false);
+    pumpUntil([&] { return browser->browserEntryCount() >= 2; });
+    CHECK(browser->browserEntryCount() >= 2);
+
+    browser->setRootDirectory(childDir, false, false);
+    pumpUntil([&] { return proc.selectedClipPath == nested.getFullPathName(); });
+    CHECK(browser->browserEntryCount() >= 1);
+    CHECK(proc.selectedClipPath == nested.getFullPathName());
+
+    ed = nullptr;
+    parent.deleteRecursively();
+}
+
+TEST_CASE("Locked trim stays on for a clip with no empty bars", "[editorui]")
+{
+    juce::ScopedJuceInitialiser_GUI gui;
+    tweaks().size.store((int) ContentSize::Medium);
+
+    auto dir = juce::File::getSpecialLocation(juce::File::tempDirectory)
+                   .getChildFile("MidiToolkitTrimLock");
+    dir.deleteRecursively();
+    dir.createDirectory();
+    const auto gapped = dir.getChildFile("gapped.mid");
+    const auto full = dir.getChildFile("full.mid");
+    writeMidiFile(test::makeClipWithNotes({ { 60, 100, 4.0, 1.0, 1 } }, 8.0), gapped, 120.0);
+    writeMidiFile(test::makeClipWithNotes({ { 60, 100, 0.0, 1.0, 1 } }, 4.0), full, 120.0);
+
+    MidiToolkitProcessor proc;
+    proc.effectsOpen = true;
+    proc.passthrough = false;
+    proc.passthroughActive.store(false);
+
+    std::unique_ptr<juce::AudioProcessorEditor> ed(proc.createEditor());
+    auto* browser = dynamic_cast<MidiToolkitEditor*>(ed.get());
+    REQUIRE(browser != nullptr);
+    browser->ensureAndSelectFile(gapped);
+
+    auto* trim = dynamic_cast<juce::Button*>(findById(ed.get(), "btnTrim"));
+    REQUIRE(trim != nullptr);
+    trim->onClick();
+    CHECK(trim->getToggleState());
+    CHECK(proc.editFor(gapped.getFullPathName()).hasTrim());
+
+    auto* lock = dynamic_cast<juce::Button*>(findById(ed.get(), "btnLock"));
+    REQUIRE(lock != nullptr);
+    lock->onClick();
+    CHECK(proc.lockAutoTrim);
+
+    browser->ensureAndSelectFile(full);
+    CHECK(proc.lockAutoTrim);
+    CHECK(trim->getToggleState());
+    CHECK_FALSE(proc.editFor(full.getFullPathName()).hasTrim());
+
+    trim->onClick();
+    CHECK_FALSE(proc.lockAutoTrim);
+    CHECK_FALSE(trim->getToggleState());
+
+    ed = nullptr;
+    dir.deleteRecursively();
+}
+
+TEST_CASE("Passthrough hides playback, complexity, and variations", "[editorui]")
+{
+    juce::ScopedJuceInitialiser_GUI gui;
+    EffectsInspector fx;
+    fx.setSize(320, 800);
+    fx.playbackSection().setOpen(true);
+    fx.effectsSection().setOpen(true);
+    const int effectsH = fx.effectsSection().idealHeight();
+    REQUIRE(fx.playbackSection().isVisible());
+
+    fx.setLiveStreamMode(true);
+    CHECK_FALSE(fx.playbackSection().isVisible());
+    CHECK(fx.effectsSection().idealHeight() < effectsH);
+    CHECK(fx.contentHeight() > 0);
+
+    fx.setLiveStreamMode(false);
+    CHECK(fx.playbackSection().isVisible());
+    CHECK(fx.effectsSection().idealHeight() == effectsH);
 }
 
 TEST_CASE("File table keyboard nav follows sorted display order", "[editorui]")
@@ -195,6 +407,26 @@ TEST_CASE("File table keyboard nav follows sorted display order", "[editorui]")
     REQUIRE(panel.getSelectedIndex() == 2); // middle
     panel.keyPressed(juce::KeyPress(juce::KeyPress::downKey));
     REQUIRE(panel.getSelectedIndex() == 1); // alpha
+}
+
+TEST_CASE("A large file list does not build a giant view", "[editorui]")
+{
+    juce::ScopedJuceInitialiser_GUI gui;
+    FileListPanel panel;
+    panel.setSize(420, 320);
+
+    std::vector<FileListEntry> entries(4000);
+    for (int i = 0; i < (int) entries.size(); ++i)
+        entries[(size_t) i].name = "clip " + juce::String(i);
+    panel.setEntries(std::move(entries));
+
+    juce::Viewport* viewport = nullptr;
+    for (int i = 0; i < panel.getNumChildComponents(); ++i)
+        if (auto* view = dynamic_cast<juce::Viewport*>(panel.getChildComponent(i)))
+            viewport = view;
+    REQUIRE(viewport != nullptr);
+    REQUIRE(viewport->getViewedComponent() != nullptr);
+    CHECK(viewport->getViewedComponent()->getHeight() < 800);
 }
 
 TEST_CASE("Toolkit fold keeps dirty rows and collapses clean sections", "[editorui]")
@@ -248,4 +480,52 @@ TEST_CASE("Note filter legend follows key and mode", "[editorui]")
     fx.setEdit(edit, juce::dontSendNotification);
     REQUIRE(fx.noteFilterLegendLead() == "In A aeolian");
     REQUIRE(metrics::effectsPaneWidth() == metrics::scaled(300));
+}
+
+TEST_CASE("Header logo tracks the traffic-light zone and drops Toolkit before MIDI", "[editorui]")
+{
+    juce::ScopedJuceInitialiser_GUI gui;
+    tweaks().size.store((int) ContentSize::Medium);
+
+    TransportBar bar;
+    bar.setSize(1600, 52);
+    bar.setLightsZoneWidth(88);
+    REQUIRE(bar.getTitleBounds().getX() == 88);
+    REQUIRE(bar.logoWordmarkLevel() == 2);
+
+    bar.setLightsZoneWidth(0);
+    REQUIRE(bar.getTitleBounds().getX() == 16);
+
+    const auto midiFont = ds::font(ds::Type::Logo);
+    const auto toolFont = uiFontFixed(14.0f, false).withExtraKerningFactor(-0.02f);
+    auto measure = [](const juce::Font& font, const juce::String& text)
+    {
+        juce::GlyphArrangement glyphs;
+        glyphs.addLineOfText(font, text, 0.0f, 0.0f);
+        if (glyphs.getNumGlyphs() <= 0)
+            return 0.0f;
+        return glyphs.getBoundingBox(0, glyphs.getNumGlyphs(), true).getWidth();
+    };
+    const int textW = (int) std::ceil(measure(midiFont, "MIDI")
+                                    + measure(midiFont, " ")
+                                    + measure(toolFont, "Toolkit"));
+    REQUIRE(std::abs(bar.logoIdealWidth() - (16 + 6 + textW)) <= 1);
+
+    bar.setLightsZoneWidth(16);
+    bool sawFull = false, sawMidi = false, sawGlyph = false;
+    int previous = 3;
+    for (int w = 1600; w >= 220; w -= 8)
+    {
+        bar.setSize(w, 52);
+        const int level = bar.logoWordmarkLevel();
+        REQUIRE(level <= previous);
+        REQUIRE(bar.getTitleBounds().getWidth() >= 16);
+        if (level == 2) sawFull = true;
+        if (level == 1) sawMidi = true;
+        if (level == 0) sawGlyph = true;
+        previous = level;
+    }
+    REQUIRE(sawFull);
+    REQUIRE(sawMidi);
+    REQUIRE(sawGlyph);
 }

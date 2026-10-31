@@ -71,6 +71,12 @@ public:
         the clip; user actions come back through the callbacks. */
     void setClip(const StepClip& clip, const ClipEdit& edit, const GrooveParams& groove);
     void clearClip();
+    /** Live take: notes grow in place and loop handles stay hidden. */
+    void beginRecording(const StepClip& clip);
+    void setRecordingNotes(const StepClip& clip, double playheadStep);
+    /** Show the finished take and place the movable loop. */
+    void endRecording(const StepClip& clip, const ClipEdit& edit, const GrooveParams& groove,
+                      double loopEndStep);
     void setPlayheadStep(double step, bool playing);
     void setLockActive(bool locked);
     void setTimeStretch(double stretch);   // 1/bpmMultiplier — stretches roll + export view
@@ -81,6 +87,8 @@ public:
 
     std::function<void(const ClipEdit&)> onEditChanged;
     std::function<void(bool active, bool enabled, const juce::String& label)> onTrimStateChanged;
+    /** When set, the trim control asks the editor before toggling (lock-aware). */
+    std::function<void()> onTrimRequested;
     /** Loop region in unstretched steps [start, end); end exclusive. */
     std::function<void(double startStep, double endStep)> onLoopChanged;
     /** Fired when the user clicks into the piano roll (sticky key-nav). */
@@ -145,7 +153,7 @@ private:
         PianoRollEditor& owner;
         int dragNoteId = -1;
         static constexpr int headerH = 22;
-        static constexpr int laneH = 64;
+        static constexpr int laneH = 76;
 
     };
 
@@ -233,6 +241,7 @@ private:
     // ── state ──
     bool hasClip = false;
     bool pendingScrollToContent = false;
+    bool recordingVisual = false;
     StepClip clip;
     ClipEdit edit;
     GrooveParams groove;

@@ -5,7 +5,7 @@
 
 namespace pflow {
 
-// ── Cupertino design tokens (MidiBrowser Design System v1.0) ─────────────────
+// ── Cupertino design tokens (MidiToolkit Design System v1.0) ─────────────────
 // Source of truth: DesignSystem.h / DesignSystem.cpp (§2). Density tweaks remain.
 
 enum class Density { Compact, Comfortable };
@@ -261,6 +261,8 @@ namespace metrics {
     constexpr int sidebarRailW      = 44;
     constexpr int sidebarExpandedW  = ds::region::sidebarW;
     constexpr int fileTableW        = ds::region::fileListW;
+    /** File browser does not grow past this; extra width goes to the piano roll. */
+    constexpr int fileTableMaxW     = 640;
     constexpr int editorPaneW       = 470;
     constexpr int effectsPaneW      = ds::region::toolkitW;
     constexpr int openRollW         = editorPaneW;
@@ -288,6 +290,7 @@ namespace metrics {
         return juce::roundToInt((float) chromeIconGlyph * contentScale() * textIconScale());
     }
     inline int fileTableWidth()   { return scaled(fileTableW); }
+    inline int fileTableMaxWidth(){ return scaled(fileTableMaxW); }
     inline int editorPaneWidth()  { return scaled(editorPaneW); }
     inline int effectsPaneWidth() { return scaled(effectsPaneW); }
     inline int browserMinWidthScaled() { return scaled(browserMinWidth); }

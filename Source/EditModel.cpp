@@ -269,13 +269,28 @@ void applyPitchLock(const ClipEdit& locked, ClipEdit& target)
     target.octaveRange = locked.octaveRange;
     target.pitchMin = locked.pitchMin;
     target.pitchMax = locked.pitchMax;
-    target.extendMult = locked.extendMult;
     target.fitScale = locked.fitScale;
     target.mapToRoot = locked.mapToRoot;
     target.root = locked.root;
     target.mode = locked.mode;
     target.noteFilterMask = locked.noteFilterMask;
     target.noteFilterType = locked.noteFilterType;
+}
+
+void applyPlaybackLock(const ClipEdit& locked, ClipEdit& target, bool autoTrim, const StepClip& clip)
+{
+    target.extendMult = locked.extendMult;
+    if (!autoTrim)
+    {
+        target.clearTrim();
+        return;
+    }
+
+    ClipEdit probe = target;
+    probe.clearTrim();
+    const auto preTrim = resolveClip(clip, probe);
+    target.clearTrim();
+    target.removedBars = emptyBars(preTrim.notes, clip.bars);
 }
 
 bool editIsClean(const ClipEdit& e)
@@ -588,6 +603,159 @@ std::vector<EditBadge> editBadges(const StepClip& clip, const ClipEdit& e)
     return out;
 }
 
+namespace {
+
+struct Polyphony
+{
+    int maxPoly = 1;
+    double meanPoly = 1.0;
+    bool frequentChords = false;
+};
+
+Polyphony measurePolyphony(const std::vector<NoteEvent>& notes)
+{
+    Polyphony out;
+    if (notes.empty())
+        return out;
+
+    struct Ev
+    {
+        double t = 0.0;
+        int delta = 0; // ends (-1) sort before starts (+1) at the same time
+    };
+    std::vector<Ev> evs;
+    evs.reserve(notes.size() * 2);
+    for (const auto& n : notes)
+    {
+        evs.push_back({ n.startBeat, 1 });
+        evs.push_back({ n.startBeat + n.lengthBeats, -1 });
+    }
+    std::sort(evs.begin(), evs.end(), [](const Ev& a, const Ev& b)
+    {
+        if (a.t < b.t) return true;
+        if (b.t < a.t) return false;
+        return a.delta < b.delta;
+    });
+
+    int active = 0;
+    int maxPoly = 1;
+    double polySum = 0.0;
+    int samples = 0;
+    int chord3 = 0;
+    // Sample once per note-on, after every note that starts at that instant is
+    // active. That matches the old per-note count (a chord of 3 samples as 3, 3, 3).
+    for (size_t i = 0; i < evs.size();)
+    {
+        const double t = evs[i].t;
+        while (i < evs.size() && evs[i].t == t && evs[i].delta < 0)
+        {
+            active += evs[i].delta;
+            ++i;
+        }
+        int starts = 0;
+        while (i < evs.size() && evs[i].t == t && evs[i].delta > 0)
+        {
+            active += evs[i].delta;
+            ++starts;
+            ++i;
+        }
+        for (int s = 0; s < starts; ++s)
+        {
+            maxPoly = std::max(maxPoly, active);
+            polySum += (double) active;
+            ++samples;
+            if (active >= 3)
+                ++chord3;
+        }
+    }
+    out.maxPoly = maxPoly;
+    out.meanPoly = samples > 0 ? polySum / (double) samples : 1.0;
+    out.frequentChords = samples > 0 && chord3 * 4 >= samples;
+    return out;
+}
+
+void applyKind(StepClip& s, int meanPitch, bool anyDrum, const Polyphony& poly)
+{
+    if (anyDrum)
+        s.kind = ClipKind::Drums;
+    else if (s.difNotes <= 2 && poly.maxPoly <= 1)
+        s.kind = ClipKind::Single;
+    else if (meanPitch < 48)
+        s.kind = ClipKind::Bass;
+    else if (poly.meanPoly >= 2.5 || poly.frequentChords)
+        s.kind = ClipKind::Piano;
+    else
+        s.kind = ClipKind::Lead;
+}
+
+/** 1..100 from several musical features, each normalized so a busy clip
+    does not pin at 100 the way note-count × pitch-count did. */
+int scoreClipComplexity(const std::vector<RollNote>& notes, int bars, double meanPoly)
+{
+    if (notes.empty())
+        return 1;
+
+    const double notesPerBar = (double) notes.size() / (double) juce::jmax(1, bars);
+    // 1 note/bar ≈ 0.2, 4 ≈ 0.46, 16 ≈ 0.80. The log keeps dense files from saturating.
+    const double density = std::log2(1.0 + notesPerBar) / std::log2(33.0);
+
+    std::vector<const RollNote*> order;
+    order.reserve(notes.size());
+    for (const auto& n : notes)
+        order.push_back(&n);
+    std::sort(order.begin(), order.end(), [](const RollNote* a, const RollNote* b)
+    {
+        if (a->start < b->start) return true;
+        if (b->start < a->start) return false;
+        return a->pitch < b->pitch;
+    });
+
+    std::set<int> pitchClasses;
+    std::set<int> onsetSlots;
+    int minVel = 127;
+    int maxVel = 1;
+    double intervalSum = 0.0;
+    int intervalN = 0;
+    int prevPitch = -1;
+    double prevStart = -1.0e9;
+
+    for (const auto* n : order)
+    {
+        pitchClasses.insert(n->pitch % 12);
+        minVel = std::min(minVel, n->fileVelocity);
+        maxVel = std::max(maxVel, n->fileVelocity);
+        const int slot = ((int) std::lround(n->start)) % kStepsPerBar;
+        onsetSlots.insert(slot < 0 ? slot + kStepsPerBar : slot);
+        if (prevPitch >= 0 && n->start > prevStart + 0.01)
+        {
+            intervalSum += (double) std::abs(n->pitch - prevPitch);
+            ++intervalN;
+        }
+        prevPitch = n->pitch;
+        prevStart = n->start;
+    }
+
+    const double pitchVar = (double) pitchClasses.size() / 12.0;
+    const double poly = juce::jlimit(0.0, 1.0, (meanPoly - 1.0) / 3.5);
+    const double rhythm = (double) onsetSlots.size() / (double) kStepsPerBar;
+    const double interval = intervalN > 0
+        ? juce::jlimit(0.0, 1.0, (intervalSum / (double) intervalN) / 8.0)
+        : 0.0;
+    const double vel = notes.size() > 1
+        ? juce::jlimit(0.0, 1.0, (double) (maxVel - minVel) / 90.0)
+        : 0.0;
+
+    const double score = 100.0 * (0.30 * density
+                                 + 0.18 * pitchVar
+                                 + 0.20 * poly
+                                 + 0.18 * rhythm
+                                 + 0.08 * interval
+                                 + 0.06 * vel);
+    return juce::jlimit(1, 100, (int) std::lround(score));
+}
+
+} // namespace
+
 StepClip makeStepClip(const MidiClip& clip)
 {
     StepClip s;
@@ -628,50 +796,128 @@ StepClip makeStepClip(const MidiClip& clip)
     s.noteCount = (int) s.notes.size();
     s.difNotes = (int) distinctPitches.size();
 
-    const double notesPerBar = (double) s.noteCount / (double) juce::jmax(1, s.bars);
-    // Density x pitch variety on a 1..100 scale for the Complexity slider.
-    s.complexity = juce::jlimit(1, 100,
-        (int) std::lround((double) s.difNotes * notesPerBar));
-    if (s.noteCount > 0 && s.complexity < 1)
-        s.complexity = 1;
-
     if (!clip.notes.empty())
     {
         s.root = estimatePitchClassFromNotes(clip.notes);
         const int meanPitch = pitchSum / (int) clip.notes.size();
-
-        int maxPoly = 1;
-        double polySum = 0.0;
-        int polySamples = 0;
-        int chord3Hits = 0;
-        for (const auto& n : clip.notes)
-        {
-            int active = 0;
-            for (const auto& o : clip.notes)
-                if (o.startBeat <= n.startBeat + 1.0e-9
-                    && o.startBeat + o.lengthBeats > n.startBeat + 1.0e-9)
-                    ++active;
-            maxPoly = std::max(maxPoly, active);
-            polySum += (double) active;
-            ++polySamples;
-            if (active >= 3)
-                ++chord3Hits;
-        }
-        const double meanPoly = polySamples > 0 ? polySum / (double) polySamples : 1.0;
-        const bool frequentChords = polySamples > 0 && chord3Hits * 4 >= polySamples;
-
-        if (anyDrumChannel)
-            s.kind = ClipKind::Drums;
-        else if (s.difNotes <= 2 && maxPoly <= 1)
-            s.kind = ClipKind::Single;
-        else if (meanPitch < 48)
-            s.kind = ClipKind::Bass;
-        else if (meanPoly >= 2.5 || frequentChords)
-            s.kind = ClipKind::Piano;
-        else
-            s.kind = ClipKind::Lead;
+        const auto poly = measurePolyphony(clip.notes);
+        applyKind(s, meanPitch, anyDrumChannel, poly);
+        s.complexity = scoreClipComplexity(s.notes, s.bars, poly.meanPoly);
     }
+    else
+    {
+        s.complexity = 1;
+    }
+    s.notesResident = true;
     return s;
+}
+
+StepClip scanMidiBrowseMeta(const juce::File& file)
+{
+    StepClip s;
+    s.name = file.getFileNameWithoutExtension();
+    s.filePath = file.getFullPathName();
+    s.notesResident = false;
+
+    juce::FileInputStream stream(file);
+    if (!stream.openedOk())
+        return s;
+
+    juce::MidiFile midiFile;
+    if (!midiFile.readFrom(stream))
+        return s;
+    midiFile.convertTimestampTicksToSeconds();
+
+    double bpm = 120.0;
+    int timeSigNum = 4;
+    int timeSigDen = 4;
+    if (midiFile.getNumTracks() > 0)
+    {
+        if (auto* track = midiFile.getTrack(0))
+        {
+            for (int i = 0; i < track->getNumEvents(); ++i)
+            {
+                auto& ev = track->getEventPointer(i)->message;
+                if (ev.isTempoMetaEvent())
+                {
+                    bpm = 60.0 / ev.getTempoSecondsPerQuarterNote();
+                    break;
+                }
+            }
+        }
+        for (int t = 0; t < midiFile.getNumTracks(); ++t)
+        {
+            auto* tr = midiFile.getTrack(t);
+            if (tr == nullptr)
+                continue;
+            bool found = false;
+            for (int i = 0; i < tr->getNumEvents(); ++i)
+            {
+                auto& ev = tr->getEventPointer(i)->message;
+                if (ev.isTimeSignatureMetaEvent())
+                {
+                    int num = 4, den = 4;
+                    ev.getTimeSignatureInfo(num, den);
+                    timeSigNum = juce::jmax(1, num);
+                    timeSigDen = juce::jmax(1, den);
+                    found = true;
+                    break;
+                }
+            }
+            if (found)
+                break;
+        }
+    }
+
+    s.bpm = bpm;
+    s.timeSigNum = timeSigNum;
+    s.timeSigDen = timeSigDen;
+    const double secPerBeat = 60.0 / bpm;
+
+    std::vector<NoteEvent> spans;
+    double maxBeat = 0.0;
+    for (int t = 0; t < midiFile.getNumTracks(); ++t)
+    {
+        auto* trackPtr = midiFile.getTrack(t);
+        if (trackPtr == nullptr)
+            continue;
+        juce::MidiMessageSequence track(*trackPtr);
+        track.updateMatchedPairs();
+        for (int i = 0; i < track.getNumEvents(); ++i)
+        {
+            auto* holder = track.getEventPointer(i);
+            auto& msg = holder->message;
+            if (!msg.isNoteOn())
+                continue;
+            NoteEvent ne;
+            ne.noteNumber = msg.getNoteNumber();
+            ne.channel = msg.getChannel();
+            ne.startBeat = msg.getTimeStamp() / secPerBeat;
+            if (holder->noteOffObject != nullptr)
+                ne.lengthBeats = (holder->noteOffObject->message.getTimeStamp() - msg.getTimeStamp()) / secPerBeat;
+            else
+                ne.lengthBeats = 0.25;
+            if (ne.lengthBeats < 0.0)
+                ne.lengthBeats = 0.0;
+            spans.push_back(ne);
+            maxBeat = std::max(maxBeat, ne.startBeat + ne.lengthBeats);
+        }
+        maxBeat = std::max(maxBeat, track.getEndTime() / secPerBeat);
+    }
+
+    MidiClip shell;
+    shell.bpm = bpm;
+    shell.lengthBeats = maxBeat > 0.0 ? maxBeat : 4.0;
+    shell.timeSigNum = timeSigNum;
+    shell.timeSigDen = timeSigDen;
+    shell.notes = std::move(spans);
+    auto full = makeStepClip(shell);
+    full.name = s.name;
+    full.filePath = s.filePath;
+    full.notes.clear();
+    full.notes.shrink_to_fit();
+    full.notesResident = false;
+    return full;
 }
 
 } // namespace pflow

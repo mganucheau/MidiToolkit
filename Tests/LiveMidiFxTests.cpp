@@ -58,3 +58,49 @@ TEST_CASE("LiveMidiFx transforms note-on pitch", "[LiveMidiFx]")
     }
     REQUIRE(saw);
 }
+
+TEST_CASE("LiveMidiFx scales velocity with intensity", "[LiveMidiFx]")
+{
+    LiveMidiFx fx;
+    LiveFxState state;
+    state.groove.intensity = 200;
+    fx.setState(state);
+
+    juce::MidiBuffer buf;
+    buf.addEvent(juce::MidiMessage::noteOn(1, 60, (juce::uint8) 40), 0);
+    fx.process(buf, 44100.0, 120.0, 0.0, 512);
+
+    bool saw = false;
+    for (const auto m : buf)
+    {
+        auto msg = m.getMessage();
+        if (msg.isNoteOn())
+        {
+            CHECK(msg.getVelocity() > 40);
+            saw = true;
+        }
+    }
+    REQUIRE(saw);
+}
+
+TEST_CASE("LiveMidiFx swings offbeats while the host is stopped", "[LiveMidiFx]")
+{
+    LiveMidiFx fx;
+    LiveFxState state;
+    state.groove.swing = 100;
+    state.groove.swingGridIndex = 1; // 1/8
+    fx.setState(state);
+
+    juce::MidiBuffer silent;
+    fx.process(silent, 44100.0, 120.0, 0.0, 11025, false);
+
+    juce::MidiBuffer buf;
+    buf.addEvent(juce::MidiMessage::noteOn(1, 60, (juce::uint8) 100), 0);
+    fx.process(buf, 44100.0, 120.0, 0.0, 11025, false);
+
+    int onAt = -1;
+    for (const auto m : buf)
+        if (m.getMessage().isNoteOn())
+            onAt = m.samplePosition;
+    REQUIRE(onAt > 1000);
+}

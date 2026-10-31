@@ -38,6 +38,8 @@ public:
     /** Clip baseline complexity (1..100) — drives the Complexity slider position. */
     void setClipComplexity(int complexity);
     void setTrimState(bool active, bool enabled, const juce::String& label = {});
+    /** Live MIDI stream: hide Playback, Complexity, and Variations. */
+    void setLiveStreamMode(bool on);
 
     std::function<void(const GrooveParams&)> onGrooveChanged;
     std::function<void(const ClipEdit&)> onEditChanged;
@@ -48,6 +50,10 @@ public:
     std::function<void()> onResetUnlocked;
     std::function<void()> onTrimClicked;
     std::function<void()> onActivated;
+    /** Transport + toolkit header + current section heights. */
+    int contentHeight() const;
+    /** Fired when a section fold changes the preferred pane height. */
+    std::function<void()> onContentHeightChanged;
 
     fx::Section& playbackSection() { return playback; }
     fx::Section& timingSection() { return timing; }
@@ -93,6 +99,7 @@ private:
     double bpmMultiplier = 1.0;
     uint32_t sectionLocks = 0;
     bool hasClip = false;
+    bool liveStream = false;
     int clipRootPc = -1;
     int clipSourceOctave = 4;
     int clipComplexity = 50;
@@ -165,6 +172,7 @@ private:
 
     juce::Viewport viewport;
     juce::Component body;
+    bool notifyingHeight = false;
 
     static constexpr int kPanelW = 300;
 

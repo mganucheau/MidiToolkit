@@ -11,7 +11,7 @@ int main(int argc, char** argv)
     juce::File bundle(argc > 1
         ? juce::String(argv[1])
         : juce::File::getSpecialLocation(juce::File::userHomeDirectory)
-              .getChildFile("Library/Audio/Plug-Ins/VST3/Midi Browser.vst3")
+              .getChildFile("Library/Audio/Plug-Ins/VST3/Midi Toolkit.vst3")
               .getFullPathName());
 
     std::cout << "probing: " << bundle.getFullPathName() << "\n";

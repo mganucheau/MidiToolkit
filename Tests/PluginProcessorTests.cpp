@@ -32,7 +32,7 @@ public:
         return midi;
     }
 
-    MidiBrowserProcessor processor;
+    MidiToolkitProcessor processor;
 };
 
 MidiClip previewClipWithNoteAt(double startBeat)
@@ -44,7 +44,7 @@ MidiClip previewClipWithNoteAt(double startBeat)
 
 TEST_CASE("Processor advertises MIDI capability", "[Processor][qa]")
 {
-    MidiBrowserProcessor processor;
+    MidiToolkitProcessor processor;
     REQUIRE(processor.acceptsMidi());
     REQUIRE(processor.producesMidi());
     REQUIRE(processor.getName() == "Midi Toolkit");
@@ -53,7 +53,7 @@ TEST_CASE("Processor advertises MIDI capability", "[Processor][qa]")
 
 TEST_CASE("Processor bus layout supports stereo or mono output", "[Processor][qa]")
 {
-    MidiBrowserProcessor processor;
+    MidiToolkitProcessor processor;
     juce::AudioProcessor::BusesLayout layout;
     layout.outputBuses.add(juce::AudioChannelSet::stereo());
     REQUIRE(processor.isBusesLayoutSupported(layout));
@@ -236,7 +236,7 @@ TEST_CASE("Soft preview updates do not release held notes", "[Processor][qa]")
 
 TEST_CASE("Per-clip edits and grooves round-trip through plugin state", "[Processor][qa]")
 {
-    MidiBrowserProcessor original;
+    MidiToolkitProcessor original;
     ClipEdit e;
     e.octave = 1;
     e.fitScale = true;
@@ -254,7 +254,7 @@ TEST_CASE("Per-clip edits and grooves round-trip through plugin state", "[Proces
     juce::MemoryBlock state;
     original.getStateInformation(state);
 
-    MidiBrowserProcessor restored;
+    MidiToolkitProcessor restored;
     restored.setStateInformation(state.getData(), (int) state.getSize());
 
     REQUIRE(restored.clipEdits.count("/tmp/a.mid") == 1);
@@ -274,7 +274,7 @@ TEST_CASE("Per-clip edits and grooves round-trip through plugin state", "[Proces
 
 TEST_CASE("Saved folder helpers dedupe and cap list size", "[Processor][qa]")
 {
-    MidiBrowserProcessor processor;
+    MidiToolkitProcessor processor;
     const auto tempRoot = test::tempMidiFile("bookmark_root");
     tempRoot.createDirectory();
 
@@ -308,8 +308,8 @@ TEST_CASE("Processor state round-trips browser settings", "[Processor][qa]")
         libFile.copyFileTo(backup);
     libFile.deleteFile();
 
-    MidiBrowserProcessor original;
-    original.lastBrowserDir = "/tmp/MidiBrowserSaved";
+    MidiToolkitProcessor original;
+    original.lastBrowserDir = "/tmp/MidiToolkitSaved";
     original.trimEmptyMeasuresPreview = true;
     original.syncSessionBars.store(8);
     original.effectsOpen = true;
@@ -351,7 +351,7 @@ TEST_CASE("Processor state round-trips browser settings", "[Processor][qa]")
     tweaks().density.store((int) Density::Compact);
     tweaks().size.store((int) ContentSize::Medium);
 
-    MidiBrowserProcessor restored;
+    MidiToolkitProcessor restored;
     restored.setStateInformation(state.getData(), (int) state.getSize());
 
     REQUIRE(restored.lastBrowserDir == original.lastBrowserDir);
@@ -404,7 +404,7 @@ TEST_CASE("Processor state ignores empty and legacy-safe payloads", "[Processor]
     libFile.deleteFile();
 
     {
-        MidiBrowserProcessor processor;
+        MidiToolkitProcessor processor;
         processor.lastBrowserDir = "before";
         processor.setStateInformation(nullptr, 0);
         REQUIRE(processor.lastBrowserDir.isEmpty());

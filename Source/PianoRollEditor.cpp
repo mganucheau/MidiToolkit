@@ -251,7 +251,13 @@ PianoRollEditor::PianoRollEditor()
     // Toolbar
     btnRevert.setVisible(false);
 
-    btnTrim.onClick = [this] { toggleTrim(); };
+    btnTrim.onClick = [this]
+    {
+        if (onTrimRequested)
+            onTrimRequested();
+        else
+            toggleTrim();
+    };
     addChildComponent(btnTrim);
     btnTrim.setVisible(false);
 
@@ -342,6 +348,46 @@ void PianoRollEditor::setClip(const StepClip& c, const ClipEdit& e, const Groove
         updateRollSize();
     }
     repaint();
+}
+
+void PianoRollEditor::beginRecording(const StepClip& c)
+{
+    recordingVisual = true;
+    setClip(c, {}, {});
+    setPlayheadStep(0.0, true);
+}
+
+void PianoRollEditor::setRecordingNotes(const StepClip& c, double playhead)
+{
+    recordingVisual = true;
+    hasClip = true;
+    clip = c;
+    edit = {};
+    groove = {};
+    rebuildResolved();
+    playheadStep = playhead;
+    playing = true;
+    updateRollSize();
+
+    const int x = (int) contentXFromStep(playheadStep);
+    const auto view = rollViewport.getViewArea();
+    const int margin = juce::jmax(24, view.getWidth() / 5);
+    if (view.getWidth() > 0 && (x > view.getRight() - margin || x < view.getX() + 8))
+        rollViewport.setViewPosition(juce::jmax(0, x - view.getWidth() / 2), view.getY());
+
+    rollContent.repaint();
+    timeRuler.repaint();
+    velocityLane.repaint();
+    gutter.repaint();
+}
+
+void PianoRollEditor::endRecording(const StepClip& c, const ClipEdit& e, const GrooveParams& g,
+                                   double loopEnd)
+{
+    recordingVisual = false;
+    setClip(c, e, g);
+    setLoopSteps(0.0, loopEnd, true);
+    setPlayheadStep(0.0, false);
 }
 
 void PianoRollEditor::clearClip()
@@ -616,6 +662,8 @@ float PianoRollEditor::contentXFromStep(double step) const
 
 int PianoRollEditor::hitLoopHandle(float contentX, float hitPx) const
 {
+    if (recordingVisual)
+        return -1;
     const float xs = contentXFromStep(loopStartStep);
     const float xe = contentXFromStep(loopEndStep);
     if (std::abs(contentX - xs) <= hitPx) return 0;
@@ -626,6 +674,8 @@ int PianoRollEditor::hitLoopHandle(float contentX, float hitPx) const
 void PianoRollEditor::paintLoopOverlay(juce::Graphics& g, juce::Rectangle<float> clipB,
                                        float top, float bottom) const
 {
+    if (recordingVisual)
+        return;
     const float xs = contentXFromStep(loopStartStep);
     const float xe = contentXFromStep(loopEndStep);
     const float h = bottom - top;
@@ -745,6 +795,9 @@ void PianoRollEditor::paintTimeRulerLabels(juce::Graphics& g, float viewX,
             drawLabel(x, label, isBar);
         }
     }
+
+    if (recordingVisual)
+        return;
 
     // Loop handles on the ruler.
     const float xs = contentXFromStep(loopStartStep) - viewX;
@@ -1619,6 +1672,25 @@ void PianoRollEditor::VelocityLane::paint(juce::Graphics& g)
     auto lane = getLocalBounds().withTrimmedTop(headerH);
     const float pps = ed.pxPerStep();
     const float viewX = (float) ed.rollViewport.getViewPositionX();
+    const float laneTop = (float) lane.getY();
+    const float laneH = (float) juce::jmax(1, lane.getHeight());
+    auto yForVel = [&](int vel)
+    {
+        const float t = (float) juce::jlimit(0, 127, vel) / 127.0f;
+        return laneTop + (1.0f - t) * laneH;
+    };
+
+    g.setFont(uiFont(9.0f, false));
+    const int ticks[] = { 127, 96, 64, 32, 0 };
+    for (int vel : ticks)
+    {
+        const float y = yForVel(vel);
+        g.setColour(colours::line().withAlpha(vel == 0 ? 0.0f : 0.85f));
+        g.drawLine((float) gutterW, y, (float) getWidth(), y, 1.0f);
+        auto label = juce::Rectangle<int>(0, (int) std::lround(y) - 6, gutterW - 6, 12);
+        g.setColour(colours::text2());
+        g.drawText(juce::String(vel), label, juce::Justification::centredRight, false);
+    }
 
     for (const auto& n : ed.grooved)
     {
@@ -1626,11 +1698,12 @@ void PianoRollEditor::VelocityLane::paint(juce::Graphics& g)
         const float x = (float) gutterW + ed.contentXFromStep(n.start) - viewX;
         if (x + noteW < (float) gutterW - 4.0f || x > (float) getWidth() + 4.0f) continue;
         const int vel = ed.velocityForNote(n);
-        const float bh = juce::jmax(2.0f, (float) vel / 127.0f * (float) lane.getHeight() * 0.92f);
+        const float top = yForVel(vel);
+        const float bh = juce::jmax(2.0f, (float) lane.getBottom() - top);
         g.setColour(colours::accent().withAlpha(0.85f));
-        g.fillRect(x, (float) lane.getBottom() - bh, noteW, bh);
+        g.fillRect(x, top, noteW, bh);
         g.setColour(colours::accent().brighter(0.15f));
-        g.fillRect(x, (float) lane.getBottom() - bh, noteW, 2.0f);
+        g.fillRect(x, top, noteW, 2.0f);
     }
 }
 
@@ -1643,6 +1716,7 @@ void PianoRollEditor::VelocityLane::mouseDown(const juce::MouseEvent& e)
         return;
     }
     if (!owner.hasClip || !owner.velocityOpen) return;
+    if (e.x < gutterW) return;
     if (const auto* n = owner.noteAtVelocityX(e.position.x))
     {
         dragNoteId = n->id;

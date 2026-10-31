@@ -4,6 +4,7 @@
 #include "EditModel.h"
 #include "GrooveEngine.h"
 #include "LiveMidiFx.h"
+#include "MidiRecorder.h"
 #include "BrowserPanels.h"
 #include "LibraryStore.h"
 #include <atomic>
@@ -12,11 +13,11 @@
 namespace pflow {
 
 /** Lightweight MIDI-file browser: session-synced preview only (no arrangement). */
-class MidiBrowserProcessor : public juce::AudioProcessor
+class MidiToolkitProcessor : public juce::AudioProcessor
 {
 public:
-    MidiBrowserProcessor();
-    ~MidiBrowserProcessor() override;
+    MidiToolkitProcessor();
+    ~MidiToolkitProcessor() override;
 
     void prepareToPlay(double sampleRate, int samplesPerBlock) override;
     void releaseResources() override {}
@@ -90,8 +91,8 @@ public:
     std::map<juce::String, GrooveParams> clipGrooves;
 
     // Toolkit browse-locks: bitmask of toolkitLock::* — locked sections are
-    // stamped onto every clip while browsing. lockAutoTrim applies empty-edge
-    // trim when Playback or Pitch is locked with trim engaged.
+    // stamped onto every clip while browsing. lockAutoTrim reapplies empty-bar
+    // trim on each file while Playback is locked with trim engaged.
     uint32_t sectionLocks = 0;
     bool lockAutoTrim = false;
     ClipEdit lockedEdit;
@@ -119,10 +120,29 @@ public:
     BrowserColumnVisibility columnVisibility;
     /** Logical (unscaled) Name column width in the file table. */
     int nameColumnWidth = 140;
+    /** Browser column width while the piano roll is open. 0 = default split. */
+    int browserPaneW = 0;
+
+    /** Layout saved from Settings → “Save current view as default”. */
+    bool hasDefaultView = false;
+    bool defEditorOpen = false;
+    bool defEffectsOpen = false;
+    bool defPreviewOpen = true;
+    bool defSidebarCollapsed = false;
+    bool defPassthrough = false;
+    BrowserColumnVisibility defColumns;
+    int defNameColumnWidth = 140;
+    int defWindowW = 0;
+    int defWindowH = 700;
+    int defTweakSize = 1;
+    int defTweakTextScalePct = 100;
+    int defTweakDensity = 1;
+    int defTweakAppearance = 0;
 
     juce::String lastBrowserDir;
     bool trimEmptyMeasuresPreview = false;
     juce::StringArray savedBrowserDirs;
+    std::vector<SavedLibraryFolder> savedLibraries;
     juce::StringArray starredFiles;   // favourites — mirrored from LibraryStore
     std::vector<SavedSearchEntry> savedSearches;
 
@@ -138,7 +158,10 @@ public:
     juce::StringArray browserResultPaths;
 
     void addSavedBrowserDir(const juce::String& path);
+    /** Insert or update a library folder. `replaceDetails` keeps an existing filter when false. */
+    void saveLibraryFolder(const SavedLibraryFolder& folder, bool replaceDetails);
     void removeSavedBrowserDir(const juce::String& path);
+    const SavedLibraryFolder* libraryFolderFor(const juce::String& path) const;
     void addSavedSearch(const SavedSearchEntry& entry);
     void removeSavedSearch(int index);
     /** Persist result paths onto an existing saved search (library + host state). */
@@ -168,6 +191,13 @@ public:
 
     /** Enable/disable passthrough; flushes held notes on transition. */
     void setPassthroughEnabled(bool enabled);
+
+    /** Capture incoming MIDI while on. Stopping closes held notes. */
+    void setRecordingEnabled(bool enabled);
+    bool isRecording() const { return recordingActive.load(); }
+    /** When set, recorded input is also run through the Toolkit effects. */
+    void setRecordMonitorFx(bool enabled) { recordMonitorFx.store(enabled); }
+    RecordingSnapshot recordSnapshot() const { return recorder.snapshot(); }
 
     /** Ask the audio thread to release every held note on the next block. */
     void requestNoteFlush()
@@ -200,12 +230,15 @@ private:
 
     LiveMidiFx liveFx_;
     std::atomic<bool> liveFlushPending_ { false };
+    MidiRecorder recorder;
+    std::atomic<bool> recordingActive { false };
+    std::atomic<bool> recordMonitorFx { false };
 
     LibraryStore library_;
     void syncLibraryFromMemory();
     void applyLibraryToMemory();
 
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MidiBrowserProcessor)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MidiToolkitProcessor)
 };
 
 } // namespace pflow

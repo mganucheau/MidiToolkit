@@ -4,7 +4,7 @@
 namespace pflow {
 namespace ds {
 
-/** MidiBrowser Design System v1.0 — Cupertino direction (§2 colour tokens).
+/** MidiToolkit Design System v1.0 — Cupertino direction (§2 colour tokens).
     All app hex values live here. Surfaces must reference these accessors only. */
 
 struct Palette
@@ -54,6 +54,9 @@ struct Palette
     juce::Colour kfInB;
     juce::Colour kfOutW;
     juce::Colour kfOutB;
+
+    juce::Colour lensFill;    // logo lens face
+    juce::Colour logoNoteHi;  // logo note highlight
 };
 
 const Palette& palette();
@@ -91,6 +94,9 @@ inline juce::Colour kfInW()    { return palette().kfInW; }
 inline juce::Colour kfInB()    { return palette().kfInB; }
 inline juce::Colour kfOutW()   { return palette().kfOutW; }
 inline juce::Colour kfOutB()   { return palette().kfOutB; }
+inline juce::Colour lensFill() { return palette().lensFill; }
+inline juce::Colour logoNoteHi() { return palette().logoNoteHi; }
+inline juce::Colour accent()  { return acc(); }
 inline juce::Colour kindDrums(){ return palette().kindDrums; }
 inline juce::Colour kindBass() { return palette().kindBass; }
 inline juce::Colour kindKeys() { return palette().kindKeys; }
@@ -114,7 +120,8 @@ enum class Type
     Body,          // 12–12.5 / 400 / tx
     Metadata,      // 11–11.5 / 400 tabular / tx2
     Caption,       // 10 / 400 / tx3
-    NumericDisplay // 13 / 600 tabular / tx
+    NumericDisplay, // 13 / 600 tabular / tx
+    Logo            // 14 / 600 / −0.02 tracking / tx
 };
 
 juce::Font font (Type t);
@@ -123,7 +130,7 @@ juce::Colour colour (Type t);
 /** §5 region metrics (logical px at Medium). */
 namespace region {
     constexpr int toolbarH     = 52;
-    constexpr int sidebarW     = 280;
+    constexpr int sidebarW     = 210;
     constexpr int fileListW    = 420;
     constexpr int toolkitW     = 300;
     constexpr int rollMinW     = 320;
@@ -131,7 +138,7 @@ namespace region {
     constexpr int previewH     = 112;
     constexpr int listRowH     = 26;
     constexpr int listHeaderH  = 28;
-    constexpr int sidebarRowH  = 29;
+    constexpr int sidebarRowH  = 28;
 }
 
 } // namespace ds

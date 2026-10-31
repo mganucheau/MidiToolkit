@@ -224,6 +224,65 @@ TEST_CASE("noteVelocityWithBase uses file velocities as the base", "[groove]")
     CHECK(noteVelocityWithBase(0.5, n, k) == Approx(1.0));   // clamped
 }
 
+TEST_CASE("effects lock freezes follow-clip complexity", "[groove]")
+{
+    GrooveParams src;
+    src.delayAmount = 55;
+    src.complexityTarget = -1;
+
+    GrooveParams locked;
+    captureGrooveSectionLock(src, locked, toolkitLock::Effects, 37);
+    CHECK(locked.complexityTarget == 37);
+    CHECK(locked.delayAmount == 55);
+
+    GrooveParams other;
+    other.complexityTarget = 90;
+    other.delayAmount = 0;
+    other.swing = 12;
+    applyGrooveSectionLock(locked, other, toolkitLock::Effects);
+    CHECK(other.complexityTarget == 37);
+    CHECK(other.delayAmount == 55);
+    CHECK(other.swing == 12);
+
+    GrooveParams explicitTarget;
+    explicitTarget.complexityTarget = 80;
+    GrooveParams kept;
+    captureGrooveSectionLock(explicitTarget, kept, toolkitLock::Effects, 10);
+    CHECK(kept.complexityTarget == 80);
+}
+
+TEST_CASE("performance lock keeps articulation length when timing is unlocked", "[groove]")
+{
+    GrooveParams src;
+    src.articulationIndex = (int) Articulation::Staccato;
+    src.articulationStrength = 80;
+    src.length = 40;
+    src.swing = 25;
+
+    GrooveParams locked;
+    captureGrooveSectionLock(src, locked, toolkitLock::Performance);
+    CHECK(locked.length == 40);
+    CHECK(locked.swing == 0);
+
+    GrooveParams file;
+    file.length = 100;
+    file.swing = 10;
+    applyGrooveSectionLock(locked, file, toolkitLock::Performance);
+    CHECK(file.length == 40);
+    CHECK(file.swing == 10);
+    CHECK(file.articulationIndex == (int) Articulation::Staccato);
+
+    GrooveParams both = src;
+    both.length = 70;
+    GrooveParams bothLocked;
+    captureGrooveSectionLock(both, bothLocked, toolkitLock::Timing | toolkitLock::Performance);
+    GrooveParams timed;
+    timed.length = 100;
+    applyGrooveSectionLock(bothLocked, timed, toolkitLock::Timing | toolkitLock::Performance);
+    CHECK(timed.length == 70);
+    CHECK(timed.swing == 25);
+}
+
 TEST_CASE("grooveValueText formats bipolar and percent", "[groove]")
 {
     CHECK(grooveValueText(kKnobDefs[1], -12) == "-12");

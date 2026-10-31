@@ -1,5 +1,6 @@
 #pragma once
 #include "EditModel.h"
+#include <atomic>
 #include <juce_core/juce_core.h>
 #include <optional>
 #include <vector>
@@ -87,5 +88,20 @@ struct QuickDirListing
 
 QuickDirListing listDirectoryQuick(const juce::File& dir,
                                    int midiCap = FolderIndex::kMaxBrowseNames);
+
+/** At most one progress publish per minIntervalMs, plus a final publish at `total`.
+    Safe to call from several parse threads. */
+inline bool claimScanProgressPublish(int done, int total,
+                                     std::atomic<juce::int64>& lastMs,
+                                     juce::int64 nowMs,
+                                     juce::int64 minIntervalMs = 100)
+{
+    if (total > 0 && done >= total)
+        return true;
+    auto prev = lastMs.load();
+    if (nowMs - prev < minIntervalMs)
+        return false;
+    return lastMs.compare_exchange_strong(prev, nowMs);
+}
 
 } // namespace pflow

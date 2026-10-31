@@ -10,12 +10,15 @@ namespace icons {
     inline constexpr const char* play          = "play";
     inline constexpr const char* pause         = "pause";
     inline constexpr const char* stop          = "stop";
+    inline constexpr const char* record        = "record";
     inline constexpr const char* caretUp       = "caret-up";
     inline constexpr const char* caretDown     = "caret-down";
     inline constexpr const char* caretLeft     = "caret-left";
     inline constexpr const char* caretRight    = "caret-right";
     inline constexpr const char* arrowsIn      = "arrows-in-line-horizontal";
     inline constexpr const char* arrowsOut     = "arrows-out-line-horizontal";
+    /** Arrow into a tray — drag a clip out to the DAW. */
+    inline constexpr const char* dragOut       = "drag-out";
     inline constexpr const char* scissors      = "scissors";
     inline constexpr const char* sliders       = "sliders";
     inline constexpr const char* folder        = "folder";
@@ -47,6 +50,8 @@ namespace icons {
     inline constexpr const char* sidebarRight  = "sidebar-right";
     /** Linked tempo / host sync (not a refresh arrow). */
     inline constexpr const char* sync          = "sync";
+    /** Circular arrow — rescan the open folder. */
+    inline constexpr const char* refresh       = "refresh";
     inline constexpr const char* gear          = "gear";
     inline constexpr const char* more          = "more";
     inline constexpr const char* lockOpen      = "lock-open";
@@ -85,6 +90,8 @@ public:
     float iconScale = 1.0f;
     /** When set, the button draws this label beside the icon and grows to fit. */
     juce::String caption;
+    /** Used instead of the accent colour while `active`, when not transparent. */
+    juce::Colour activeTint {};
     int captionWidth() const;
 };
 

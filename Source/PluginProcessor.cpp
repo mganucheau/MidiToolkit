@@ -7,7 +7,7 @@
 
 namespace pflow {
 
-MidiBrowserProcessor::MidiBrowserProcessor()
+MidiToolkitProcessor::MidiToolkitProcessor()
     : AudioProcessor(BusesProperties()
                          .withOutput("Output", juce::AudioChannelSet::stereo(), true))
 {
@@ -16,7 +16,7 @@ MidiBrowserProcessor::MidiBrowserProcessor()
     applySharedUiSessionFromLibrary();
 }
 
-MidiBrowserProcessor::~MidiBrowserProcessor()
+MidiToolkitProcessor::~MidiToolkitProcessor()
 {
     // Favorites + last workspace live in Application Support — flush on teardown.
     persistSharedUiSession();
@@ -24,13 +24,13 @@ MidiBrowserProcessor::~MidiBrowserProcessor()
     library_.flush();
 }
 
-void MidiBrowserProcessor::applyLibraryToMemory()
+void MidiToolkitProcessor::applyLibraryToMemory()
 {
     starredFiles = library_.starredFiles;
     savedSearches = library_.savedSearches;
 }
 
-void MidiBrowserProcessor::applySharedUiSessionFromLibrary()
+void MidiToolkitProcessor::applySharedUiSessionFromLibrary()
 {
     if (!library_.hasUiSession)
         return;
@@ -38,6 +38,22 @@ void MidiBrowserProcessor::applySharedUiSessionFromLibrary()
     const auto& s = library_.uiSession;
     lastBrowserDir = s.lastBrowserDir;
     savedBrowserDirs = s.savedBrowserDirs;
+    savedLibraries = s.savedLibraries;
+    if (savedLibraries.empty())
+    {
+        for (const auto& path : savedBrowserDirs)
+        {
+            SavedLibraryFolder folder;
+            folder.path = path;
+            savedLibraries.push_back(std::move(folder));
+        }
+    }
+    else if (savedBrowserDirs.isEmpty())
+    {
+        for (const auto& folder : savedLibraries)
+            if (folder.path.isNotEmpty())
+                savedBrowserDirs.add(folder.path);
+    }
     browseMode = juce::jlimit(0, 2, s.browseMode);
     starredFilter = s.starredFilter;
     includeSubdirs = s.includeSubdirs;
@@ -47,6 +63,7 @@ void MidiBrowserProcessor::applySharedUiSessionFromLibrary()
     browserResultPaths = s.browserResultPaths;
     columnVisibility = s.columnVisibility;
     nameColumnWidth = juce::jlimit(120, 2400, s.nameColumnWidth);
+    browserPaneW = juce::jmax(0, s.browserPaneW);
     editorOpen = s.editorOpen;
     effectsOpen = s.effectsOpen;
     previewOpen = s.previewOpen;
@@ -59,13 +76,29 @@ void MidiBrowserProcessor::applySharedUiSessionFromLibrary()
     tweaks().textScalePct.store(juce::jlimit(60, 150, s.tweakTextScalePct));
     tweaks().appearance.store(juce::jlimit(0, kNumAppearances - 1, s.tweakAppearance));
     tweaks().showTooltips.store(s.tweakShowTooltips != 0 ? 1 : 0);
+
+    hasDefaultView = s.hasDefaultView;
+    defEditorOpen = s.defEditorOpen;
+    defEffectsOpen = s.defEffectsOpen;
+    defPreviewOpen = s.defPreviewOpen;
+    defSidebarCollapsed = s.defSidebarCollapsed;
+    defPassthrough = s.defPassthrough;
+    defColumns = s.defColumns;
+    defNameColumnWidth = s.defNameColumnWidth;
+    defWindowW = s.defWindowW;
+    defWindowH = s.defWindowH;
+    defTweakSize = s.defTweakSize;
+    defTweakTextScalePct = s.defTweakTextScalePct;
+    defTweakDensity = s.defTweakDensity;
+    defTweakAppearance = s.defTweakAppearance;
 }
 
-void MidiBrowserProcessor::persistSharedUiSession()
+void MidiToolkitProcessor::persistSharedUiSession()
 {
     SharedUiSession s;
     s.lastBrowserDir = lastBrowserDir;
     s.savedBrowserDirs = savedBrowserDirs;
+    s.savedLibraries = savedLibraries;
     s.browseMode = juce::jlimit(0, 2, browseMode);
     s.starredFilter = starredFilter;
     s.includeSubdirs = includeSubdirs;
@@ -75,6 +108,7 @@ void MidiBrowserProcessor::persistSharedUiSession()
     s.browserResultPaths = browserResultPaths;
     s.columnVisibility = columnVisibility;
     s.nameColumnWidth = juce::jlimit(120, 2400, nameColumnWidth);
+    s.browserPaneW = juce::jmax(0, browserPaneW);
     s.editorOpen = editorOpen;
     s.effectsOpen = effectsOpen;
     s.previewOpen = previewOpen;
@@ -85,10 +119,24 @@ void MidiBrowserProcessor::persistSharedUiSession()
     s.tweakTextScalePct = tweaks().textScalePct.load();
     s.tweakAppearance = tweaks().appearance.load();
     s.tweakShowTooltips = tweaks().showTooltips.load();
+    s.hasDefaultView = hasDefaultView;
+    s.defEditorOpen = defEditorOpen;
+    s.defEffectsOpen = defEffectsOpen;
+    s.defPreviewOpen = defPreviewOpen;
+    s.defSidebarCollapsed = defSidebarCollapsed;
+    s.defPassthrough = defPassthrough;
+    s.defColumns = defColumns;
+    s.defNameColumnWidth = defNameColumnWidth;
+    s.defWindowW = defWindowW;
+    s.defWindowH = defWindowH;
+    s.defTweakSize = defTweakSize;
+    s.defTweakTextScalePct = defTweakTextScalePct;
+    s.defTweakDensity = defTweakDensity;
+    s.defTweakAppearance = defTweakAppearance;
     library_.putUiSession(s);
 }
 
-void MidiBrowserProcessor::syncLibraryFromMemory()
+void MidiToolkitProcessor::syncLibraryFromMemory()
 {
     // Union memory stars into the library (never replace — disk accrues).
     library_.mergeStarsFromDisk();
@@ -101,6 +149,7 @@ void MidiBrowserProcessor::syncLibraryFromMemory()
         SharedUiSession s;
         s.lastBrowserDir = lastBrowserDir;
         s.savedBrowserDirs = savedBrowserDirs;
+        s.savedLibraries = savedLibraries;
         s.browseMode = juce::jlimit(0, 2, browseMode);
         s.starredFilter = starredFilter;
         s.includeSubdirs = includeSubdirs;
@@ -110,6 +159,7 @@ void MidiBrowserProcessor::syncLibraryFromMemory()
         s.browserResultPaths = browserResultPaths;
         s.columnVisibility = columnVisibility;
         s.nameColumnWidth = juce::jlimit(120, 2400, nameColumnWidth);
+        s.browserPaneW = juce::jmax(0, browserPaneW);
         s.editorOpen = editorOpen;
         s.effectsOpen = effectsOpen;
         s.previewOpen = previewOpen;
@@ -120,6 +170,20 @@ void MidiBrowserProcessor::syncLibraryFromMemory()
         s.tweakTextScalePct = tweaks().textScalePct.load();
         s.tweakAppearance = tweaks().appearance.load();
         s.tweakShowTooltips = tweaks().showTooltips.load();
+        s.hasDefaultView = hasDefaultView;
+        s.defEditorOpen = defEditorOpen;
+        s.defEffectsOpen = defEffectsOpen;
+        s.defPreviewOpen = defPreviewOpen;
+        s.defSidebarCollapsed = defSidebarCollapsed;
+        s.defPassthrough = defPassthrough;
+        s.defColumns = defColumns;
+        s.defNameColumnWidth = defNameColumnWidth;
+        s.defWindowW = defWindowW;
+        s.defWindowH = defWindowH;
+        s.defTweakSize = defTweakSize;
+        s.defTweakTextScalePct = defTweakTextScalePct;
+        s.defTweakDensity = defTweakDensity;
+        s.defTweakAppearance = defTweakAppearance;
         library_.uiSession = s;
         library_.hasUiSession = true;
     }
@@ -127,30 +191,30 @@ void MidiBrowserProcessor::syncLibraryFromMemory()
     starredFiles = library_.starredFiles;
 }
 
-void MidiBrowserProcessor::saveLibrary()
+void MidiToolkitProcessor::saveLibrary()
 {
     syncLibraryFromMemory();
 }
 
-void MidiBrowserProcessor::toggleStarred(const juce::String& path)
+void MidiToolkitProcessor::toggleStarred(const juce::String& path)
 {
     library_.toggleStarred(path);
     starredFiles = library_.starredFiles;
 }
 
-void MidiBrowserProcessor::addSavedSearch(const SavedSearchEntry& entry)
+void MidiToolkitProcessor::addSavedSearch(const SavedSearchEntry& entry)
 {
     library_.addSavedSearch(entry);
     savedSearches = library_.savedSearches;
 }
 
-void MidiBrowserProcessor::removeSavedSearch(int index)
+void MidiToolkitProcessor::removeSavedSearch(int index)
 {
     library_.removeSavedSearch(index);
     savedSearches = library_.savedSearches;
 }
 
-void MidiBrowserProcessor::updateSavedSearchResults(int index,
+void MidiToolkitProcessor::updateSavedSearchResults(int index,
                                                     const juce::StringArray& resultPaths,
                                                     const juce::String& rootPath)
 {
@@ -163,12 +227,12 @@ void MidiBrowserProcessor::updateSavedSearchResults(int index,
     syncLibraryFromMemory();
 }
 
-void MidiBrowserProcessor::prepareToPlay(double sr, int)
+void MidiToolkitProcessor::prepareToPlay(double sr, int)
 {
     sampleRate_ = sr;
 }
 
-void MidiBrowserProcessor::processBlock(juce::AudioBuffer<float>& buffer,
+void MidiToolkitProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                                         juce::MidiBuffer& midi)
 {
     buffer.clear();
@@ -201,6 +265,24 @@ void MidiBrowserProcessor::processBlock(juce::AudioBuffer<float>& buffer,
         }
     }
 
+    if (recordingActive.load())
+    {
+        double bpm = hostBpm.load();
+        if (bpm <= 0.0)
+            bpm = freeBpm.load();
+        recorder.process(midi, buffer.getNumSamples(), sampleRate_, bpm);
+        if (wasSounding_)
+        {
+            flushActiveNotes(midi, 0);
+            wasSounding_ = false;
+            lastBeatPos_ = -1.0;
+        }
+        if (recordMonitorFx.load())
+            liveFx_.process(midi, sampleRate_, hostBpm.load(), hostBeatPos.load(),
+                            buffer.getNumSamples(), true);
+        return;
+    }
+
     const bool pass = passthroughActive.load();
     juce::MidiBuffer flushEvents;
     if (liveFlushPending_.exchange(false))
@@ -216,7 +298,7 @@ void MidiBrowserProcessor::processBlock(juce::AudioBuffer<float>& buffer,
             lastBeatPos_ = -1.0;
         }
         liveFx_.process(midi, sampleRate_, hostBpm.load(), hostBeatPos.load(),
-                        buffer.getNumSamples());
+                        buffer.getNumSamples(), hostPlaying.load());
         for (const auto metadata : flushEvents)
             midi.addEvent(metadata.getMessage(), metadata.samplePosition);
         return;
@@ -410,7 +492,7 @@ juce::uint64 previewFingerprint(const MidiClip& clip)
 
 } // namespace
 
-void MidiBrowserProcessor::setPreviewState(const MidiClip& clip, bool hasClip, bool muted, bool soloed,
+void MidiToolkitProcessor::setPreviewState(const MidiClip& clip, bool hasClip, bool muted, bool soloed,
                                            bool softUpdate)
 {
     const auto fp = previewFingerprint(clip);
@@ -428,12 +510,25 @@ void MidiBrowserProcessor::setPreviewState(const MidiClip& clip, bool hasClip, b
     juce::ignoreUnused(soloed);
 }
 
-void MidiBrowserProcessor::setLiveFxState(const LiveFxState& state)
+void MidiToolkitProcessor::setLiveFxState(const LiveFxState& state)
 {
     liveFx_.setState(state);
 }
 
-void MidiBrowserProcessor::setPassthroughEnabled(bool enabled)
+void MidiToolkitProcessor::setRecordingEnabled(bool enabled)
+{
+    if (enabled)
+    {
+        requestNoteFlush();
+        recorder.start();
+        recordingActive.store(true);
+        return;
+    }
+    recorder.stop();
+    recordingActive.store(false);
+}
+
+void MidiToolkitProcessor::setPassthroughEnabled(bool enabled)
 {
     const bool was = passthroughActive.load();
     passthrough = enabled;
@@ -452,7 +547,7 @@ void MidiBrowserProcessor::setPassthroughEnabled(bool enabled)
     }
 }
 
-void MidiBrowserProcessor::generatePreviewMidi(const MidiClip& clip, double startBeat, double endBeat,
+void MidiToolkitProcessor::generatePreviewMidi(const MidiClip& clip, double startBeat, double endBeat,
                                                juce::MidiBuffer& output, int numSamples,
                                                int sampleOffsetBase)
 {
@@ -517,7 +612,7 @@ void MidiBrowserProcessor::generatePreviewMidi(const MidiClip& clip, double star
     }
 }
 
-void MidiBrowserProcessor::flushActiveNotes(juce::MidiBuffer& output, int samplePosition)
+void MidiToolkitProcessor::flushActiveNotes(juce::MidiBuffer& output, int samplePosition)
 {
     // Explicit note-offs for every held note (some instruments ignore CC123),
     // then all-notes-off + sustain-off as belt and braces on every channel.
@@ -535,27 +630,88 @@ void MidiBrowserProcessor::flushActiveNotes(juce::MidiBuffer& output, int sample
     }
 }
 
-void MidiBrowserProcessor::addSavedBrowserDir(const juce::String& path)
+void MidiToolkitProcessor::addSavedBrowserDir(const juce::String& path)
 {
-    const juce::File dir(path);
+    SavedLibraryFolder folder;
+    folder.path = path;
+    saveLibraryFolder(folder, false);
+}
+
+void MidiToolkitProcessor::saveLibraryFolder(const SavedLibraryFolder& incoming, bool replaceDetails)
+{
+    const juce::File dir(incoming.path);
     if (!dir.isDirectory()) return;
     const auto fullPath = dir.getFullPathName();
-    savedBrowserDirs.removeString(fullPath);
-    savedBrowserDirs.insert(0, fullPath);
-    while (savedBrowserDirs.size() > 24)
-        savedBrowserDirs.remove(savedBrowserDirs.size() - 1);
+
+    SavedLibraryFolder kept;
+    bool had = false;
+    for (const auto& folder : savedLibraries)
+        if (folder.path == fullPath)
+        {
+            kept = folder;
+            had = true;
+            break;
+        }
+
+    SavedLibraryFolder next = incoming;
+    next.path = fullPath;
+    if (had && !replaceDetails)
+    {
+        next.scanSubdirs = kept.scanSubdirs;
+        next.filter = kept.filter;
+    }
+
+    if (had && replaceDetails)
+    {
+        for (auto& folder : savedLibraries)
+            if (folder.path == fullPath)
+            {
+                folder = next;
+                break;
+            }
+    }
+    else
+    {
+        savedLibraries.erase(std::remove_if(savedLibraries.begin(), savedLibraries.end(),
+                                             [&](const SavedLibraryFolder& folder)
+                                             { return folder.path == fullPath; }),
+                             savedLibraries.end());
+        savedLibraries.insert(savedLibraries.begin(), next);
+    }
+    while ((int) savedLibraries.size() > 24)
+        savedLibraries.pop_back();
+
+    savedBrowserDirs.clear();
+    for (const auto& folder : savedLibraries)
+        savedBrowserDirs.add(folder.path);
     persistSharedUiSession();
 }
 
-void MidiBrowserProcessor::removeSavedBrowserDir(const juce::String& path)
+void MidiToolkitProcessor::removeSavedBrowserDir(const juce::String& path)
 {
+    const auto full = juce::File(path).getFullPathName();
     savedBrowserDirs.removeString(path);
+    if (full != path)
+        savedBrowserDirs.removeString(full);
+    savedLibraries.erase(std::remove_if(savedLibraries.begin(), savedLibraries.end(),
+                                         [&](const SavedLibraryFolder& folder)
+                                         { return folder.path == path || folder.path == full; }),
+                         savedLibraries.end());
     persistSharedUiSession();
 }
 
-void MidiBrowserProcessor::getStateInformation(juce::MemoryBlock& dest)
+const SavedLibraryFolder* MidiToolkitProcessor::libraryFolderFor(const juce::String& path) const
 {
-    juce::XmlElement xml("MidiBrowserState");
+    const auto full = juce::File(path).getFullPathName();
+    for (const auto& folder : savedLibraries)
+        if (folder.path == path || folder.path == full)
+            return &folder;
+    return nullptr;
+}
+
+void MidiToolkitProcessor::getStateInformation(juce::MemoryBlock& dest)
+{
+    juce::XmlElement xml("MidiToolkitState");
     xml.setAttribute("version", 5);
     xml.setAttribute("tweakDensity", tweaks().density.load());
     xml.setAttribute("tweakSize", tweaks().size.load());
@@ -643,12 +799,24 @@ void MidiBrowserProcessor::getStateInformation(juce::MemoryBlock& dest)
     xml.setAttribute("lockVelRangeLo", lockedGroove.velocityRangeLo);
     xml.setAttribute("lockVelRangeHi", lockedGroove.velocityRangeHi);
     xml.setAttribute("lockVariation", lockedGroove.variationIndex);
-    for (const auto& folder : savedBrowserDirs)
+    if (!savedLibraries.empty())
     {
-        if (folder.isNotEmpty())
+        for (const auto& folder : savedLibraries)
         {
+            if (folder.path.isEmpty()) continue;
             auto* child = xml.createNewChildElement("SavedFolder");
-            child->setAttribute("path", folder);
+            LibraryStore::savedLibraryToXml(*child, folder);
+        }
+    }
+    else
+    {
+        for (const auto& folder : savedBrowserDirs)
+        {
+            if (folder.isNotEmpty())
+            {
+                auto* child = xml.createNewChildElement("SavedFolder");
+                child->setAttribute("path", folder);
+            }
         }
     }
     for (const auto& star : starredFiles)
@@ -764,10 +932,11 @@ void MidiBrowserProcessor::getStateInformation(juce::MemoryBlock& dest)
     copyXmlToBinary(xml, dest);
 }
 
-void MidiBrowserProcessor::setStateInformation(const void* data, int sizeInBytes)
+void MidiToolkitProcessor::setStateInformation(const void* data, int sizeInBytes)
 {
     lastBrowserDir.clear();
     savedBrowserDirs.clear();
+    savedLibraries.clear();
     // Favorites/searches accrue in Application Support — do not clear them here.
     // Host state is merged into the library at the end of this load.
     juce::StringArray hostStars;
@@ -792,7 +961,7 @@ void MidiBrowserProcessor::setStateInformation(const void* data, int sizeInBytes
     }
     if (auto xml = getXmlFromBinary(data, sizeInBytes))
     {
-        if (xml->hasTagName("MidiBrowserState") || xml->hasTagName("PatternFlowState"))
+        if (xml->hasTagName("MidiToolkitState") || xml->hasTagName("MidiBrowserState") || xml->hasTagName("PatternFlowState"))
         {
             tweaks().density.store(juce::jlimit(0, 1,
                 xml->getIntAttribute("tweakDensity", (int) Density::Comfortable)));
@@ -945,10 +1114,13 @@ void MidiBrowserProcessor::setStateInformation(const void* data, int sizeInBytes
             {
                 if (child->hasTagName("SavedFolder"))
                 {
-                    const auto path = child->getStringAttribute("path");
-                    if (path.isNotEmpty() && juce::File(path).isDirectory()
-                        && !savedBrowserDirs.contains(path))
-                        savedBrowserDirs.add(path);
+                    auto folder = LibraryStore::savedLibraryFromXml(*child);
+                    if (folder.path.isNotEmpty() && juce::File(folder.path).isDirectory()
+                        && !savedBrowserDirs.contains(folder.path))
+                    {
+                        savedBrowserDirs.add(folder.path);
+                        savedLibraries.push_back(std::move(folder));
+                    }
                 }
                 else if (child->hasTagName("StarredFile"))
                 {
@@ -1116,14 +1288,14 @@ void MidiBrowserProcessor::setStateInformation(const void* data, int sizeInBytes
     }
 }
 
-juce::AudioProcessorEditor* MidiBrowserProcessor::createEditor()
+juce::AudioProcessorEditor* MidiToolkitProcessor::createEditor()
 {
-    return new MidiBrowserEditor(*this);
+    return new MidiToolkitEditor(*this);
 }
 
 } // namespace pflow
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
 {
-    return new pflow::MidiBrowserProcessor();
+    return new pflow::MidiToolkitProcessor();
 }

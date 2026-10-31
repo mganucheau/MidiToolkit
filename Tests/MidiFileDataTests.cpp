@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
 #include "MidiFileData.h"
+#include "MidiRecorder.h"
 #include "TestHelpers.h"
 
 using namespace pflow;
@@ -171,4 +172,44 @@ TEST_CASE("CompLane region helpers", "[CompLane][qa]")
     region.ensureSelectionInBounds();
     REQUIRE(region.startBeat == Approx(0.0));
     REQUIRE(region.endBeat > region.startBeat);
+}
+
+TEST_CASE("Recording loop ends at the last measure with notes", "[MidiFileData]")
+{
+    REQUIRE(loopEndBeatForNotes({}, 4) == Approx(4.0));
+
+    NoteEvent onBar;
+    onBar.startBeat = 0.0;
+    onBar.lengthBeats = 4.0;
+    REQUIRE(loopEndBeatForNotes({ onBar }, 4) == Approx(4.0));
+
+    NoteEvent intoNext;
+    intoNext.startBeat = 3.5;
+    intoNext.lengthBeats = 0.6;
+    REQUIRE(loopEndBeatForNotes({ intoNext }, 4) == Approx(8.0));
+
+    NoteEvent late;
+    late.startBeat = 8.0;
+    late.lengthBeats = 0.25;
+    REQUIRE(loopEndBeatForNotes({ onBar, late }, 4) == Approx(12.0));
+}
+
+TEST_CASE("MidiRecorder stores notes and closes them when recording stops", "[MidiFileData]")
+{
+    MidiRecorder recorder;
+    recorder.start();
+    juce::MidiBuffer midi;
+    midi.addEvent(juce::MidiMessage::noteOn(1, 60, (juce::uint8) 100), 0);
+    midi.addEvent(juce::MidiMessage::noteOff(1, 60), 22050);
+    recorder.process(midi, 44100, 44100.0, 120.0);
+    recorder.stop();
+
+    const auto snap = recorder.snapshot();
+    REQUIRE_FALSE(snap.recording);
+    REQUIRE(snap.notes.size() == 1);
+    REQUIRE(snap.notes[0].noteNumber == 60);
+    REQUIRE(snap.notes[0].startBeat == Approx(0.0).margin(0.01));
+    // 22050 samples at 120 bpm is half a second, one beat.
+    REQUIRE(snap.notes[0].lengthBeats == Approx(1.0).margin(0.02));
+    REQUIRE(loopEndBeatForNotes(snap.notes, 4) == Approx(4.0));
 }

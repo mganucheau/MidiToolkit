@@ -23,6 +23,7 @@ struct SharedUiSession
 {
     juce::String lastBrowserDir;
     juce::StringArray savedBrowserDirs;
+    std::vector<SavedLibraryFolder> savedLibraries;
 
     int browseMode = 0; // 0 folder, 1 starred, 2 search
     bool starredFilter = false;
@@ -34,6 +35,7 @@ struct SharedUiSession
 
     BrowserColumnVisibility columnVisibility;
     int nameColumnWidth = 140;
+    int browserPaneW = 0;
 
     bool editorOpen = false;
     bool effectsOpen = false;
@@ -46,6 +48,21 @@ struct SharedUiSession
     int tweakTextScalePct = 100;
     int tweakAppearance = 0;    // Appearance::System
     int tweakShowTooltips = 1;
+
+    bool hasDefaultView = false;
+    bool defEditorOpen = false;
+    bool defEffectsOpen = false;
+    bool defPreviewOpen = true;
+    bool defSidebarCollapsed = false;
+    bool defPassthrough = false;
+    BrowserColumnVisibility defColumns;
+    int defNameColumnWidth = 140;
+    int defWindowW = 0;
+    int defWindowH = 700;
+    int defTweakSize = 1;
+    int defTweakTextScalePct = 100;
+    int defTweakDensity = 1;
+    int defTweakAppearance = 0;
 };
 
 /**
@@ -100,6 +117,8 @@ public:
     /** Shared XML helpers for host state + library file. */
     static BrowserSearch browserSearchFromXml(const juce::XmlElement& el);
     static void browserSearchToXml(juce::XmlElement& el, const BrowserSearch& s);
+    static SavedLibraryFolder savedLibraryFromXml(const juce::XmlElement& el);
+    static void savedLibraryToXml(juce::XmlElement& el, const SavedLibraryFolder& folder);
 
     static SharedUiSession uiSessionFromXml(const juce::XmlElement& el);
     static void uiSessionToXml(juce::XmlElement& el, const SharedUiSession& s);

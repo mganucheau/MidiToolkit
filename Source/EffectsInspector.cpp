@@ -140,11 +140,14 @@ EffectsInspector::EffectsInspector()
 
     complexitySl.onChange = [this](int v)
     {
-        if (v == juce::jlimit(0, 100, clipComplexity))
-            groove.complexityTarget = -1;
-        else
+        const int clipCx = juce::jlimit(0, 100, clipComplexity);
+        // A locked Effects section stores the number on the slider. Follow-clip
+        // (-1) would retarget every file and look like the lock let go.
+        if ((sectionLocks & toolkitLock::Effects) != 0 || v != clipCx)
             groove.complexityTarget = v;
-        complexitySl.valueText = juce::String(v);
+        else
+            groove.complexityTarget = -1;
+        refreshComplexitySlider();
         notifyGroove();
     };
 
@@ -341,7 +344,7 @@ EffectsInspector::EffectsInspector()
 
     // Dirty predicates — when a section is folded, only dirty rows stay visible.
     playback.addRow(&tempoRow, kRowMinH, [this] { return std::abs(bpmMultiplier - 1.0) > 1.0e-6; });
-    playback.addRow(&trimRow, kRowMinH, [this] { return edit.hasTrim(); });
+    playback.addRow(&trimRow, kRowMinH, [this] { return trimSwitch.getToggleState(); });
     playback.addRow(&extendRow, kRowMinH, [this] { return edit.extendMult > 1; });
 
     timing.addRow(&quantizeBlock, [this] { return quantizeBlock.idealHeight(); }, [this] {
@@ -630,8 +633,14 @@ void EffectsInspector::refreshComplexitySlider()
     const int v = groove.resolvedComplexityTarget(clipComplexity);
     complexitySl.setDefault(clipComplexity);
     complexitySl.setValue(v, juce::dontSendNotification);
-    const int delta = v - clipComplexity;
-    complexitySl.valueText = delta == 0 ? "Clip" : signedIntText(delta);
+    const bool frozen = (sectionLocks & toolkitLock::Effects) != 0 && groove.complexityTarget >= 0;
+    if (frozen)
+        complexitySl.valueText = juce::String(v);
+    else
+    {
+        const int delta = v - clipComplexity;
+        complexitySl.valueText = delta == 0 ? "Clip" : signedIntText(delta);
+    }
     complexitySl.repaint();
 }
 
@@ -682,6 +691,17 @@ void EffectsInspector::setClipComplexity(int complexity)
     clipComplexity = juce::jlimit(0, 100, complexity);
     complexitySl.setDefault(clipComplexity);
     refreshComplexitySlider();
+}
+
+void EffectsInspector::setLiveStreamMode(bool on)
+{
+    if (liveStream == on) return;
+    liveStream = on;
+    // Complexity, variations, and the whole Playback section need a clip.
+    effectsSec.setRowForcedHidden(&complexitySl, on);
+    effectsSec.setRowForcedHidden(&variationsSl, on);
+    effectsSec.setRowForcedHidden(&effectsDivider, on);
+    layoutSections();
 }
 
 void EffectsInspector::setTrimState(bool active, bool enabled, const juce::String&)
@@ -804,24 +824,53 @@ void EffectsInspector::layoutSections()
     int y = 0;
     fx::Section* secs[] = { &playback, &timing, &performance, &pitchSec, &effectsSec };
     const int n = (int) (sizeof(secs) / sizeof(secs[0]));
+    fx::Section* last = &effectsSec;
     for (int i = 0; i < n; ++i)
     {
         auto* sec = secs[i];
-        sec->showBottomDivider = sec != &effectsSec;
+        if (liveStream && sec == &playback)
+        {
+            sec->setVisible(false);
+            sec->setBounds(0, 0, 0, 0);
+            continue;
+        }
+        sec->setVisible(true);
+        last = sec;
+        sec->showBottomDivider = true;
         const int h = sec->idealHeight();
         sec->setBounds(0, y, w, h);
         sec->resized();
         y += h;
     }
+    if (last != nullptr)
+        last->showBottomDivider = false;
     // Match header / section top pad so the last control isn't flush to the scroll edge.
     y += toolkitBodyPadB();
     body.setSize(w, juce::jmax(y, viewport.getMaximumVisibleHeight()));
+    if (onContentHeightChanged != nullptr && !notifyingHeight)
+    {
+        notifyingHeight = true;
+        onContentHeightChanged();
+        notifyingHeight = false;
+    }
+}
+
+int EffectsInspector::contentHeight() const
+{
+    int y = metrics::toolkitHeaderH();
+    for (auto* sec : { &playback, &timing, &performance, &pitchSec, &effectsSec })
+    {
+        if (liveStream && sec == &playback) continue;
+        y += sec->idealHeight();
+    }
+    y += toolkitBodyPadB();
+    return y;
 }
 
 bool EffectsInspector::anySectionOpen() const
 {
-    return playback.open || timing.open || performance.open
-        || pitchSec.open || effectsSec.open;
+    if (!liveStream && playback.open) return true;
+    return timing.open || performance.open || pitchSec.open || effectsSec.open;
 }
 
 void EffectsInspector::foldAllSections()

@@ -1,9 +1,9 @@
 cmake_minimum_required(VERSION 3.22)
 # Pre-1.0 beta — each build appends an incrementing -beta.N via GenerateBuildInfo.
 if(APPLE)
-    project(MidiBrowser VERSION 0.1.0 LANGUAGES C CXX OBJCXX)
+    project(MidiToolkit VERSION 0.1.0 LANGUAGES C CXX OBJCXX)
 else()
-    project(MidiBrowser VERSION 0.1.0 LANGUAGES C CXX)
+    project(MidiToolkit VERSION 0.1.0 LANGUAGES C CXX)
 endif()
 
 set(PF_VERSION "${PROJECT_VERSION}")
@@ -12,7 +12,7 @@ file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/Generated")
 # Fresh version stamp (0.1.0-beta.N · 12h time · git hash) on every build for testers.
 set(PF_BUILDINFO_CPP "${CMAKE_BINARY_DIR}/Generated/BuildInfo.cpp")
 set(PF_BUILDINFO_H   "${CMAKE_BINARY_DIR}/Generated/BuildInfo.h")
-add_custom_target(MidiBrowserBuildInfo ALL
+add_custom_target(MidiToolkitBuildInfo ALL
     COMMAND "${CMAKE_COMMAND}"
         -DPF_VERSION=${PF_VERSION}
         -DSRC_DIR=${CMAKE_SOURCE_DIR}
@@ -52,21 +52,21 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(JUCE)
 
 if(APPLE)
-    set(_midibrowser_formats AU VST3 Standalone)
+    set(_miditoolkit_formats AU VST3 Standalone)
 else()
-    set(_midibrowser_formats VST3 Standalone)
+    set(_miditoolkit_formats VST3 Standalone)
 endif()
 
 # Single instrument-style plugin: MIDI output + silent stereo audio.
 # Loads reliably in Ableton (VST3) and Logic (AU). IS_MIDI_EFFECT breaks many hosts.
-set(MIDIBROWSER_PRODUCT_NAME "Midi Toolkit")
-juce_add_plugin(MidiBrowser
-    COMPANY_NAME            "MidiBrowser"
-    BUNDLE_ID               com.midibrowser.app
+set(MIDITOOLKIT_PRODUCT_NAME "Midi Toolkit")
+juce_add_plugin(MidiToolkit
+    COMPANY_NAME            "MidiToolkit"
+    BUNDLE_ID               com.miditoolkit.app
     PLUGIN_MANUFACTURER_CODE MdbR
     PLUGIN_CODE              MdbB
-    FORMATS                  ${_midibrowser_formats}
-    PRODUCT_NAME             "${MIDIBROWSER_PRODUCT_NAME}"
+    FORMATS                  ${_miditoolkit_formats}
+    PRODUCT_NAME             "${MIDITOOLKIT_PRODUCT_NAME}"
     IS_SYNTH                 TRUE
     NEEDS_MIDI_INPUT         TRUE
     NEEDS_MIDI_OUTPUT        TRUE
@@ -78,49 +78,68 @@ juce_add_plugin(MidiBrowser
 # Always install into the user plug-in folders so DAWs see the latest build.
 # (JUCE's COPY_PLUGIN_AFTER_BUILD can be left OFF in an old CMake cache.)
 # Quote each -D so paths with spaces (e.g. "Midi Toolkit.vst3") stay intact.
+# MidiToolkit_InstallPlugins is part of the default build (ALL) and of ./build.sh.
+# It runs even when the bundles are already up to date, so the plugins folder
+# is replaced at the end of every build.
 if(APPLE)
     foreach(_fmt IN ITEMS VST3 AU)
-        if(TARGET MidiBrowser_${_fmt})
+        if(TARGET MidiToolkit_${_fmt})
             if(_fmt STREQUAL "VST3")
                 set(_kind VST3)
             else()
                 set(_kind AU)
             endif()
-            add_custom_command(TARGET MidiBrowser_${_fmt} POST_BUILD
+            add_custom_command(TARGET MidiToolkit_${_fmt} POST_BUILD
                 COMMAND "${CMAKE_COMMAND}"
-                    "-DPLUGIN_SRC=$<TARGET_BUNDLE_DIR:MidiBrowser_${_fmt}>"
+                    "-DPLUGIN_SRC=$<TARGET_BUNDLE_DIR:MidiToolkit_${_fmt}>"
                     "-DPLUGIN_KIND=${_kind}"
-                    "-DPRODUCT_NAME=${MIDIBROWSER_PRODUCT_NAME}"
+                    "-DPRODUCT_NAME=${MIDITOOLKIT_PRODUCT_NAME}"
                     -P "${CMAKE_SOURCE_DIR}/cmake/InstallPlugins.cmake"
                 COMMENT "Installing ${_fmt} -> ~/Library/Audio/Plug-Ins"
                 VERBATIM)
         endif()
     endforeach()
-elseif(WIN32)
-    if(TARGET MidiBrowser_VST3)
-        add_custom_command(TARGET MidiBrowser_VST3 POST_BUILD
+    if(TARGET MidiToolkit_VST3 AND TARGET MidiToolkit_AU)
+        add_custom_target(MidiToolkit_InstallPlugins ALL
             COMMAND "${CMAKE_COMMAND}"
-                "-DPLUGIN_SRC=$<TARGET_FILE_DIR:MidiBrowser_VST3>/../.."
+                "-DPLUGIN_SRC=$<TARGET_BUNDLE_DIR:MidiToolkit_VST3>"
                 "-DPLUGIN_KIND=VST3"
-                "-DPRODUCT_NAME=${MIDIBROWSER_PRODUCT_NAME}"
+                "-DPRODUCT_NAME=${MIDITOOLKIT_PRODUCT_NAME}"
+                -P "${CMAKE_SOURCE_DIR}/cmake/InstallPlugins.cmake"
+            COMMAND "${CMAKE_COMMAND}"
+                "-DPLUGIN_SRC=$<TARGET_BUNDLE_DIR:MidiToolkit_AU>"
+                "-DPLUGIN_KIND=AU"
+                "-DPRODUCT_NAME=${MIDITOOLKIT_PRODUCT_NAME}"
+                -P "${CMAKE_SOURCE_DIR}/cmake/InstallPlugins.cmake"
+            DEPENDS MidiToolkit_VST3 MidiToolkit_AU
+            COMMENT "Replacing VST3 and AU in ~/Library/Audio/Plug-Ins"
+            VERBATIM)
+    endif()
+elseif(WIN32)
+    if(TARGET MidiToolkit_VST3)
+        add_custom_command(TARGET MidiToolkit_VST3 POST_BUILD
+            COMMAND "${CMAKE_COMMAND}"
+                "-DPLUGIN_SRC=$<TARGET_FILE_DIR:MidiToolkit_VST3>/../.."
+                "-DPLUGIN_KIND=VST3"
+                "-DPRODUCT_NAME=${MIDITOOLKIT_PRODUCT_NAME}"
                 -P "${CMAKE_SOURCE_DIR}/cmake/InstallPlugins.cmake"
             COMMENT "Installing VST3 into Common Files"
             VERBATIM)
     endif()
 endif()
 
-juce_add_binary_data(MidiBrowserAssets
+juce_add_binary_data(MidiToolkitAssets
     SOURCES
         Resources/Fonts/SchibstedGrotesk.ttf
         Resources/Fonts/JetBrainsMono-Regular.ttf
         Resources/Fonts/JetBrainsMono-SemiBold.ttf
 )
 
-target_include_directories(MidiBrowser PRIVATE
+target_include_directories(MidiToolkit PRIVATE
     "${CMAKE_BINARY_DIR}/Generated"
     "${CMAKE_SOURCE_DIR}/Source")
 
-target_sources(MidiBrowser PRIVATE
+target_sources(MidiToolkit PRIVATE
     Source/PluginProcessor.cpp
     Source/PluginEditor.cpp
     Source/MidiFileData.cpp
@@ -140,11 +159,11 @@ target_sources(MidiBrowser PRIVATE
     "${PF_BUILDINFO_CPP}"
 )
 if(APPLE)
-    target_sources(MidiBrowser PRIVATE Source/NativeWindowChrome.mm)
+    target_sources(MidiToolkit PRIVATE Source/NativeWindowChrome.mm)
 endif()
-add_dependencies(MidiBrowser MidiBrowserBuildInfo)
+add_dependencies(MidiToolkit MidiToolkitBuildInfo)
 
-target_compile_definitions(MidiBrowser PUBLIC
+target_compile_definitions(MidiToolkit PUBLIC
     JUCE_WEB_BROWSER=0
     JUCE_USE_CURL=0
     JUCE_VST3_CAN_REPLACE_VST2=0
@@ -152,9 +171,9 @@ target_compile_definitions(MidiBrowser PUBLIC
     JUCE_ALSA=0
 )
 
-target_link_libraries(MidiBrowser
+target_link_libraries(MidiToolkit
     PRIVATE
-        MidiBrowserAssets
+        MidiToolkitAssets
         juce::juce_audio_utils
         juce::juce_audio_processors
         juce::juce_gui_extra
@@ -165,10 +184,10 @@ target_link_libraries(MidiBrowser
         juce::juce_recommended_warning_flags
 )
 
-option(MIDIBROWSER_BUILD_TESTS "Build unit tests" ON)
-option(MIDIBROWSER_BUILD_PROBE "Build the VST3 MIDI-out probe tool" ON)
+option(MIDITOOLKIT_BUILD_TESTS "Build unit tests" ON)
+option(MIDITOOLKIT_BUILD_PROBE "Build the VST3 MIDI-out probe tool" ON)
 
-if(MIDIBROWSER_BUILD_PROBE)
+if(MIDITOOLKIT_BUILD_PROBE)
     juce_add_console_app(MidiOutProbe PRODUCT_NAME "MidiOutProbe")
     target_sources(MidiOutProbe PRIVATE Tools/MidiOutProbe.cpp)
     target_compile_definitions(MidiOutProbe PRIVATE
@@ -183,7 +202,7 @@ if(MIDIBROWSER_BUILD_PROBE)
     )
 endif()
 
-if(MIDIBROWSER_BUILD_TESTS)
+if(MIDITOOLKIT_BUILD_TESTS)
     FetchContent_Declare(
         Catch2
         GIT_REPOSITORY https://github.com/catchorg/Catch2.git
@@ -191,7 +210,7 @@ if(MIDIBROWSER_BUILD_TESTS)
     )
     FetchContent_MakeAvailable(Catch2)
 
-    add_executable(MidiBrowserTests
+    add_executable(MidiToolkitTests
         Tests/main.cpp
         Tests/MidiFileDataTests.cpp
         Tests/TrimTests.cpp
@@ -202,17 +221,18 @@ if(MIDIBROWSER_BUILD_TESTS)
         Tests/LibraryStoreTests.cpp
         Tests/LiveMidiFxTests.cpp
         Tests/FolderIndexTests.cpp
+        Tests/ScanEfficiencyTests.cpp
     )
-    target_link_libraries(MidiBrowserTests PRIVATE
-        MidiBrowser
+    target_link_libraries(MidiToolkitTests PRIVATE
+        MidiToolkit
         Catch2::Catch2WithMain
         juce::juce_audio_utils
         juce::juce_audio_processors
         juce::juce_gui_extra
         juce::juce_data_structures
     )
-    target_include_directories(MidiBrowserTests PRIVATE ${CMAKE_SOURCE_DIR}/Source "${CMAKE_BINARY_DIR}/Generated")
+    target_include_directories(MidiToolkitTests PRIVATE ${CMAKE_SOURCE_DIR}/Source "${CMAKE_BINARY_DIR}/Generated")
     include(CTest)
     enable_testing()
-    add_test(NAME MidiBrowserTests COMMAND MidiBrowserTests)
+    add_test(NAME MidiToolkitTests COMMAND MidiToolkitTests)
 endif()

@@ -56,7 +56,7 @@ TEST_CASE("Midi_Parsed Keys browse is fast with native listing", "[perf][midi_pa
 TEST_CASE("FolderIndex binary roundtrip", "[folder_index]")
 {
     auto tmp = juce::File::getSpecialLocation(juce::File::tempDirectory)
-                   .getChildFile("MidiBrowserIndexTest");
+                   .getChildFile("MidiToolkitIndexTest");
     tmp.deleteRecursively();
     REQUIRE(tmp.createDirectory());
     for (int i = 0; i < 3; ++i)

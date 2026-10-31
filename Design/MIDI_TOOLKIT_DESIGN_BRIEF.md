@@ -1,14 +1,14 @@
-# Design Brief: Midi Browser — VST3/AU Plugin UI Redesign
+# Design Brief: Midi Toolkit — VST3/AU Plugin UI Redesign
 
 ## Role
 
-You are redesigning the user interface for **Midi Browser**, a compact **DAW plugin** (VST3, AU, Standalone on macOS) that lets music producers **browse local MIDI files**, **preview them in sync with the host transport**, and **drag files into their DAW**. Produce high-fidelity mockups with clear component specs, states, spacing, typography, and interaction notes suitable for handoff to a JUCE/C++ engineer.
+You are redesigning the user interface for **Midi Toolkit**, a compact **DAW plugin** (VST3, AU, Standalone on macOS) that lets music producers **browse local MIDI files**, **preview them in sync with the host transport**, and **drag files into their DAW**. Produce high-fidelity mockups with clear component specs, states, spacing, typography, and interaction notes suitable for handoff to a JUCE/C++ engineer.
 
 ---
 
 ## Product summary
 
-**Midi Browser** is a **MIDI instrument plugin** (not an audio effect). It produces **no audible audio** — only **MIDI note output** routed to the host. Producers use it to audition `.mid` / `.midi` files while the DAW is playing, then drag files into arrangement slots or other tracks.
+**Midi Toolkit** is a **MIDI instrument plugin** (not an audio effect). It produces **no audible audio** — only **MIDI note output** routed to the host. Producers use it to audition `.mid` / `.midi` files while the DAW is playing, then drag files into arrangement slots or other tracks.
 
 **Core value proposition:** Fast auditioning of a MIDI library without leaving the DAW, with preview locked to session tempo and playhead.
 
@@ -104,7 +104,7 @@ Icon buttons: 28×28px, subtle hover/press fill.
 
 ### 9. Plugin header (above browser)
 
-- **Title:** "Midi Browser" — Large Title scale (~28pt semibold).
+- **Title:** "Midi Toolkit" — Large Title scale (~28pt semibold).
 - **Hairline separator** below header (~52px header zone).
 - **Ableton Live only:** optional footnote banner (40px) with routing instructions:  
   *"Ableton: use on its own MIDI track. Set your instrument track's MIDI From to this plugin and Monitor to In."*  
@@ -144,7 +144,7 @@ Saved in DAW project/plugin state:
 
 ```
 ┌─────────────────────────────────────────┐
-│  Midi Browser                    (52px) │  ← Large title + separator
+│  Midi Toolkit                    (52px) │  ← Large title + separator
 ├─────────────────────────────────────────┤
 │  [Ableton hint banner]           (40px) │  ← conditional
 ├─────────────────────────────────────────┤
@@ -299,7 +299,7 @@ A successful redesign:
 
 ---
 
-**Product name:** Midi Browser  
+**Product name:** Midi Toolkit  
 **Version:** 1.0  
 **Platform:** macOS VST3 / AU / Standalone  
-**Repo:** github.com/mganucheau/MidiBrowser
+**Repo:** github.com/mganucheau/MidiToolkit

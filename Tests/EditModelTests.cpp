@@ -398,11 +398,14 @@ TEST_CASE("applyPitchLock copies pitch fields, preserves moves and trim", "[edit
     locked.root = 0;              // C
     locked.mode = Mode::Aeolian;
 
+    locked.extendMult = 8;
+
     ClipEdit target;
     target.moves[7] = { 2, -4 };
     target.removedBars = { 0 };
     target.octave = -2;
     target.root = 9;
+    target.extendMult = 4;
 
     applyPitchLock(locked, target);
     CHECK(target.octave == 1);
@@ -413,6 +416,36 @@ TEST_CASE("applyPitchLock copies pitch fields, preserves moves and trim", "[edit
     CHECK(target.moves.at(7).dPitch == 2);    // per-note moves untouched
     CHECK(target.moves.at(7).dStep == -4);
     CHECK(target.removedBars == std::vector<int>{ 0 });  // trim untouched
+    CHECK(target.extendMult == 4);                       // extend is Playback
+}
+
+TEST_CASE("playback lock holds extend and trim mode across clips", "[editmodel]")
+{
+    auto gapped = makeClip({ { 0, 60, 16.0, 4.0 } }, 2);
+    auto full = makeClip({ { 0, 60, 0.0, 32.0 } }, 2);
+
+    ClipEdit locked;
+    locked.extendMult = 4;
+
+    ClipEdit leftover;
+    leftover.extendMult = 1;
+    leftover.removedBars = { 1 };
+    leftover.octave = 3;
+    applyPlaybackLock(locked, leftover, false, gapped);
+    CHECK(leftover.extendMult == 4);
+    CHECK(leftover.removedBars.empty());
+    CHECK(leftover.octave == 3);
+
+    ClipEdit gappedEdit;
+    applyPlaybackLock(locked, gappedEdit, true, gapped);
+    CHECK(gappedEdit.extendMult == 4);
+    CHECK(gappedEdit.removedBars == std::vector<int>{ 0 });
+
+    ClipEdit fullEdit;
+    fullEdit.removedBars = { 0 };
+    applyPlaybackLock(locked, fullEdit, true, full);
+    CHECK(fullEdit.extendMult == 4);
+    CHECK(fullEdit.removedBars.empty());
 }
 
 TEST_CASE("parseMidiFile honours end-of-track length for trailing empty bars", "[editmodel]")
@@ -469,4 +502,31 @@ TEST_CASE("makeStepClip converts beats to 16th steps with stable ids", "[editmod
     CHECK(s.notes[0].fileVelocity == 100);
     CHECK(s.bars == 2);   // 8 beats = 2 bars
     CHECK(s.root >= 0);
+}
+
+TEST_CASE("complexity stays low for a single note and rises for a dense part", "[editmodel]")
+{
+    const auto sparse = makeStepClip(test::makeClipWithNotes({
+        { 60, 100, 0.0, 4.0, 1 }
+    }, 16.0));
+
+    std::vector<NoteEvent> busy;
+    for (int bar = 0; bar < 4; ++bar)
+    {
+        for (int step = 0; step < 8; ++step)
+        {
+            const double beat = bar * 4.0 + step * 0.5;
+            busy.push_back({ 60 + (step % 7), 40 + step * 10, beat, 0.4, 1 });
+            busy.push_back({ 64 + (step % 5), 100, beat, 0.4, 1 });
+        }
+    }
+    MidiClip denseClip;
+    denseClip.name = "Dense";
+    denseClip.notes = std::move(busy);
+    denseClip.lengthBeats = 16.0;
+    const auto dense = makeStepClip(denseClip);
+
+    CHECK(sparse.complexity < 25);
+    CHECK(dense.complexity > sparse.complexity + 20);
+    CHECK(dense.complexity < 100);
 }

@@ -55,6 +55,8 @@ const Palette& palette()
         juce::Colour(0xff1d5bb0),   // kfInB
         juce::Colour(0xffdcdce0),   // kfOutW
         juce::Colour(0xff8c8c93),   // kfOutB
+        juce::Colour(0xffffffff),   // lensFill
+        juce::Colour(0xff6fe3ff),   // logoNoteHi
     };
     static const Palette dark {
         juce::Colour(0xff28282b),
@@ -91,6 +93,8 @@ const Palette& palette()
         rgba(10, 132, 255, 0.70f),          // kfInB = accent @ 70%
         rgba(255, 255, 255, 0.14f),         // kfOutW
         rgba(255, 255, 255, 0.28f),         // kfOutB
+        juce::Colour(0xff2a2d33),           // lensFill
+        juce::Colour(0xff6fe3ff),           // logoNoteHi
     };
     return usesDarkAppearance() ? dark : light;
 }
@@ -143,6 +147,7 @@ juce::Font font(Type t)
         case Type::Metadata:       return monoFontFixed(11.0f, false);
         case Type::Caption:        return uiFontFixed(10.0f, false);
         case Type::NumericDisplay: return monoFontFixed(13.0f, true);
+        case Type::Logo:           return uiFontFixed(14.0f, true).withExtraKerningFactor(-0.02f);
     }
     return uiFontFixed(12.5f, false);
 }
@@ -159,6 +164,7 @@ juce::Colour colour(Type t)
         case Type::Metadata:       return tx2();
         case Type::Caption:        return tx3();
         case Type::NumericDisplay: return tx();
+        case Type::Logo:           return tx();
     }
     return tx();
 }

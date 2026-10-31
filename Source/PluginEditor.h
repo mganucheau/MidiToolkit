@@ -12,19 +12,20 @@
 #include "PianoRollEditor.h"
 #include "EffectsInspector.h"
 #include "Theme.h"
+#include "ClipNoteCache.h"
 
 namespace pflow {
 
 // Cupertino shell: toolbar / [sidebar | file table + preview | editor? | effects?]
 
-class MidiBrowserEditor : public juce::AudioProcessorEditor,
+class MidiToolkitEditor : public juce::AudioProcessorEditor,
                           public juce::Timer,
                           public juce::DragAndDropContainer,
                           private juce::DarkModeSettingListener
 {
 public:
-    explicit MidiBrowserEditor(MidiBrowserProcessor&);
-    ~MidiBrowserEditor() override;
+    explicit MidiToolkitEditor(MidiToolkitProcessor&);
+    ~MidiToolkitEditor() override;
 
     void paint(juce::Graphics&) override;
     void resized() override;
@@ -34,7 +35,10 @@ public:
     bool keyPressed(const juce::KeyPress&) override;
     void darkModeSettingChanged() override;
 
-    void setRootDirectory(const juce::File& dir, bool keepSelection = false);
+    void setRootDirectory(const juce::File& dir, bool keepSelection = false,
+                          bool scanSubdirs = false);
+    /** Rows currently shown in the file browser (folders + MIDI files). */
+    int browserEntryCount() const { return fileList.getNumEntries(); }
     /** Parse one MIDI file for preview without a full folder Scan. */
     void ensureAndSelectFile(const juce::File& file);
     void toggleEditorFold();
@@ -49,8 +53,11 @@ private:
     void rebuildEntries();
     /** Load notes for an indexed clip (metadata-only) before preview/play. */
     bool ensureClipNotesLoaded(int clipIndex);
-    /** Prefer a valid on-disk folder index; fall back to name listing. */
-    void refreshBrowseListingAsync();
+    /** Prefer a valid on-disk folder index; fall back to name listing.
+        selectPath restores the previous file. rescanIfMissing parses when the index is stale. */
+    void refreshBrowseListingAsync(const juce::String& selectPath = {},
+                                   bool rescanIfMissing = false);
+    void handleTrimClicked();
     /** Refilter the already-loaded clip list (no disk rescan). */
     void applyBrowserFilter();
     int displayForClip(int clipIdx) const;
@@ -65,6 +72,9 @@ private:
     void pushLiveFxToProcessor();
     void applyPassthroughUi();
     void togglePassthrough();
+    void toggleRecord();
+    void refreshRecordingRoll(const RecordingSnapshot& snap);
+    void finishRecording(const RecordingSnapshot& snap);
     void startDragExport();
     void startDragOriginalFile(const juce::File& file);
     void copyFileToFolder(const juce::File& file);
@@ -73,6 +83,8 @@ private:
     void applyLayoutState();
     void updateWindowLimits();
     void layoutContent();
+    void applySavedDefaultView();
+    void saveCurrentViewAsDefault();
     void toggleEffectsFold();
     /** Dim veil over file browser + piano UI while Passthrough is on. */
     class PassthroughVeil : public juce::Component
@@ -91,6 +103,36 @@ private:
         void mouseWheelMove(const juce::MouseEvent&, const juce::MouseWheelDetails&) override {}
     };
     PassthroughVeil passthroughVeil;
+
+    /** Drag handle between the file browser and the piano roll. */
+    class PaneSplitter : public juce::Component
+    {
+    public:
+        std::function<void()> onDragStart;
+        std::function<void(int dx)> onDrag;
+
+        void paint(juce::Graphics& g) override
+        {
+            g.setColour(colours::line());
+            g.fillRect(getLocalBounds().withSizeKeepingCentre(1, getHeight()));
+        }
+        void mouseDown(const juce::MouseEvent& e) override
+        {
+            dragOriginX = e.getScreenX();
+            if (onDragStart) onDragStart();
+        }
+        void mouseDrag(const juce::MouseEvent& e) override
+        {
+            if (onDrag) onDrag(e.getScreenX() - dragOriginX);
+        }
+        juce::MouseCursor getMouseCursor() override
+        {
+            return juce::MouseCursor::LeftRightResizeCursor;
+        }
+    private:
+        int dragOriginX = 0;
+    };
+    PaneSplitter browserRollSplitter;
     void showTweaksMenu();
     void refreshSidebar();
     void syncEffectsInspector();
@@ -98,11 +140,22 @@ private:
     void loadStarredClips(const juce::String& preferredPath = {});
     /** Mirror browser UI into the processor (survives editor teardown / host save). */
     void persistBrowserSession();
+    /** Write the shared session. Debounced so arrow-key browsing does not hit disk. */
+    void flushBrowserSession();
+    /** Preview/roll update once `clips[selectedIdx]` has resident notes. */
+    void finishClipSelection();
+    /** Copy locked section snapshots onto the selected clip.
+        resetUnlockedGroove drops unlocked groove tweaks so browsing plays the
+        file itself except for sections that are locked. */
+    void stampLockedSections(bool resetUnlockedGroove);
+    void captureLocksFromEdit(const ClipEdit& previous, const ClipEdit& next, const StepClip* clip);
+    void loadClipNotesAsync(int clipIndex, bool applyWhenReady);
+    void prefetchNearbyClips(int clipIndex);
     /** Rebuild folder/search/filters/selection from processor session state. */
     void restoreBrowserSession();
     void selectPathOrFirst(const juce::String& path);
-    /** Cancel in-flight scans and show the searching affordance. */
-    int beginBackgroundClipLoad();
+    /** Cancel in-flight scans. hideList covers the file list with the scan overlay. */
+    int beginBackgroundClipLoad(bool hideList = true);
     /** Hydrate clips from cached paths using FolderIndex metadata (no MIDI parse).
         Notes are still loaded lazily on select via ensureClipNotesLoaded. */
     void loadClipsFromPathsAsync(juce::StringArray paths,
@@ -127,7 +180,7 @@ private:
     ClipEdit selectedEdit() const;
     GrooveParams selectedGroove() const;
 
-    MidiBrowserProcessor& processorRef;
+    MidiToolkitProcessor& processorRef;
     PatternFlowLookAndFeel lnf;
 
     /** Hides tips when Settings → Show Tooltips is off; styled via LookAndFeel. */
@@ -162,10 +215,10 @@ private:
     class PreviewHeader : public juce::Component
     {
     public:
-        explicit PreviewHeader(MidiBrowserEditor& o) : owner(o) {}
+        explicit PreviewHeader(MidiToolkitEditor& o) : owner(o) {}
         void paint(juce::Graphics&) override;
         void mouseDown(const juce::MouseEvent&) override;
-        MidiBrowserEditor& owner;
+        MidiToolkitEditor& owner;
     };
     PreviewHeader previewHeader { *this };
 
@@ -196,6 +249,14 @@ private:
     std::atomic<int> folderScanGeneration { 0 };
     /** Bumps when browsing to a new folder so stale subdir lists are ignored. */
     std::atomic<int> browseListGeneration { 0 };
+    /** Bumps when the selected clip changes so a stale note parse is ignored. */
+    std::atomic<int> noteLoadGeneration { 0 };
+    int browseDirection = 1;
+    ClipNoteCache noteCache;
+    ClipEdit pendingCarriedScale;
+    bool havePendingCarriedScale = false;
+    bool sessionDirty = false;
+    double sessionDirtyAtMs = 0.0;
     bool sidebarScanning = false;
     /** Primary clip path -> all Finder locations (including primary) after dedupe. */
     std::map<juce::String, juce::StringArray> searchDuplicateLocations;
@@ -215,13 +276,35 @@ private:
     int selectedIdx = -1;
     KeyNavTarget keyNavTarget = KeyNavTarget::Browser;
     int lastWindowH = 700;
+    /** Height after the first layout. The window cannot shrink below this. */
+    int openedWindowH = 0;
+    int trackedBrowserContentW = -1;
+    int chromeApplyAttempts = 0;
     int browserColW = metrics::fileTableW;
+    /** User-dragged browser width while the piano roll is open. 0 keeps the default split. */
+    int browserPaneW = 0;
+    int splitterDragOrigin = 0;
+    int splitterDragSpan = 0;
     int layoutTargetW = 0;
     int layoutAnimFromW = 0;
+    bool layoutTracked = false;
+    bool trackedEditor = false;
+    bool trackedEffects = false;
+    bool trackedSidebar = false;
+    bool trackedPassthrough = false;
+    bool recording = false;
+    bool hasRecording = false;
+    bool trackedRecording = false;
+    int savedNonRecordW = 0;
+    StepClip recordedClip;
+    int savedNonPassW = 0;
+    int savedNonPassH = 0;
+    int passthroughWindowHeight() const;
+    void syncPassthroughWindowHeight();
     double layoutAnimStartMs = 0.0;
     static constexpr double kLayoutAnimMs = 220.0;
 
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MidiBrowserEditor)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MidiToolkitEditor)
 };
 
 } // namespace pflow

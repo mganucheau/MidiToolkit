@@ -1,4 +1,4 @@
-// ui.jsx — MidiBrowser control atoms. All visuals via CSS vars (see app theme).
+// ui.jsx — MidiToolkit control atoms. All visuals via CSS vars (see app theme).
 
 function Icon({ name, weight = '', size = 16, style = {}, className = '' }) {
   const w = weight ? `-${weight}` : '';

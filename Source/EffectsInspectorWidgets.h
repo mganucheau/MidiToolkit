@@ -1448,7 +1448,7 @@ public:
     int getHi() const { return hi; }
     bool isFullRange() const { return lo <= minV && hi >= maxV; }
 
-    int idealHeight() const { return kLabelH + toolkitRowGap() + kHistH + 4 + kTrackH; }
+    int idealHeight() const { return kLabelH + toolkitRowGap() + kHistH + 4 + kTrackH + 8; }
 
     void mouseDown(const juce::MouseEvent& e) override
     {
@@ -1466,7 +1466,7 @@ public:
         auto header = r.removeFromTop(kLabelH);
         if (sidebarLabelStyle)
         {
-            g.setFont(uiFontFixed(11.0f));
+            g.setFont(uiFont(11.0f));
             g.setColour(ds::tx2());
         }
         else
@@ -1477,17 +1477,14 @@ public:
         g.drawText(label, header.removeFromLeft(header.getWidth() / 2),
                    juce::Justification::centredLeft, true);
         g.setColour(t.accent);
-        g.setFont(sidebarLabelStyle ? uiFontFixed(11.0f) : inspectorFont());
+        g.setFont(sidebarLabelStyle ? uiFont(11.0f, true) : inspectorFont());
         const juce::String val = isFullRange() ? "Any"
             : (juce::String(lo) + juce::String::charToString((juce::juce_wchar) 0x2013) + juce::String(hi));
         g.drawText(val, header, juce::Justification::centredRight, true);
 
         r.removeFromTop(toolkitRowGap());
-        // Scale hist + track into whatever height the parent assigned (filter panel = 2 rows).
-        const int avail = juce::jmax(1, r.getHeight());
-        const int histH = juce::jmax(8, (avail - 4) * 2 / 5);
-        const int trackH = juce::jmax(8, avail - 4 - histH);
-        auto hist = r.removeFromTop(histH).toFloat();
+        // Fixed hist + track so the 14px thumbs stay inside the component.
+        auto hist = r.removeFromTop(kHistH).toFloat();
         const int n = juce::jmax(1, (int) bins.size());
         int peak = 1;
         for (int c : bins) peak = juce::jmax(peak, c);
@@ -1511,7 +1508,7 @@ public:
         r.removeFromTop(4);
         constexpr float kThumbD = 14.0f;
         const float thumbInset = kThumbD * 0.5f;
-        auto lane = r.removeFromTop(trackH).toFloat();
+        auto lane = r.removeFromTop(kTrackH).toFloat();
         auto track = lane.reduced(thumbInset, 0.0f).withSizeKeepingCentre(lane.getWidth() - thumbInset * 2.0f, 4.0f);
         g.setColour(ds::trk());
         g.fillRoundedRectangle(track, 2.0f);
@@ -2052,6 +2049,19 @@ public:
         repaint();
     }
 
+    /** Hide a row in every fold state (passthrough controls that do not apply). */
+    void setRowForcedHidden(juce::Component* c, bool hidden)
+    {
+        for (auto& r : rows)
+        {
+            if (r.comp != c) continue;
+            if (r.forcedHidden == hidden) return;
+            r.forcedHidden = hidden;
+            refreshRowVisibility();
+            return;
+        }
+    }
+
     bool isLocked() const { return locked; }
 
     /** Re-evaluate dirty-row visibility (call after param changes). */
@@ -2075,7 +2085,7 @@ public:
     {
         int n = 0;
         for (const auto& r : rows)
-            if (r.dirty && r.dirty()) ++n;
+            if (!r.forcedHidden && r.dirty && r.dirty()) ++n;
         return n;
     }
 
@@ -2224,6 +2234,7 @@ public:
         int h = kRowMinH;
         std::function<int()> heightFn;
         std::function<bool()> dirty;
+        bool forcedHidden = false;
         int height() const { return heightFn ? juce::jmax(1, heightFn()) : h; }
     };
     std::vector<Row> rows;
@@ -2267,6 +2278,7 @@ private:
 
     bool isRowShowing(const Row& r) const
     {
+        if (r.forcedHidden) return false;
         if (open) return true;
         return r.dirty && r.dirty();
     }

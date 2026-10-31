@@ -28,6 +28,10 @@ void drawIcon(juce::Graphics& g, const juce::String& name,
     {
         g.fillRoundedRectangle(cx - s * 0.85f, cy - s * 0.85f, s * 1.7f, s * 1.7f, px);
     }
+    else if (name == icons::record)
+    {
+        g.fillEllipse(cx - s * 0.72f, cy - s * 0.72f, s * 1.44f, s * 1.44f);
+    }
     else if (name == icons::caretUp || name == icons::caretDown)
     {
         const float dir = (name == icons::caretUp) ? -1.0f : 1.0f;
@@ -64,6 +68,17 @@ void drawIcon(juce::Graphics& g, const juce::String& name,
         };
         arrow(-1.0f);
         arrow(1.0f);
+    }
+    else if (name == icons::dragOut)
+    {
+        // Arrow entering a tray: the clip leaving the browser for a DAW track.
+        g.drawRoundedRectangle(cx - s * 0.05f, cy - s * 0.9f, s * 1.15f, s * 1.8f, s * 0.2f, px);
+        g.drawLine(cx - s * 1.35f, cy, cx + s * 0.15f, cy, px);
+        juce::Path head;
+        head.startNewSubPath(cx - s * 0.25f, cy - s * 0.42f);
+        head.lineTo(cx + s * 0.28f, cy);
+        head.lineTo(cx - s * 0.25f, cy + s * 0.42f);
+        g.strokePath(head, st);
     }
     else if (name == icons::scissors)
     {
@@ -153,7 +168,7 @@ void drawIcon(juce::Graphics& g, const juce::String& name,
         g.drawLine(cx - s * 0.7f, cy - s * 0.7f, cx + s * 0.7f, cy + s * 0.7f, px);
         g.drawLine(cx - s * 0.7f, cy + s * 0.7f, cx + s * 0.7f, cy - s * 0.7f, px);
     }
-    else if (name == icons::undo)
+    else if (name == icons::undo || name == icons::refresh)
     {
         p.addCentredArc(cx, cy, s * 0.85f, s * 0.85f, 0.0f, 0.6f,
                         juce::MathConstants<float>::twoPi - 0.6f, true);
@@ -370,13 +385,15 @@ IconBtn::IconBtn(const juce::String& iconName, const juce::String& tip)
 
 int IconBtn::captionWidth() const
 {
+    const float s = juce::jmax(0.5f, contentScale());
     if (caption.isEmpty())
-        return 34;
-    const auto font = uiFontFixed(12.0f, true);
+        return juce::roundToInt(34.0f * s);
+    const auto font = uiFont(12.0f, true);
     const int textW = (int) std::ceil(font.getStringWidthFloat(caption));
-    // Same side inset as the square sync button (34px around a 14px glyph).
-    constexpr int padH = 10;
-    return padH + 14 + 5 + textW + padH;
+    const int padH = juce::roundToInt(10.0f * s);
+    const int iconW = juce::roundToInt(14.0f * s);
+    const int gap = juce::roundToInt(5.0f * s);
+    return padH + iconW + gap + textW + padH;
 }
 
 void IconBtn::paintButton(juce::Graphics& g, bool over, bool down)
@@ -415,7 +432,7 @@ void IconBtn::paintButton(juce::Graphics& g, bool over, bool down)
             g.fillRoundedRectangle(b, radius);
         }
     }
-    const juce::Colour col = active ? ds::acc()
+    const juce::Colour col = active ? (activeTint.isTransparent() ? ds::acc() : activeTint)
                            : isEnabled() ? (over ? ds::tx() : ds::tx2())
                                          : ds::tx3().withAlpha(0.40f);
     const float inset = juce::jmin(b.getWidth(), b.getHeight()) * (0.5f - 0.32f * iconScale);
@@ -427,11 +444,12 @@ void IconBtn::paintButton(juce::Graphics& g, bool over, bool down)
     const float stroke = juce::jlimit(1.2f, 1.5f, 1.35f * contentScale() * textIconScale());
     if (caption.isNotEmpty())
     {
-        const auto font = uiFontFixed(12.0f, true);
+        const auto font = uiFont(12.0f, true);
         const int textW = (int) std::ceil(font.getStringWidthFloat(caption));
-        constexpr float iconW = 14.0f;
-        constexpr float padL = 10.0f;
-        constexpr float gap = 5.0f;
+        const float s = juce::jmax(0.5f, contentScale());
+        const float iconW = 14.0f * s;
+        const float padL = 10.0f * s;
+        const float gap = 5.0f * s;
         auto iconR = juce::Rectangle<float>(b.getX() + padL, b.getY(), iconW, b.getHeight())
                          .withSizeKeepingCentre(iconW, 14.0f);
         iconR.setX(b.getX() + padL);

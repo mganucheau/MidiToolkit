@@ -9,7 +9,7 @@ namespace pflow::test
 inline juce::File tempMidiFile(const juce::String& leafName)
 {
     return juce::File::getSpecialLocation(juce::File::tempDirectory)
-        .getChildFile("MidiBrowserTests")
+        .getChildFile("MidiToolkitTests")
         .getChildFile(leafName);
 }
 

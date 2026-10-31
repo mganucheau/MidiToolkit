@@ -21,10 +21,42 @@ struct BrowserSearch
     int complexityMax = 0; // 0 = no upper bound
     /** Bit i set = ClipKind i selected. 0 = any kind. */
     uint8_t kindMask = 0;
+    /** Bit i matches kFilterTimeSigs[i]. 0 = any time signature. */
+    uint16_t timeSigMask = 0;
     bool subdirs = true;
     /** Collapse content-identical hits from multiple folders into one row. */
     bool removeDuplicates = true;
 };
+
+/** A folder kept in the Library list, with the filters and scan scope used when it was saved. */
+struct SavedLibraryFolder
+{
+    juce::String path;
+    /** True when this library was saved while scanning subdirectories (flat file list). */
+    bool scanSubdirs = false;
+    BrowserSearch filter;
+};
+
+struct TimeSigOption
+{
+    int num;
+    int den;
+    const char* label;
+};
+
+inline constexpr TimeSigOption kFilterTimeSigs[] = {
+    { 4, 4, "4/4" }, { 3, 4, "3/4" }, { 2, 4, "2/4" }, { 6, 8, "6/8" },
+    { 5, 4, "5/4" }, { 7, 8, "7/8" }, { 12, 8, "12/8" }, { 9, 8, "9/8" },
+};
+inline constexpr int kNumFilterTimeSigs = (int) (sizeof(kFilterTimeSigs) / sizeof(kFilterTimeSigs[0]));
+
+inline int timeSigFilterBit(int num, int den)
+{
+    for (int i = 0; i < kNumFilterTimeSigs; ++i)
+        if (kFilterTimeSigs[i].num == num && kFilterTimeSigs[i].den == den)
+            return i;
+    return -1;
+}
 
 struct SavedSearchEntry
 {
@@ -37,7 +69,7 @@ struct SavedSearchEntry
     juce::StringArray resultPaths;
 };
 
-// 3c source-list: Open Folder → folder card → LIBRARY → SEARCH → SAVED SEARCHES.
+// Sidebar: joined search → LIBRARY (+ opens a folder) → SAVED SEARCHES.
 
 class FavoritesSidebar : public juce::Component,
                          public juce::SettableTooltipClient,
@@ -80,10 +112,10 @@ public:
     std::function<void(const juce::String&)> onRemoveDir;
     /** Keep / un-keep current folder in Library. */
     std::function<void()> onAddCurrent;
-    /** Rescan current folder (must not block UI). */
+    /** Rescan the current folder without changing subdirectory scope. */
     std::function<void()> onRefreshFolder;
-    /** Include Subfolders toggle — rescans scope immediately. */
-    std::function<void(bool)> onIncludeSubdirsChanged;
+    /** Scan this folder and its subdirectories (flat list, no folder rows). */
+    std::function<void()> onScanSubdirs;
     void setIncludeSubdirs(bool on);
     bool getIncludeSubdirs() const { return includeSubdirs; }
     void setCurrentClipCount(int n);
@@ -131,7 +163,7 @@ private:
     };
     enum class ChromeHit
     {
-        None, Settings, OpenFolder, Keep, Update, Filters
+        None, Settings, OpenFolder, Star, Refresh, ScanSubdirs, Filters
     };
 
     struct Row { RowKind kind; int index = -1; };
@@ -162,7 +194,7 @@ private:
     /** Keyboard / tooltip navigation targets in visual order. */
     enum class NavKind
     {
-        Row, OpenFolder, Keep, Update, Filters, Settings
+        Row, OpenFolder, Star, Refresh, ScanSubdirs, Filters, Settings
     };
     struct NavItem
     {
@@ -175,7 +207,7 @@ private:
     void updateTooltipForPos(juce::Point<int> pos);
     juce::Rectangle<int> navItemBounds(const NavItem&) const;
 
-    enum class LayoutKind { OpenBtn, FolderCard, Section, Row, Query, End };
+    enum class LayoutKind { OpenBtn, FolderCard, Section, Row, Query, Filter, End };
     struct LayoutItem
     {
         LayoutKind kind = LayoutKind::End;
@@ -188,8 +220,6 @@ private:
 
     IconBtn btnToggle { icons::sidebar, "Show or hide sidebar" };
     IconBtn btnSettings { icons::gear, "Settings" };
-    fx::FlatSwitch includeSwitch;
-    fx::FlatSwitch hideDupesSwitch;
     juce::StringArray dirs;
     juce::String active; // current folder path when a root is loaded
     std::vector<SavedSearchEntry> savedSearches;
@@ -222,9 +252,8 @@ private:
 
     juce::Rectangle<int> settingsRowBounds;
     juce::Rectangle<int> openFolderBounds, folderCardBounds;
-    juce::Rectangle<int> keepBtnBounds, updateBtnBounds, filtersBtnBounds;
-    juce::Rectangle<int> includeRowBounds, hideDupesRowBounds;
-    juce::Rectangle<int> libraryHeaderBounds, searchHeaderBounds, savedHeaderBounds;
+    juce::Rectangle<int> starBounds, refreshBtnBounds, scanBtnBounds, filtersBtnBounds;
+    juce::Rectangle<int> libraryHeaderBounds, libraryPlusBounds, searchHeaderBounds, savedHeaderBounds;
 
     std::vector<Row> rows;
 
@@ -238,6 +267,7 @@ private:
         void lookAndFeelChanged() override;
         void applyTo(BrowserSearch&) const;
         void loadFrom(const BrowserSearch&);
+        void resetFilters();
         void setHistograms(const std::vector<StepClip>& clips);
         int idealHeight() const;
         int activeGroupCount() const;
@@ -245,8 +275,12 @@ private:
     private:
         int rowH() const;
         int rangeH() const;
+        void mouseDown(const juce::MouseEvent&) override;
+        bool hideDuplicates = true;
+        juce::Rectangle<int> hideDupesBounds, resetBounds;
         fx::ChipGrid keyGrid;
         fx::ChipGrid kindGrid;
+        fx::ChipGrid timeSigGrid;
         fx::HistRangeSlider bpmRange { "TEMPO", 40, 240 };
         fx::HistRangeSlider barsRange { "BARS", 1, 64 };
         fx::HistRangeSlider complexityRange { "COMPLEXITY", 0, 100 };
@@ -267,8 +301,10 @@ private:
         void focusQuery();
         void blurQuery();
         bool isQueryFocused() const;
-        int idealHeight() const { return metrics::scaled(32); }
+        int idealHeight() const { return metrics::scaled(28); }
+        void setFilterActive(bool on);
         std::function<void()> onActivate;
+        std::function<void()> onToggleFilter;
         std::function<void()> onClear;
         std::function<void()> onDeactivate;
         std::function<void()> onSave;
@@ -306,8 +342,9 @@ private:
 
         QueryEditor queryField;
         IconBtn clearBtn { icons::x, "Clear search" };
-        juce::Rectangle<int> queryWell, saveChipBounds;
+        juce::Rectangle<int> queryWell, filterCapBounds, saveChipBounds;
         bool saveVisible = false;
+        bool filterActive = false;
     };
 
     FilterPanel filterPanel;
@@ -351,7 +388,9 @@ struct FileListEntry
     juce::StringArray locations;
 };
 
-class FileListPanel : public juce::Component, private juce::Timer
+class FileListPanel : public juce::Component,
+                      private juce::Timer,
+                      private juce::ScrollBar::Listener
 {
 public:
     enum class SortColumn
@@ -380,6 +419,8 @@ public:
     int getNumEntries() const { return (int) entries.size(); }
     void setPlaying(bool isPlaying);
     void setSearching(bool searching);
+    /** Shown on the scanning overlay. `total <= 0` hides the bar. */
+    void setScanProgress(int done, int total);
 
     void selectAdjacent(int direction);
     void grabBrowseFocus();
@@ -401,6 +442,8 @@ public:
     std::function<void(int)> onToggleStar;   // entry index
     std::function<void()> onEnterParent;
     std::function<void(int)> onEnterFolder;  // entry index
+    /** Double-click a file (not a folder). */
+    std::function<void(int)> onOpenInPianoRoll;
     std::function<void(const juce::File&)> onDragFile;
     std::function<void()> onEmptyOpenFolder;
     /** Fired when the user clicks the file list (sticky browser key-nav). */
@@ -427,6 +470,7 @@ private:
         void mouseDown(const juce::MouseEvent&) override;
         void mouseDrag(const juce::MouseEvent&) override;
         void mouseUp(const juce::MouseEvent&) override;
+        void mouseWheelMove(const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
         void clearDragState();
         FileListPanel& owner;
         int hoverRow = -1;
@@ -470,6 +514,11 @@ private:
     void paintColumnHeader(juce::Graphics&);
     void updateContentSize();
     void rebuildSortOrder();
+    void setScrollRow(int row);
+    void syncRowScroll();
+    int visibleRowCount() const;
+    int displayIndexAtContentY(int y) const;
+    void scrollBarMoved(juce::ScrollBar*, double newRangeStart) override;
     int displayToEntry(int displayIdx) const;
     int entryToDisplay(int entryIdx) const;
     juce::Rectangle<int> headerColumnBounds(SortColumn col) const;
@@ -482,6 +531,9 @@ private:
     juce::String emptyHint { "No files" };
     std::vector<FileListEntry> entries;
     std::vector<int> sortOrder;
+    /** entry index -> display row. Rebuilt with sortOrder. */
+    std::vector<int> displayOfEntry;
+    int scrollRow = 0;
     SortColumn sortColumn = SortColumn::Name;
     bool sortAscending = true;
     BrowserColumnVisibility columnsVisible;
@@ -492,10 +544,13 @@ private:
     int selected = -1;
     bool playing = false;
     bool searching = false;
+    int scanDone = 0;
+    int scanTotal = 0;
     double searchAnimT = 0.0;
     int lastViewX = 0;
 
     juce::Viewport viewport;
+    juce::ScrollBar rowScroll { true };
     ListContent content { *this };
     IconBtn scrollTopBtn { icons::caretUp, "Scroll to top" };
     void updateScrollTopButton();
