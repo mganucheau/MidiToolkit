@@ -385,86 +385,86 @@ IconBtn::IconBtn(const juce::String& iconName, const juce::String& tip)
 
 int IconBtn::captionWidth() const
 {
-    const float s = juce::jmax(0.5f, contentScale());
+    // Groove toggle: control-lg square, or 8 px padding + 10 px glyph + 4 px gap + caption.
+    const float sc = juce::jmax(0.5f, contentScale());
     if (caption.isEmpty())
-        return juce::roundToInt(34.0f * s);
-    const auto font = uiFont(12.0f, true);
+        return juce::roundToInt(24.0f * sc);
+    const auto font = uiFont(11.0f, true);
     const int textW = (int) std::ceil(font.getStringWidthFloat(caption));
-    const int padH = juce::roundToInt(10.0f * s);
-    const int iconW = juce::roundToInt(14.0f * s);
-    const int gap = juce::roundToInt(5.0f * s);
+    const int padH = juce::roundToInt(8.0f * sc);
+    const int iconW = juce::roundToInt(10.0f * sc);
+    const int gap = juce::roundToInt(4.0f * sc);
     return padH + iconW + gap + textW + padH;
 }
 
 void IconBtn::paintButton(juce::Graphics& g, bool over, bool down)
 {
     auto b = getLocalBounds().toFloat();
+    const float radius = ds::radius::sm;
+
     if (headerChrome)
     {
+        // Pane-header icon: no face; hover raises one surface step.
         if (over || down)
         {
-            g.setColour(ds::acc().withAlpha(0.12f));
-            g.fillRoundedRectangle(b, 5.0f);
-        }
-        const auto col = (active || over) ? ds::acc() : ds::tx3();
-        auto glyph = b.withSizeKeepingCentre(14.0f, 14.0f);
-        drawIcon(g, icon, glyph, col, 1.4f);
-        return;
-    }
-    const float radius = 6.0f;
-    if (ghost)
-    {
-        // Toolbar toggles: colour only — no pad, border, or wash.
-    }
-    else
-    {
-        // §6 icon button: control face + border + shadow.
-        g.setColour(down ? (usesDarkAppearance() ? ds::ctl().brighter(0.06f) : ds::ctl().darker(0.06f))
-                  : over ? (usesDarkAppearance() ? ds::ctl().brighter(0.03f) : ds::ctl().darker(0.03f))
-                         : ds::ctl());
-        g.fillRoundedRectangle(b, radius);
-        g.setColour(ds::ctlb());
-        g.drawRoundedRectangle(b.reduced(0.5f), radius, 1.0f);
-        ds::shadow::control(g, b, radius);
-        if (active)
-        {
-            g.setColour(ds::selsoft());
+            g.setColour(ds::surface300());
             g.fillRoundedRectangle(b, radius);
         }
-    }
-    const juce::Colour col = active ? (activeTint.isTransparent() ? ds::acc() : activeTint)
-                           : isEnabled() ? (over ? ds::tx() : ds::tx2())
-                                         : ds::tx3().withAlpha(0.40f);
-    const float inset = juce::jmin(b.getWidth(), b.getHeight()) * (0.5f - 0.32f * iconScale);
-    const float glyphScale = juce::jlimit(0.7f, 1.4f, textIconScale());
-    auto glyph = b.reduced(inset).withSizeKeepingCentre(
-        b.reduced(inset).getWidth() * glyphScale,
-        b.reduced(inset).getHeight() * glyphScale);
-    // §7: stroke 1.2–1.5
-    const float stroke = juce::jlimit(1.2f, 1.5f, 1.35f * contentScale() * textIconScale());
-    if (caption.isNotEmpty())
-    {
-        const auto font = uiFont(12.0f, true);
-        const int textW = (int) std::ceil(font.getStringWidthFloat(caption));
-        const float s = juce::jmax(0.5f, contentScale());
-        const float iconW = 14.0f * s;
-        const float padL = 10.0f * s;
-        const float gap = 5.0f * s;
-        auto iconR = juce::Rectangle<float>(b.getX() + padL, b.getY(), iconW, b.getHeight())
-                         .withSizeKeepingCentre(iconW, 14.0f);
-        iconR.setX(b.getX() + padL);
-        drawIcon(g, icon, iconR, col, stroke);
-        g.setFont(font);
-        g.setColour(col);
-        g.drawText(caption, (int) (b.getX() + padL + iconW + gap), (int) b.getY(),
-                   textW + 2, (int) b.getHeight(), juce::Justification::centredLeft, false);
+        const auto col = active ? ds::acc() : (over ? ds::ink() : ds::inkMuted());
+        drawIcon(g, icon, b.withSizeKeepingCentre(12.0f, 12.0f), col, 1.3f);
         if (hasKeyboardFocus(true))
             drawFocusRing(g, b, radius);
         return;
     }
-    drawIcon(g, icon, glyph, col, stroke);
-    if (!isEnabled())
-        g.setOpacity(0.40f);
+
+    const bool lit = active;
+    const juce::Colour litFill = activeTint.isTransparent() ? ds::acc() : activeTint;
+
+    if (lit)
+    {
+        // Lit toggle: state fill + matching border; glyph in on-accent / on-lit.
+        g.setColour(down ? litFill.darker(0.12f) : litFill);
+        g.fillRoundedRectangle(b, radius);
+    }
+    else if (!ghost)
+    {
+        // Unlit Groove toggle: surface-200 face, edge border; hover raises to surface-300.
+        g.setColour((over || down) ? ds::surface300() : ds::surface200());
+        g.fillRoundedRectangle(b, radius);
+        g.setColour(ds::edge());
+        g.drawRoundedRectangle(b.reduced(0.5f), radius, 1.0f);
+    }
+    else if (over || down)
+    {
+        g.setColour(ds::surface300());
+        g.fillRoundedRectangle(b, radius);
+    }
+
+    const juce::Colour col = lit ? (activeTint.isTransparent() ? ds::onAccent() : ds::onLit())
+                           : isEnabled() ? ds::ink()
+                                         : ds::inkFaint();
+    const float stroke = juce::jlimit(1.2f, 1.5f, 1.35f * contentScale());
+    const float glyphPx = juce::jmin(b.getHeight() - 8.0f,
+                                     10.0f * juce::jmax(0.7f, contentScale()) * iconScale * 1.2f);
+
+    if (caption.isNotEmpty())
+    {
+        const float sc = juce::jmax(0.5f, contentScale());
+        const auto font = uiFont(11.0f, true);
+        const float padL = 8.0f * sc, iconW = 10.0f * sc, gap = 4.0f * sc;
+        auto iconR = juce::Rectangle<float>(b.getX() + padL, b.getCentreY() - iconW * 0.5f, iconW, iconW);
+        drawIcon(g, icon, iconR, col, stroke);
+        g.setFont(font);
+        g.setColour(col);
+        g.drawText(caption, juce::Rectangle<float>(iconR.getRight() + gap, b.getY(),
+                                                   b.getRight() - iconR.getRight() - gap, b.getHeight()),
+                   juce::Justification::centredLeft, false);
+    }
+    else
+    {
+        drawIcon(g, icon, b.withSizeKeepingCentre(glyphPx, glyphPx), col, stroke);
+    }
+
     if (hasKeyboardFocus(true))
         drawFocusRing(g, b, radius);
 }
@@ -488,48 +488,44 @@ int ChipBtn::idealWidth() const
 
 void ChipBtn::paintButton(juce::Graphics& g, bool over, bool down)
 {
-    auto b = getLocalBounds().toFloat().reduced(0.5f);
-    const float r = cornerRadius >= 0.0f ? cornerRadius : b.getHeight() * 0.5f;
-    const bool well = cornerRadius >= 0.0f;
+    // Groove toggle / tag: square-ish (radius-sm), edge border when unlit, accent fill when lit.
+    auto b = getLocalBounds().toFloat();
+    const float r = ds::radius::sm;
 
-    juce::Colour fill = active ? colours::accent() : colours::elev();
-    if (!isEnabled()) fill = fill.withAlpha(0.5f);
-    else if (down) fill = fill.darker(0.12f);
-    else if (over) fill = fill.brighter(0.06f);
-    g.setColour(fill);
-    g.fillRoundedRectangle(b, r);
-    if (!active && !well)
+    if (active)
     {
-        g.setColour(accentText ? colours::accentLine() : colours::line());
-        g.drawRoundedRectangle(b, r, 1.0f);
+        g.setColour(down ? ds::acc().darker(0.12f) : ds::acc());
+        g.fillRoundedRectangle(b, r);
+    }
+    else
+    {
+        g.setColour((over || down) ? ds::surface300() : ds::surface200());
+        g.fillRoundedRectangle(b, r);
+        g.setColour(accentText ? ds::acc() : ds::edge());
+        g.drawRoundedRectangle(b.reduced(0.5f), r, 1.0f);
     }
 
-    juce::Colour col = active ? colours::accentInk()
-                     : accentText ? colours::accent()
-                                  : colours::text2();
+    juce::Colour col = active ? ds::onAccent()
+                     : accentText ? ds::acc()
+                                  : ds::ink();
     if (!isEnabled())
-        col = colours::text2();
+        col = ds::inkFaint();
 
-    auto area = getLocalBounds().reduced(9, 0);
+    auto area = getLocalBounds().reduced(6, 0);
     if (icon.isNotEmpty())
     {
-        auto ia = area.removeFromLeft(13).toFloat().withSizeKeepingCentre(13.0f, 13.0f);
-        drawIcon(g, icon, ia, col, 1.4f);
-        area.removeFromLeft(3);
+        auto ia = area.removeFromLeft(10).toFloat().withSizeKeepingCentre(10.0f, 10.0f);
+        drawIcon(g, icon, ia, col, 1.3f);
+        area.removeFromLeft(4);
     }
     if (trailingIcon.isNotEmpty())
     {
-        auto ta = area.removeFromRight(12).toFloat().withSizeKeepingCentre(10.0f, 10.0f);
+        auto ta = area.removeFromRight(10).toFloat().withSizeKeepingCentre(9.0f, 9.0f);
         drawIcon(g, trailingIcon, ta, col.withAlpha(over ? 1.0f : 0.85f), 1.3f);
     }
     g.setColour(col);
-    g.setFont(mono ? monoFont(13.0f, true) : uiFont(13.0f, true));
+    g.setFont(mono ? monoFont(11.0f) : uiFont(11.0f, true));
     g.drawFittedText(label, area, juce::Justification::centred, 1, 1.0f);
-    if (!isEnabled())
-    {
-        g.setColour(colours::elev().withAlpha(0.35f));
-        g.fillRoundedRectangle(b, r);
-    }
     if (hasKeyboardFocus(true))
         drawFocusRing(g, b, r);
 }

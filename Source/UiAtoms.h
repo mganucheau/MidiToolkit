@@ -67,11 +67,11 @@ namespace icons {
 void drawIcon(juce::Graphics& g, const juce::String& name,
               juce::Rectangle<float> bounds, juce::Colour colour, float px = 1.6f);
 
-/** §9 focused: 2px accent ring at 40% opacity, 2px offset. */
+/** Groove focus: 1px solid `focus` outline, offset 1px. */
 inline void drawFocusRing(juce::Graphics& g, juce::Rectangle<float> bounds, float radius)
 {
-    g.setColour(ds::acc().withAlpha(0.40f));
-    g.drawRoundedRectangle(bounds.expanded(2.0f), radius + 2.0f, 2.0f);
+    g.setColour(ds::focus());
+    g.drawRoundedRectangle(bounds.expanded(1.5f), radius + 1.0f, 1.0f);
 }
 
 // ── Small controls ───────────────────────────────────────────────────────────

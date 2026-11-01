@@ -295,7 +295,7 @@ PianoRollEditor::PianoRollEditor()
     addAndMakeVisible(timeRuler);
     rollViewport.setViewedComponent(&rollContent, false);
     rollViewport.setScrollBarsShown(true, true, true, true);
-    rollViewport.setScrollBarThickness(8);
+    rollViewport.setScrollBarThickness(10);
     rollViewport.onScrolled = [this]
     {
         gutter.repaint();

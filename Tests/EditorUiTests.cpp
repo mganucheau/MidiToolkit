@@ -482,50 +482,45 @@ TEST_CASE("Note filter legend follows key and mode", "[editorui]")
     REQUIRE(metrics::effectsPaneWidth() == metrics::scaled(300));
 }
 
-TEST_CASE("Header logo tracks the traffic-light zone and drops Toolkit before MIDI", "[editorui]")
+TEST_CASE("Header wordmark tracks the traffic-light zone and drops Toolkit before MIDI", "[editorui]")
 {
     juce::ScopedJuceInitialiser_GUI gui;
     tweaks().size.store((int) ContentSize::Medium);
 
     TransportBar bar;
-    bar.setSize(1600, 52);
+    bar.setSize(1600, 40);
     bar.setLightsZoneWidth(88);
     REQUIRE(bar.getTitleBounds().getX() == 88);
     REQUIRE(bar.logoWordmarkLevel() == 2);
 
     bar.setLightsZoneWidth(0);
-    REQUIRE(bar.getTitleBounds().getX() == 16);
+    REQUIRE(bar.getTitleBounds().getX() == 12);
 
-    const auto midiFont = ds::font(ds::Type::Logo);
-    const auto toolFont = uiFontFixed(14.0f, false).withExtraKerningFactor(-0.02f);
-    auto measure = [](const juce::Font& font, const juce::String& text)
+    const auto font = ds::font(ds::Type::Logo);
+    auto measure = [](const juce::Font& f, const juce::String& text)
     {
         juce::GlyphArrangement glyphs;
-        glyphs.addLineOfText(font, text, 0.0f, 0.0f);
+        glyphs.addLineOfText(f, text, 0.0f, 0.0f);
         if (glyphs.getNumGlyphs() <= 0)
             return 0.0f;
         return glyphs.getBoundingBox(0, glyphs.getNumGlyphs(), true).getWidth();
     };
-    const int textW = (int) std::ceil(measure(midiFont, "MIDI")
-                                    + measure(midiFont, " ")
-                                    + measure(toolFont, "Toolkit"));
-    REQUIRE(std::abs(bar.logoIdealWidth() - (16 + 6 + textW)) <= 1);
+    const int textW = (int) std::ceil(measure(font, "MIDI") + measure(font, " ") + measure(font, "Toolkit"));
+    REQUIRE(std::abs(bar.logoIdealWidth() - textW) <= 1);
 
-    bar.setLightsZoneWidth(16);
-    bool sawFull = false, sawMidi = false, sawGlyph = false;
+    bool sawFull = false, sawMidi = false, sawHidden = false;
     int previous = 3;
     for (int w = 1600; w >= 220; w -= 8)
     {
-        bar.setSize(w, 52);
+        bar.setSize(w, 40);
         const int level = bar.logoWordmarkLevel();
         REQUIRE(level <= previous);
-        REQUIRE(bar.getTitleBounds().getWidth() >= 16);
         if (level == 2) sawFull = true;
         if (level == 1) sawMidi = true;
-        if (level == 0) sawGlyph = true;
+        if (level == 0) sawHidden = true;
         previous = level;
     }
     REQUIRE(sawFull);
     REQUIRE(sawMidi);
-    REQUIRE(sawGlyph);
+    REQUIRE(sawHidden);
 }

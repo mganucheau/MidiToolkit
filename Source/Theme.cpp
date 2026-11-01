@@ -1,4 +1,5 @@
 #include "Theme.h"
+#include "BinaryData.h"
 #include <unordered_map>
 #include <cmath>
 
@@ -114,42 +115,57 @@ void drawInspectorDivider(juce::Graphics& g, juce::Rectangle<int> bounds)
     g.fillRect(bounds.getX(), bounds.getBottom() - 1, bounds.getWidth(), 1);
 }
 
-// ── Fonts (system stack) ─────────────────────────────────────────────────────
+// ── Fonts (Groove Panel: Archivo for the interface, IBM Plex Mono for live values) ──
 
-// Resolve the San Francisco system font. "-apple-system" is a CSS alias, not a
-// CoreText family name, so JUCE would silently fall back to Helvetica.
-static const juce::String& systemFontFamily(bool display)
+namespace {
+
+struct GrooveFaces
 {
-    struct Families
+    GrooveFaces()
     {
-        Families()
+        auto load = [](const char* data, int size)
         {
-            const auto all = juce::Font::findAllTypefaceNames();
-            text = all.contains("SF Pro Text") ? "SF Pro Text"
-                 : all.contains("Helvetica Neue") ? "Helvetica Neue"
-                 : juce::Font::getDefaultSansSerifFontName();
-            displayFamily = all.contains("SF Pro Display") ? "SF Pro Display" : text;
-            sf = text.startsWith("SF ");
-        }
-        juce::String text, displayFamily;
-        bool sf = false;
-    };
-    static const Families f;
-    return display ? f.displayFamily : f.text;
+            return juce::Typeface::createSystemTypefaceFor(data, (size_t) size);
+        };
+        regular  = load(BinaryData::ArchivoRegular_ttf,    BinaryData::ArchivoRegular_ttfSize);
+        medium   = load(BinaryData::ArchivoMedium_ttf,     BinaryData::ArchivoMedium_ttfSize);
+        semibold = load(BinaryData::ArchivoSemiBold_ttf,   BinaryData::ArchivoSemiBold_ttfSize);
+        bold     = load(BinaryData::ArchivoBold_ttf,       BinaryData::ArchivoBold_ttfSize);
+        monoReg  = load(BinaryData::IBMPlexMonoRegular_ttf, BinaryData::IBMPlexMonoRegular_ttfSize);
+        monoMed  = load(BinaryData::IBMPlexMonoMedium_ttf,  BinaryData::IBMPlexMonoMedium_ttfSize);
+    }
+    juce::Typeface::Ptr regular, medium, semibold, bold, monoReg, monoMed;
+};
+
+const GrooveFaces& grooveFaces()
+{
+    static const GrooveFaces faces;
+    return faces;
 }
 
-static bool systemFontIsSF()
+} // namespace
+
+juce::Font grooveFont(float height, int weight, bool mono)
 {
-    return systemFontFamily(false).startsWith("SF ");
+    const auto& f = grooveFaces();
+    juce::Typeface::Ptr face;
+    if (mono)
+        face = weight >= 500 ? f.monoMed : f.monoReg;
+    else if (weight >= 700) face = f.bold;
+    else if (weight >= 600) face = f.semibold;
+    else if (weight >= 500) face = f.medium;
+    else                    face = f.regular;
+
+    if (face == nullptr)
+        return juce::Font(juce::FontOptions(height));
+    return juce::Font(juce::FontOptions().withTypeface(face).withHeight(height));
 }
 
 static juce::Font makeUiFont(float pt, bool semibold)
 {
-    // SF Pro Display for large text, SF Pro Text for body (HIG threshold 20pt).
-    const auto& family = systemFontFamily(pt >= 20.0f);
-    const char* style = semibold ? (systemFontIsSF() ? "Semibold" : "Medium")
-                                 : "Regular";
-    return juce::Font(juce::FontOptions(pt).withName(family).withStyle(style));
+    // Groove Panel: labels (small text) are Medium, body copy Regular, emphasis SemiBold.
+    const int weight = semibold ? 600 : (pt < 12.0f ? 500 : 400);
+    return grooveFont(pt, weight, false);
 }
 
 juce::Font uiFont(float pt, bool semibold)
@@ -160,9 +176,9 @@ juce::Font uiFont(float pt, bool semibold)
 
 juce::Font monoFont(float pt, bool semibold)
 {
-    auto f = uiFont(pt, semibold);
-    f.setExtraKerningFactor(0.0f);
-    return f;
+    // Every live value is a readout: IBM Plex Mono so digits never shift.
+    juce::ignoreUnused(semibold);
+    return grooveFont(pt * contentScale() * textIconScale(), 500, true);
 }
 
 juce::Font uiFontFixed(float pt, bool semibold)
@@ -173,9 +189,8 @@ juce::Font uiFontFixed(float pt, bool semibold)
 
 juce::Font monoFontFixed(float pt, bool semibold)
 {
-    auto f = uiFontFixed(pt, semibold);
-    f.setExtraKerningFactor(0.0f);
-    return f;
+    juce::ignoreUnused(semibold);
+    return grooveFont(pt * textIconScale(), 500, true);
 }
 
 juce::Font fontFor(TextStyle s)
@@ -709,18 +724,28 @@ void PatternFlowLookAndFeel::drawScrollbar(juce::Graphics& g, juce::ScrollBar&, 
                                           int thumbStartPosition, int thumbSize,
                                           bool isMouseOver, bool isMouseDown)
 {
+    // Groove scrollbar: a square thumb on a hairline track, not a floating pill.
     auto track = juce::Rectangle<int>(x, y, width, height).toFloat();
+    g.setColour(ds::surface100());
+    g.fillRect(track);
+    g.setColour(ds::line());
+    if (isScrollbarVertical)
+        g.fillRect(track.getX(), track.getY(), 1.0f, track.getHeight());
+    else
+        g.fillRect(track.getX(), track.getY(), track.getWidth(), 1.0f);
+
     juce::Rectangle<float> thumb;
     if (isScrollbarVertical)
-        thumb = { track.getX(), track.getY() + (float) thumbStartPosition, track.getWidth(), (float) thumbSize };
+        thumb = { track.getX() + 2.0f, track.getY() + (float) thumbStartPosition, track.getWidth() - 3.0f, (float) thumbSize };
     else
-        thumb = { track.getX() + (float) thumbStartPosition, track.getY(), (float) thumbSize, track.getHeight() };
-    thumb = thumb.reduced(3.0f);
-    const float alpha = isMouseDown ? 0.9f : (isMouseOver ? 0.65f : 0.35f);
-    g.setColour(colours::textDim().withAlpha(alpha));
-    // Use the short axis so horizontal thumbs are pills like vertical ones.
-    const float r = juce::jmin(thumb.getWidth(), thumb.getHeight()) * 0.5f;
-    g.fillRoundedRectangle(thumb, r);
+        thumb = { track.getX() + (float) thumbStartPosition, track.getY() + 2.0f, (float) thumbSize, track.getHeight() - 3.0f };
+    if (thumb.isEmpty())
+        return;
+
+    g.setColour(isMouseDown ? ds::acc() : ds::surface300());
+    g.fillRect(thumb);
+    g.setColour(isMouseDown || isMouseOver ? ds::acc() : ds::edge());
+    g.drawRect(thumb, 1.0f);
 }
 
 void PatternFlowLookAndFeel::drawTooltip(juce::Graphics& g, const juce::String& text,

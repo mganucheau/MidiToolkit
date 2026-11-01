@@ -5,7 +5,7 @@
 
 namespace pflow {
 
-/** Cupertino 52px header: lights zone · app name · transport · drag chip · toggles. */
+/** Groove Panel 40px header: wordmark · BPM · play/stop · record · sync · through · panel toggles. */
 class TransportBar : public juce::Component,
                      private juce::Timer
 {
@@ -38,7 +38,7 @@ public:
     juce::Rectangle<int> getTitleBounds() const { return titleBounds; }
     /** Glyph + gap + “MIDI Toolkit”, independent of the current squeeze. */
     int logoIdealWidth() const;
-    /** 2 = MIDI Toolkit, 1 = MIDI, 0 = glyph only. */
+    /** 2 = MIDI Toolkit, 1 = MIDI, 0 = hidden. */
     int logoWordmarkLevel() const { return logoLevel; }
 
     std::function<void()> onPlayPause;
@@ -62,6 +62,7 @@ private:
     int logoMidiWidth() const;
 
     class StatusPill : public juce::Component,
+                       public juce::SettableTooltipClient,
                        private juce::Timer
     {
     public:
@@ -73,8 +74,13 @@ private:
 
         void setText(const juce::String& t);
         void paint(juce::Graphics&) override;
+        int idealWidth() const;
         void mouseDown(const juce::MouseEvent&) override;
+        void mouseDrag(const juce::MouseEvent&) override;
+        void mouseEnter(const juce::MouseEvent&) override;
+        void mouseExit(const juce::MouseEvent&) override;
         void mouseDoubleClick(const juce::MouseEvent&) override;
+        void beginEditing();
         bool keyPressed(const juce::KeyPress&) override;
         void focusLost(FocusChangeType) override;
         void timerCallback() override;
@@ -83,6 +89,8 @@ private:
         bool editing = false;
         juce::String editBuffer;
         bool pendingSyncToggle = false;
+        double value = 124.0;
+        double dragStartBpm = 124.0;
     };
 
     class DragChip : public ChipBtn

@@ -122,6 +122,8 @@ inline float textIconScale()
 
 // ── Fonts (system stack) ─────────────────────────────────────────────────────
 
+/** Groove Panel faces. weight: 400 / 500 / 600 / 700. mono = IBM Plex Mono (400 / 500). */
+juce::Font grooveFont(float height, int weight, bool mono = false);
 juce::Font uiFont(float pt, bool semibold = false);
 juce::Font monoFont(float pt, bool semibold = false);   // tabular-nums system font
 /** Same stack as uiFont/monoFont but ignores content-size scaling (Caps B2 inspector). */
@@ -162,10 +164,7 @@ namespace colours {
 
     inline juce::Colour accent()        { return ds::acc(); }
     /** Text/icons on accent fills — dark in dark mode for contrast on blue. */
-    inline juce::Colour accentInk()
-    {
-        return usesDarkAppearance() ? ds::bg() : juce::Colours::white;
-    }
+    inline juce::Colour accentInk()     { return ds::onAccent(); }
     inline juce::Colour accentSoft()    { return ds::selsoft(); }
     inline juce::Colour accentLine()    { return ds::acc().withAlpha(0.40f); }
     inline juce::Colour accentBright()  { return ds::note(); }
@@ -188,7 +187,7 @@ namespace colours {
     inline juce::Colour windowBorder()  { return ds::winbrd(); }
 
     /** Flagged: traffic-light red is allowed by §1 but not named in §2 — keep as system red. */
-    inline juce::Colour playhead()      { return ds::acc(); } // playhead uses accent per §1
+    inline juce::Colour playhead()      { return ds::play(); } // Groove: the playhead moves with the music
 
     inline juce::Colour bgLight()       { return panel2(); }
     inline juce::Colour bgLighter()     { return elev(); }
@@ -210,10 +209,10 @@ namespace colours {
     inline juce::Colour selection()     { return accentSoft(); }
     inline juce::Colour muteInactive()  { return controlFill(); }
     /** Flagged: traffic yellow/green (§1) — not in §2 table; derived as stron / kindKeys. */
-    inline juce::Colour muteYellow()    { return ds::stron(); }
-    inline juce::Colour soloBlue()      { return accent(); }
-    inline juce::Colour recordRed()     { return ds::kindPerc(); } // closest warm signal in §2
-    inline juce::Colour activeGreen()   { return ds::kindKeys(); }
+    inline juce::Colour muteYellow()    { return ds::active(); }
+    inline juce::Colour soloBlue()      { return ds::solo(); }
+    inline juce::Colour recordRed()     { return ds::record(); }
+    inline juce::Colour activeGreen()   { return ds::play(); }
     inline juce::Colour muteRed()       { return muteYellow(); }
     inline juce::Colour soloGreen()     { return activeGreen(); }
 
@@ -235,11 +234,11 @@ namespace metrics {
 
     constexpr float uiScale         = 1.0f;
 
-    constexpr float cornerRadius    = 10.0f;
+    constexpr float cornerRadius    = ds::radius::md;
     constexpr float windowRadius    = 12.0f;
-    constexpr float groupedRadius   = 8.0f;
-    constexpr float chipRadius      = 6.0f;
-    constexpr float controlRadius   = 5.0f;
+    constexpr float groupedRadius   = ds::radius::md;
+    constexpr float chipRadius      = ds::radius::sm;
+    constexpr float controlRadius   = ds::radius::sm;
     constexpr float browserFontSize = 12.0f;
 
     constexpr int grid              = 8;
@@ -250,7 +249,7 @@ namespace metrics {
     constexpr int previewH          = ds::region::previewH;
     constexpr int previewControlsH  = 32;
     constexpr int editorHeaderH     = 48;
-    constexpr int iconButtonSize    = 28;
+    constexpr int iconButtonSize    = 24;
     constexpr int comboTextPadding  = 6;
 
     // Logical (unscaled) layout widths — §5 regions.
@@ -270,9 +269,9 @@ namespace metrics {
     constexpr int foldedWindowW     = sidebarRailW + fileTableW;
     constexpr int openWindowW       = sidebarExpandedW + fileTableW + editorPaneW;
     /** Header chrome icon button (play / effects / etc.). */
-    constexpr int chromeIconBtn     = 28;
+    constexpr int chromeIconBtn     = 24;   // control-lg
     /** Drawn glyph size inside a chromeIconBtn with iconScale 1. */
-    constexpr int chromeIconGlyph   = 18;
+    constexpr int chromeIconGlyph   = 12;
 
     inline int transportH()       { return scaled(toolbarH); }
     inline int listRowH()         { return scaled(ds::region::listRowH); }

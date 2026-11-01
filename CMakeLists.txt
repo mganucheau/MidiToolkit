@@ -130,9 +130,12 @@ endif()
 
 juce_add_binary_data(MidiToolkitAssets
     SOURCES
-        Resources/Fonts/SchibstedGrotesk.ttf
-        Resources/Fonts/JetBrainsMono-Regular.ttf
-        Resources/Fonts/JetBrainsMono-SemiBold.ttf
+        Resources/Fonts/Archivo-Regular.ttf
+        Resources/Fonts/Archivo-Medium.ttf
+        Resources/Fonts/Archivo-SemiBold.ttf
+        Resources/Fonts/Archivo-Bold.ttf
+        Resources/Fonts/IBMPlexMono-Regular.ttf
+        Resources/Fonts/IBMPlexMono-Medium.ttf
 )
 
 target_include_directories(MidiToolkit PRIVATE

@@ -1885,7 +1885,7 @@ FileListPanel::FileListPanel()
     setWantsKeyboardFocus(true);
     viewport.setViewedComponent(&content, false);
     viewport.setScrollBarsShown(false, false);
-    viewport.setScrollBarThickness(8);
+    viewport.setScrollBarThickness(10);
     addAndMakeVisible(viewport);
 
     rowScroll.addListener(this);
