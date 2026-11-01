@@ -389,8 +389,7 @@ int IconBtn::captionWidth() const
     const float sc = juce::jmax(0.5f, contentScale());
     if (caption.isEmpty())
         return juce::roundToInt(24.0f * sc);
-    const auto font = uiFont(11.0f, true);
-    const int textW = (int) std::ceil(font.getStringWidthFloat(caption));
+    const int textW = (int) std::ceil(juce::GlyphArrangement::getStringWidth(uiFont(11.0f, true), caption));
     const int padH = juce::roundToInt(8.0f * sc);
     const int iconW = juce::roundToInt(10.0f * sc);
     const int gap = juce::roundToInt(4.0f * sc);

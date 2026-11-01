@@ -11,3 +11,8 @@ cmake-build-*/
 # Local plugin bundles (build outputs; do not commit)
 *.vst3/
 *.component/
+
+# Claude build bridge
+.build-request
+build.log
+build.status

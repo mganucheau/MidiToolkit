@@ -4,7 +4,7 @@ namespace pflow {
 
 namespace {
 constexpr float kHeaderIconScale = 1.0f;
-constexpr int kBtnW = 24;   // control-lg square
+
 constexpr int kBtnH = 24;
 }
 
@@ -27,13 +27,13 @@ void TransportBar::StatusPill::paint(juce::Graphics& g)
     g.drawRoundedRectangle(r.reduced(0.5f), ds::radius::sm, 1.0f);
 
     auto inner = r.reduced(6.0f, 0.0f);
-    const auto value = editing ? editBuffer + "|"
-                               : text.upToFirstOccurrenceOf(" ", false, false);
+    const auto shownText = editing ? editBuffer + "|"
+                                   : text.upToFirstOccurrenceOf(" ", false, false);
     const auto valueFont = ds::font(ds::Type::NumericDisplay);
     g.setColour(ds::ink().withMultipliedAlpha(foregroundAlpha));
     g.setFont(valueFont);
-    const float valueW = juce::GlyphArrangement::getStringWidth(valueFont, value) + 4.0f;
-    g.drawText(value, inner.removeFromLeft(valueW), juce::Justification::centredLeft, false);
+    const float valueW = juce::GlyphArrangement::getStringWidth(valueFont, shownText) + 4.0f;
+    g.drawText(shownText, inner.removeFromLeft(valueW), juce::Justification::centredLeft, false);
     g.setColour(ds::inkMuted().withMultipliedAlpha(foregroundAlpha));
     g.setFont(uiFontFixed(11.0f, false));
     g.drawText("BPM", inner, juce::Justification::centredLeft, false);
@@ -43,9 +43,9 @@ void TransportBar::StatusPill::paint(juce::Graphics& g)
 
 int TransportBar::StatusPill::idealWidth() const
 {
-    const auto value = text.upToFirstOccurrenceOf(" ", false, false);
+    const auto shownText = text.upToFirstOccurrenceOf(" ", false, false);
     const float v = juce::GlyphArrangement::getStringWidth(ds::font(ds::Type::NumericDisplay),
-                                                           value.length() < 3 ? juce::String("000") : value);
+                                                           shownText.length() < 3 ? juce::String("000") : shownText);
     const float l = juce::GlyphArrangement::getStringWidth(uiFontFixed(11.0f, false), "BPM");
     return (int) std::ceil(6.0f + v + 4.0f + l + 8.0f);
 }
@@ -152,7 +152,7 @@ bool TransportBar::StatusPill::keyPressed(const juce::KeyPress& key)
 int TransportBar::DragChip::idealWidth() const
 {
     const float sc = juce::jmax(0.5f, contentScale());
-    const int textW = (int) std::ceil(uiFont(11.0f, true).getStringWidthFloat("Drag to DAW")) + 2;
+    const int textW = (int) std::ceil(juce::GlyphArrangement::getStringWidth(uiFont(11.0f, true), "Drag to DAW")) + 2;
     return juce::roundToInt(8.0f * sc) * 2 + juce::roundToInt(10.0f * sc) + juce::roundToInt(4.0f * sc) + textW;
 }
 
@@ -434,7 +434,7 @@ void TransportBar::paintLogo(juce::Graphics& g, juce::Rectangle<int> area, float
     if (logoLevel <= 0 || area.getWidth() <= 0 || area.getHeight() <= 0)
         return;
 
-    const float centreY = area.getCentreY();
+    const float centreY = (float) area.getCentreY();
     const auto midiFont = ds::font(ds::Type::Logo);
     const auto toolFont = toolkitWordFont();
     float x = (float) area.getX();
@@ -596,15 +596,17 @@ void TransportBar::resized()
 
     auto fits = [&](int logo) { return (logo > 0 ? logo + groupGap : 0) + leftW + groupGap + rightW <= avail; };
 
-    if (!fits(0))
-    {
-        applyHeaderCaptions(false);
-        rightW = rightWidth();
-    }
+    // The wordmark steps down first; button words drop only once it is gone, so
+    // the wordmark never comes back as the window keeps getting narrower.
     int titleW = fullW;
     logoLevel = 2;
     if (!fits(fullW)) { titleW = midiW; logoLevel = 1; }
     if (!fits(midiW)) { titleW = 0;     logoLevel = 0; }
+    if (!fits(titleW))
+    {
+        applyHeaderCaptions(false);
+        rightW = rightWidth();
+    }
 
     titleBounds = { lightsZoneW, 0, titleW, h };
 
