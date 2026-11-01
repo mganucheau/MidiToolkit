@@ -130,6 +130,9 @@ TEST_CASE("Snapshot the Groove Panel editor states", "[snapshot]")
     proc.addSavedBrowserDir(dir.getFullPathName());
 
     std::unique_ptr<juce::AudioProcessorEditor> ed(proc.createEditor());
+    // The saved session may restore Light or System; snapshots are always Dark.
+    tweaks().appearance.store((int) Appearance::Dark);
+    ed->sendLookAndFeelChange();
     auto* browser = dynamic_cast<MidiToolkitEditor*>(ed.get());
     REQUIRE(browser != nullptr);
     ed->setVisible(true);

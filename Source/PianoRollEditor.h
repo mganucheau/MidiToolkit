@@ -86,6 +86,9 @@ public:
     /** Shown over an empty roll (e.g. "Play MIDI in, then press record" in Through). */
     void setEmptyHint(const juce::String& h) { emptyHint = h; repaint(); }
     juce::String emptyHint;
+    /** Input mode (Through): header reads "Input" with a record status instead of clip tools. */
+    void setInputMode(bool isInput, const juce::String& subtitle);
+    bool isInputMode() const { return inputMode; }
     void clearClip();
     /** Live take: notes grow in place and loop handles stay hidden. */
     void beginRecording(const StepClip& clip);
@@ -299,6 +302,12 @@ private:
     IconBtn btnZoomOut { icons::zoomOut, "Zoom out" };
     IconBtn btnZoomIn { icons::zoomIn, "Zoom in" };
     ChipBtn selBadge { "0 sel" };
+    ChipBtn btnRevertNotes { "Revert" };
+    bool inputMode = false;
+    juce::String inputSub;
+    bool hasNoteEdits() const;
+    void revertNoteEdits();
+    void layoutHeaderTools();
     std::vector<std::unique_ptr<ChipBtn>> badgeChips;
 
     KeyGutter gutter { *this };
@@ -310,10 +319,10 @@ private:
     ScalePanel scalePanel { *this };
 
     static constexpr int stripH = 0;
-    static constexpr int toolbarH = 40; // match Toolkit / browser headers
+    static constexpr int toolbarH = 26; // Groove device header (surface-300)
     static constexpr int gutterW = 56;
 
-    juce::Rectangle<int> zoomLabelBounds, gridLabelBounds;
+    juce::Rectangle<int> zoomLabelBounds, gridLabelBounds, titleBounds;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(PianoRollEditor)
 };

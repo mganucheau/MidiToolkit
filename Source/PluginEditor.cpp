@@ -2613,6 +2613,7 @@ void MidiToolkitEditor::applyPassthroughUi()
     rollEditor.setAlpha(1.0f);
     fileList.setEnabled(!pass);
     rollEditor.setEnabled(true);
+    rollEditor.setInputMode(pass || recording, recording && !pass ? "Live MIDI" : "Live MIDI through the Toolkit");
     if (pass)
     {
         // The roll shows live input in Through: the last take, or an empty roll.
@@ -2668,6 +2669,7 @@ void MidiToolkitEditor::toggleRecord()
         recordedClip.bars = 1;
         recordedClip.notesResident = true;
         applyLayoutState();
+        rollEditor.setInputMode(true, recordFromThrough ? "Live MIDI through the Toolkit" : "Live MIDI");
         rollEditor.beginRecording(recordedClip);
         return;
     }
@@ -2676,6 +2678,7 @@ void MidiToolkitEditor::toggleRecord()
     processorRef.setRecordingEnabled(false);
     transport.setRecording(false);
     finishRecording(processorRef.recordSnapshot());
+    rollEditor.setInputMode(processorRef.passthrough, "Live MIDI through the Toolkit");
     if (recordFromThrough)
     {
         recordFromThrough = false;

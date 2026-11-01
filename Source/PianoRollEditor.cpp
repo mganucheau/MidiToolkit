@@ -295,6 +295,11 @@ PianoRollEditor::PianoRollEditor()
     // Toolbar
     btnRevert.setVisible(false);
 
+    btnRevertNotes.setComponentID("btnRevertNotes");
+    btnRevertNotes.setTooltip("Discard note edits (moves, velocities, deletions)");
+    btnRevertNotes.onClick = [this] { revertNoteEdits(); };
+    addAndMakeVisible(btnRevertNotes);
+
     btnTrim.onClick = [this]
     {
         if (onTrimRequested)
@@ -431,6 +436,8 @@ void PianoRollEditor::setRecordingNotes(const StepClip& c, double playhead)
     timeRuler.repaint();
     velocityLane.repaint();
     gutter.repaint();
+    if (inputMode)
+        repaint(0, 0, getWidth(), toolbarH); // "Recording · bar N"
 }
 
 void PianoRollEditor::endRecording(const StepClip& c, const ClipEdit& e, const GrooveParams& g,
@@ -438,6 +445,7 @@ void PianoRollEditor::endRecording(const StepClip& c, const ClipEdit& e, const G
 {
     recordingVisual = false;
     setClip(c, e, g);
+    repaint(0, 0, getWidth(), toolbarH);
     setLoopSteps(0.0, loopEnd, true);
     setPlayheadStep(0.0, false);
 }
@@ -561,6 +569,7 @@ void PianoRollEditor::refreshControls()
     btnFold.setEnabled(hasClip && !foldPitches.empty());
     btnFold.active = folded;
     btnFold.repaint();
+    btnRevertNotes.setEnabled(hasClip && hasNoteEdits());
 
     // Edit badges / selection chip removed from the toolbar chrome.
     selBadge.setVisible(false);
@@ -1208,24 +1217,8 @@ void PianoRollEditor::resized()
     btnZoomOut.setVisible(false);
     selBadge.setVisible(false);
 
-    // Toolbar: Fold | ………… | Zoom [Clip/n bars] · Grid Size [div]
-    auto bar = r.removeFromTop(toolbarH).reduced(8, 6);
-    const int ctrlH = fx::kControlH;
-    const int foldW = juce::jmin(btnFold.idealWidth(), bar.getWidth() / 2);
-    btnFold.setBounds(bar.removeFromLeft(foldW).withSizeKeepingCentre(foldW, ctrlH));
-
-    const int zoomW = barsZoomPopup.idealWidth();
-    const int gridW = divisionPopup.idealWidth();
-    const int zoomLabelW = 38;
-    const int gridLabelW = 62;
-
-    divisionPopup.setBounds(bar.removeFromRight(gridW).withSizeKeepingCentre(gridW, ctrlH));
-    bar.removeFromRight(6);
-    gridLabelBounds = bar.removeFromRight(gridLabelW);
-    bar.removeFromRight(10);
-    barsZoomPopup.setBounds(bar.removeFromRight(zoomW).withSizeKeepingCentre(zoomW, ctrlH));
-    bar.removeFromRight(6);
-    zoomLabelBounds = bar.removeFromRight(zoomLabelW);
+    titleBounds = r.removeFromTop(toolbarH).reduced(8, 0);
+    layoutHeaderTools();
 
     const int laneH = velocityOpen ? VelocityLane::headerH + VelocityLane::laneH
                                    : VelocityLane::headerH;
@@ -1265,15 +1258,145 @@ void PianoRollEditor::layoutScaleControls(juce::Rectangle<int> strip)
 
 void PianoRollEditor::paint(juce::Graphics& g)
 {
-    g.setColour(colours::panel());
+    g.setColour(ds::surface100());
     g.fillRect(getLocalBounds());
-    g.setColour(colours::line());
+    g.setColour(ds::surface300());
+    g.fillRect(0, 0, getWidth(), toolbarH);
+    g.setColour(ds::line());
     g.fillRect(0, toolbarH - 1, getWidth(), 1);
 
-    g.setFont(uiFont(11.5f, false));
-    g.setColour(colours::text2());
-    g.drawText("Zoom", zoomLabelBounds, juce::Justification::centredRight, false);
-    g.drawText("Grid Size", gridLabelBounds, juce::Justification::centredRight, false);
+    // Title · subtitle (ellipsised into whatever the tools leave free)
+    auto t = titleBounds;
+    const juce::String title = inputMode ? "Input" : "Piano Roll";
+    juce::String sub;
+    if (inputMode)
+        sub = inputSub;
+    else if (hasClip)
+        sub = clip.name + juce::String::fromUTF8(" \u00b7 ") + juce::String(juce::jmax(1, resolved.bars))
+              + (resolved.bars == 1 ? " bar" : " bars");
+
+    const auto titleFont = uiFontFixed(11.0f, true);
+    g.setFont(titleFont);
+    g.setColour(ds::ink());
+    const int tw = juce::jmin(t.getWidth(),
+                              (int) std::ceil(juce::GlyphArrangement::getStringWidth(titleFont, title)) + 1);
+    g.drawText(title, t.removeFromLeft(tw), juce::Justification::centredLeft, false);
+    t.removeFromLeft(6);
+
+    if (inputMode)
+    {
+        // Record status on the right: ● Recording · bar N  /  Press record to capture
+        const bool rec = recordingVisual;
+        const juce::String status = rec ? "Recording " + juce::String::fromUTF8("\u00b7")
+                                            + " bar " + juce::String((int) (playheadStep / kStepsPerBar) + 1)
+                                        : juce::String("Press record to capture");
+        const auto sf = uiFontFixed(11.0f, false);
+        const int sw = (int) std::ceil(juce::GlyphArrangement::getStringWidth(sf, status)) + 1;
+        auto right = getLocalBounds().removeFromTop(toolbarH).reduced(8, 0);
+        auto sb = right.removeFromRight(juce::jmin(right.getWidth() / 2, sw));
+        const auto col = rec ? ds::record() : ds::inkMuted();
+        g.setColour(col);
+        g.setFont(sf);
+        g.drawText(status, sb, juce::Justification::centredLeft, true);
+        auto dot = juce::Rectangle<float>(8.0f, 8.0f).withCentre({ (float) sb.getX() - 8.0f, (float) sb.getCentreY() });
+        g.fillEllipse(dot);
+        t.setRight(juce::jmin(t.getRight(), sb.getX() - 20));
+    }
+
+    if (sub.isNotEmpty() && t.getWidth() > 16)
+    {
+        g.setFont(monoFontFixed(10.5f));
+        g.setColour(ds::inkMuted());
+        g.drawText(sub, t, juce::Justification::centredLeft, true);
+    }
+
+    if (!inputMode)
+    {
+        g.setFont(uiFontFixed(11.0f, false));
+        g.setColour(ds::inkMuted());
+        if (!zoomLabelBounds.isEmpty())
+            g.drawText("Zoom", zoomLabelBounds, juce::Justification::centredRight, false);
+        if (!gridLabelBounds.isEmpty())
+            g.drawText("Snap", gridLabelBounds, juce::Justification::centredRight, false);
+    }
+}
+
+void PianoRollEditor::layoutHeaderTools()
+{
+    // Header (right to left): Revert · Snap [div] · Zoom [Clip/n] · Fold
+    auto bar = titleBounds;
+    const int ctrlH = 18; // Groove control-md
+    const bool tools = !inputMode;
+    btnFold.setVisible(tools);
+    barsZoomPopup.setVisible(tools);
+    divisionPopup.setVisible(tools);
+    btnRevertNotes.setVisible(tools);
+    zoomLabelBounds = gridLabelBounds = {};
+    if (!tools)
+    {
+        titleBounds = bar;
+        return;
+    }
+
+    auto place = [&bar](juce::Component& c, int w)
+    {
+        c.setBounds(bar.removeFromRight(w).withSizeKeepingCentre(w, ctrlH));
+        bar.removeFromRight(4);
+    };
+    // Title + a short subtitle need ~150px; drop labels first, then Zoom.
+    const int revertW = btnRevertNotes.idealWidth();
+    const int gridW = juce::jmax(46, divisionPopup.idealWidth() - 8);
+    const int zoomW = juce::jmax(56, barsZoomPopup.idealWidth() - 8);
+    const int foldW = btnFold.idealWidth();
+    const int labels = 26 + 4 + 30 + 4;
+    const int full = revertW + gridW + zoomW + foldW + 4 * 4 + 8 + labels;
+    const bool showLabels = bar.getWidth() - full >= 150;
+    const bool showZoom = bar.getWidth() - (full - labels) >= 120;
+
+    place(btnRevertNotes, revertW);
+    bar.removeFromRight(4);
+    place(divisionPopup, gridW);
+    if (showLabels) { gridLabelBounds = bar.removeFromRight(26); bar.removeFromRight(8); }
+    barsZoomPopup.setVisible(showZoom);
+    if (showZoom)
+    {
+        place(barsZoomPopup, zoomW);
+        if (showLabels) { zoomLabelBounds = bar.removeFromRight(30); bar.removeFromRight(8); }
+    }
+    place(btnFold, foldW);
+    bar.removeFromRight(4);
+    titleBounds = bar;
+}
+
+void PianoRollEditor::setInputMode(bool isInput, const juce::String& subtitle)
+{
+    if (inputMode == isInput && inputSub == subtitle)
+        return;
+    inputMode = isInput;
+    inputSub = subtitle;
+    resized();
+    repaint();
+}
+
+bool PianoRollEditor::hasNoteEdits() const
+{
+    return !edit.moves.empty() || !edit.velocities.empty() || !edit.deleted.empty();
+}
+
+void PianoRollEditor::revertNoteEdits()
+{
+    if (!hasNoteEdits())
+        return;
+    edit.moves.clear();
+    edit.velocities.clear();
+    edit.deleted.clear();
+    selection.clear();
+    rebuildResolved();
+    refreshControls();
+    rollContent.repaint();
+    velocityLane.repaint();
+    if (onEditChanged)
+        onEditChanged(edit);
 }
 
 void PianoRollEditor::paintOverChildren(juce::Graphics& g)
