@@ -332,19 +332,22 @@ MidiToolkitEditor::MidiToolkitEditor(MidiToolkitProcessor& p)
             rootDir = juce::File(processorRef.lastBrowserDir);
         if (!rootDir.isDirectory() || sidebarScanning)
             return;
-        sidebar.setIncludeSubdirs(true);
-        recursiveBrowse = true;
-        setBrowseMode(0);
-        starredFilter = false;
-        sidebar.setStarredFilter(false);
-        activeSavedSearchIdx = -1;
+        const bool subdirs = sidebar.getIncludeSubdirs();
+        recursiveBrowse = subdirs;
+        if (subdirs)
+        {
+            setBrowseMode(0);
+            starredFilter = false;
+            sidebar.setStarredFilter(false);
+            activeSavedSearchIdx = -1;
+        }
         if (processorRef.savedBrowserDirs.contains(rootDir.getFullPathName()))
         {
             SavedLibraryFolder folder;
             folder.path = rootDir.getFullPathName();
-            folder.scanSubdirs = true;
+            folder.scanSubdirs = subdirs;
             folder.filter = sidebar.getFilter();
-            folder.filter.subdirs = true;
+            folder.filter.subdirs = subdirs;
             processorRef.saveLibraryFolder(folder, true);
         }
         rescanFolder(true);

@@ -1031,6 +1031,10 @@ public:
     bool fitContent = false;
     /** Sidebar filter: match Include Subfolders / Favorites label styling. */
     bool sidebarLabelStyle = false;
+    /** Header toggles the chip body. Effects inspector leaves this off. */
+    bool collapsible = false;
+    bool collapsed = true;
+    std::function<void()> onCollapsedChanged;
     /** Selected index treated as the untouched default (summary in tx3). */
     int neutralIndex = 0;
     juce::String hint;
@@ -1104,17 +1108,17 @@ public:
 
     int idealHeight() const
     {
-        if (labels.isEmpty()) return kLabelH;
+        if (labels.isEmpty() || (collapsible && collapsed)) return headerStrip();
         if (!fitContent)
         {
             const int rows = (labels.size() + columns - 1) / juce::jmax(1, columns);
-            int h = kLabelH + 7 + rows * kChipH + juce::jmax(0, rows - 1) * kChipGap;
+            int h = headerStrip() + 7 + rows * kChipH + juce::jmax(0, rows - 1) * kChipGap;
             if (hint.isNotEmpty()) h += 4 + 14;
             return h;
         }
         const int w = juce::jmax(120, getWidth() > 10 ? getWidth()
                                     : metrics::effectsPaneWidth() - kContentPadX - kContentPadR);
-        int h = kLabelH + 7 + measureWrappedHeight(w);
+        int h = headerStrip() + 7 + measureWrappedHeight(w);
         if (hint.isNotEmpty()) h += 4 + 14;
         return h;
     }
@@ -1131,7 +1135,7 @@ public:
     {
         rebuildChipBounds();
         const auto& t = inspectorTokens();
-        auto header = getLocalBounds().removeFromTop(kLabelH);
+        auto header = getLocalBounds().removeFromTop(headerStrip());
         if (sidebarLabelStyle)
         {
             g.setFont(uiFontFixed(11.0f));
@@ -1142,12 +1146,27 @@ public:
             g.setFont(inspectorFont());
             g.setColour(t.rowLabel);
         }
-        g.drawText(title, header.removeFromLeft(header.getWidth() / 2),
-                   juce::Justification::centredLeft, true);
+        if (collapsible)
+        {
+            const int titleW = (int) std::ceil(g.getCurrentFont().getStringWidthFloat(title));
+            auto titleR = header.removeFromLeft(juce::jmin(titleW, juce::jmax(0, header.getWidth() - 48)));
+            g.drawText(title, titleR, juce::Justification::centredLeft, true);
+            header.removeFromLeft(4);
+            auto chev = header.removeFromLeft(12).toFloat().withSizeKeepingCentre(10.0f, 10.0f);
+            drawStrokedChevron(g, chev, sidebarLabelStyle ? ds::tx3() : t.valueText, !collapsed);
+        }
+        else
+        {
+            g.drawText(title, header.removeFromLeft(header.getWidth() / 2),
+                       juce::Justification::centredLeft, true);
+        }
         g.setFont(sidebarLabelStyle ? uiFontFixed(11.0f) : inspectorFont());
         const bool summaryDefault = getSelectedIndex() == neutralIndex;
         g.setColour(summaryDefault ? t.valueText : t.accent);
         g.drawText(selectedSummary(), header, juce::Justification::centredRight, true);
+
+        if (collapsible && collapsed)
+            return;
 
         for (int i = 0; i < labels.size(); ++i)
         {
@@ -1175,7 +1194,15 @@ public:
                 g.setColour(t.controlHairline);
                 g.drawRoundedRectangle(cell.reduced(0.5f), 6.0f, 1.0f);
             }
-            g.setFont(uiFontFixed(kAnnotPt, on));
+            float chipPt = kAnnotPt;
+            if (sidebarLabelStyle)
+            {
+                const float tw = juce::GlyphArrangement::getStringWidth(
+                    uiFontFixed(kAnnotPt, on), labels[i]);
+                if (tw > cell.getWidth() - 6.0f)
+                    chipPt = 9.0f;
+            }
+            g.setFont(uiFontFixed(chipPt, on));
             g.setColour(on ? onAccentColour()
                            : (cand ? t.accent : t.headerText));
             g.drawText(labels[i], cell.toNearestInt(), juce::Justification::centred, false);
@@ -1191,6 +1218,17 @@ public:
 
     void mouseDown(const juce::MouseEvent& e) override
     {
+        if (collapsible && e.y < headerStrip())
+        {
+            collapsed = !collapsed;
+            layoutDirty = true;
+            repaint();
+            if (onCollapsedChanged)
+                onCollapsedChanged();
+            return;
+        }
+        if (collapsible && collapsed)
+            return;
         rebuildChipBounds();
         const int idx = hitIndex(e.getPosition());
         if (idx < 0) return;
@@ -1212,6 +1250,8 @@ private:
     static constexpr int kChipH = 24;
     static constexpr int kChipGap = 4;
     static constexpr int kChipPadX = 10;
+
+    int headerStrip() const { return collapsible ? 22 : kLabelH; }
 
     int chipWidthFor(int idx) const
     {
@@ -1243,7 +1283,9 @@ private:
             return;
         layoutDirty = false;
         chipBounds.assign((size_t) labels.size(), {});
-        auto body = getLocalBounds().withTrimmedTop(kLabelH + 7);
+        if (collapsible && collapsed)
+            return;
+        auto body = getLocalBounds().withTrimmedTop(headerStrip() + 7);
         if (hint.isNotEmpty())
             body.removeFromBottom(4 + 14);
         if (body.getWidth() <= 0 || labels.isEmpty())
@@ -1258,10 +1300,13 @@ private:
             for (int i = 0; i < labels.size(); ++i)
             {
                 const int r = i / cols, c = i % cols;
-                chipBounds[(size_t) i] = juce::Rectangle<int>(
+                auto cell = juce::Rectangle<int>(
                     body.getX() + (int) ((float) c * (cellW + gap)),
                     body.getY() + r * (kChipH + kChipGap),
                     (int) cellW, (int) cellH);
+                if (c == cols - 1)
+                    cell.setRight(body.getRight());
+                chipBounds[(size_t) i] = cell;
             }
             return;
         }
@@ -1395,6 +1440,10 @@ class HistRangeSlider : public juce::Component, public juce::SettableTooltipClie
 public:
     /** Sidebar filter: match Include Subfolders / Favorites label styling. */
     bool sidebarLabelStyle = false;
+    /** Header toggles the histogram. Effects inspector leaves this off. */
+    bool collapsible = false;
+    bool collapsed = true;
+    std::function<void()> onCollapsedChanged;
 
     HistRangeSlider(const juce::String& l, int mn, int mx)
         : label(l), minV(mn), maxV(mx), lo(mn), hi(mx), defLo(mn), defHi(mx)
@@ -1448,22 +1497,43 @@ public:
     int getHi() const { return hi; }
     bool isFullRange() const { return lo <= minV && hi >= maxV; }
 
-    int idealHeight() const { return kLabelH + toolkitRowGap() + kHistH + 4 + kTrackH + 8; }
+    int idealHeight() const
+    {
+        if (collapsible && collapsed)
+            return headerStrip();
+        return headerStrip() + toolkitRowGap() + kHistH + 4 + kTrackH + 8;
+    }
 
     void mouseDown(const juce::MouseEvent& e) override
     {
+        if (collapsible && e.y < headerStrip())
+        {
+            collapsed = !collapsed;
+            dragThumb = Thumb::None;
+            repaint();
+            if (onCollapsedChanged)
+                onCollapsedChanged();
+            return;
+        }
+        if (collapsible && collapsed)
+            return;
         if (!hasKeyboardFocus(true)) grabKeyboardFocus();
         dragThumb = hitThumb(e.position.x);
         setFromX(e.position.x);
     }
     void mouseDrag(const juce::MouseEvent& e) override { setFromX(e.position.x); }
-    void mouseDoubleClick(const juce::MouseEvent&) override { setRange(defLo, defHi); }
+    void mouseDoubleClick(const juce::MouseEvent& e) override
+    {
+        if (collapsible && e.y < headerStrip())
+            return;
+        setRange(defLo, defHi);
+    }
 
     void paint(juce::Graphics& g) override
     {
         const auto& t = inspectorTokens();
         auto r = getLocalBounds();
-        auto header = r.removeFromTop(kLabelH);
+        auto header = r.removeFromTop(headerStrip());
         if (sidebarLabelStyle)
         {
             g.setFont(uiFont(11.0f));
@@ -1474,13 +1544,28 @@ public:
             g.setFont(inspectorFont());
             g.setColour(t.rowLabel);
         }
-        g.drawText(label, header.removeFromLeft(header.getWidth() / 2),
-                   juce::Justification::centredLeft, true);
-        g.setColour(t.accent);
+        if (collapsible)
+        {
+            const int titleW = (int) std::ceil(g.getCurrentFont().getStringWidthFloat(label));
+            auto titleR = header.removeFromLeft(juce::jmin(titleW, juce::jmax(0, header.getWidth() - 48)));
+            g.drawText(label, titleR, juce::Justification::centredLeft, true);
+            header.removeFromLeft(4);
+            auto chev = header.removeFromLeft(12).toFloat().withSizeKeepingCentre(10.0f, 10.0f);
+            drawStrokedChevron(g, chev, sidebarLabelStyle ? ds::tx3() : t.valueText, !collapsed);
+        }
+        else
+        {
+            g.drawText(label, header.removeFromLeft(header.getWidth() / 2),
+                       juce::Justification::centredLeft, true);
+        }
+        g.setColour(isFullRange() ? t.valueText : t.accent);
         g.setFont(sidebarLabelStyle ? uiFont(11.0f, true) : inspectorFont());
         const juce::String val = isFullRange() ? "Any"
             : (juce::String(lo) + juce::String::charToString((juce::juce_wchar) 0x2013) + juce::String(hi));
         g.drawText(val, header, juce::Justification::centredRight, true);
+
+        if (collapsible && collapsed)
+            return;
 
         r.removeFromTop(toolkitRowGap());
         // Fixed hist + track so the 14px thumbs stay inside the component.
@@ -1535,6 +1620,8 @@ private:
     static constexpr int kLabelH = 18;
     static constexpr int kHistH = 16;
     static constexpr int kTrackH = 20;
+
+    int headerStrip() const { return collapsible ? 22 : kLabelH; }
     enum class Thumb { None, Lo, Hi };
     Thumb dragThumb = Thumb::None;
 
@@ -1552,6 +1639,8 @@ private:
     {
         constexpr float kInset = 7.0f;
         const float trackW = juce::jmax(1.0f, (float) getWidth() - kInset * 2.0f);
+        if (dragThumb == Thumb::None)
+            return;
         const float t = juce::jlimit(0.0f, 1.0f, (x - kInset) / trackW);
         const int v = minV + (int) std::lround(t * (float) (maxV - minV));
         if (dragThumb == Thumb::Lo) setRange(juce::jmin(v, hi), hi);

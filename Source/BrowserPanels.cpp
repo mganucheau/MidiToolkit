@@ -91,6 +91,9 @@ FavoritesSidebar::FilterPanel::FilterPanel()
     keyGrid.columns = 6;
     keyGrid.multiSelect = true;
     keyGrid.sidebarLabelStyle = true;
+    keyGrid.collapsible = true;
+    keyGrid.collapsed = true;
+    keyGrid.onCollapsedChanged = [this] { if (onLayoutChanged) onLayoutChanged(); };
     keyGrid.setItems(keys);
     keyGrid.onChange = [this]
     {
@@ -105,6 +108,9 @@ FavoritesSidebar::FilterPanel::FilterPanel()
     kindGrid.columns = 3;
     kindGrid.multiSelect = true;
     kindGrid.sidebarLabelStyle = true;
+    kindGrid.collapsible = true;
+    kindGrid.collapsed = true;
+    kindGrid.onCollapsedChanged = [this] { if (onLayoutChanged) onLayoutChanged(); };
     kindGrid.setItems(kinds);
     kindGrid.onChange = [this]
     {
@@ -119,6 +125,9 @@ FavoritesSidebar::FilterPanel::FilterPanel()
     timeSigGrid.columns = 4;
     timeSigGrid.multiSelect = true;
     timeSigGrid.sidebarLabelStyle = true;
+    timeSigGrid.collapsible = true;
+    timeSigGrid.collapsed = true;
+    timeSigGrid.onCollapsedChanged = [this] { if (onLayoutChanged) onLayoutChanged(); };
     timeSigGrid.setItems(timeSigs);
     timeSigGrid.onChange = [this]
     {
@@ -129,6 +138,9 @@ FavoritesSidebar::FilterPanel::FilterPanel()
     for (auto* range : { &bpmRange, &barsRange, &complexityRange })
     {
         range->sidebarLabelStyle = true;
+        range->collapsible = true;
+        range->collapsed = true;
+        range->onCollapsedChanged = [this] { if (onLayoutChanged) onLayoutChanged(); };
         range->onChange = [this](int, int)
         {
             if (onCriteriaChanged) onCriteriaChanged();
@@ -145,27 +157,35 @@ void FavoritesSidebar::FilterPanel::lookAndFeelChanged()
     repaint();
 }
 
-int FavoritesSidebar::FilterPanel::rowH() const
-{
-    return sidebarRowH();
-}
-
-int FavoritesSidebar::FilterPanel::rangeH() const
-{
-    return juce::jmax(rowH() * 2, bpmRange.idealHeight());
-}
-
 int FavoritesSidebar::FilterPanel::idealHeight() const
 {
-    const int gap = metrics::scaled(12);
-    const int rh = rangeH();
-    return keyGrid.idealHeight() + gap
+    const int gap = metrics::scaled(4);
+    const int sub = metrics::scaled(28);
+    return sub + metrics::scaled(8)
+         + keyGrid.idealHeight() + gap
          + kindGrid.idealHeight() + gap
          + timeSigGrid.idealHeight() + gap
-         + rh + gap
-         + rh + gap
-         + rh + gap
+         + bpmRange.idealHeight() + gap
+         + barsRange.idealHeight() + gap
+         + complexityRange.idealHeight() + gap
+         + metrics::scaled(4)
          + 24;
+}
+
+void FavoritesSidebar::FilterPanel::setIncludeSubdirs(bool on)
+{
+    if (includeSubdirs == on)
+        return;
+    includeSubdirs = on;
+    repaint();
+}
+
+void FavoritesSidebar::FilterPanel::setScanning(bool on)
+{
+    if (scanning == on)
+        return;
+    scanning = on;
+    repaint();
 }
 
 void FavoritesSidebar::FilterPanel::applyTo(BrowserSearch& s) const
@@ -295,6 +315,34 @@ void FavoritesSidebar::FilterPanel::setHistograms(const std::vector<StepClip>& c
 void FavoritesSidebar::FilterPanel::paint(juce::Graphics& g)
 {
     const auto& t = inspectorTokens();
+    if (!subdirRowBounds.isEmpty())
+    {
+        g.setFont(uiFontFixed(kCtrlPt));
+        g.setColour(scanning ? ds::tx3() : ds::tx());
+        auto label = subdirRowBounds;
+        if (!subdirSwitchBounds.isEmpty())
+            label.setRight(subdirSwitchBounds.getX() - 8);
+        g.drawText("Subdirectories", label, juce::Justification::centredLeft, true);
+
+        auto track = subdirSwitchBounds.toFloat();
+        if (!track.isEmpty())
+        {
+            const float radius = track.getHeight() * 0.5f;
+            g.setColour(includeSubdirs ? t.accent : t.tallWell);
+            g.fillRoundedRectangle(track, radius);
+            if (!includeSubdirs)
+            {
+                g.setColour(t.controlHairline);
+                g.drawRoundedRectangle(track.reduced(0.5f), radius, 1.0f);
+            }
+            const float knob = juce::jmax(8.0f, track.getHeight() - 4.0f);
+            const float kx = includeSubdirs ? track.getRight() - knob - 2.0f
+                                             : track.getX() + 2.0f;
+            g.setColour(includeSubdirs ? fx::onAccentColour() : t.headerText);
+            g.fillEllipse(kx, track.getCentreY() - knob * 0.5f, knob, knob);
+        }
+    }
+
     auto paintChip = [&](juce::Rectangle<int> r, const juce::String& label, bool on)
     {
         if (r.isEmpty()) return;
@@ -316,6 +364,14 @@ void FavoritesSidebar::FilterPanel::paint(juce::Graphics& g)
 
 void FavoritesSidebar::FilterPanel::mouseDown(const juce::MouseEvent& e)
 {
+    if (!scanning && subdirRowBounds.contains(e.getPosition()))
+    {
+        includeSubdirs = !includeSubdirs;
+        repaint();
+        if (onSubdirsChanged)
+            onSubdirsChanged(includeSubdirs);
+        return;
+    }
     if (hideDupesBounds.contains(e.getPosition()))
     {
         hideDuplicates = !hideDuplicates;
@@ -331,8 +387,18 @@ void FavoritesSidebar::FilterPanel::mouseDown(const juce::MouseEvent& e)
 void FavoritesSidebar::FilterPanel::resized()
 {
     auto r = getLocalBounds();
-    const int gap = metrics::scaled(12);
-    const int rh = rangeH();
+    const int gap = metrics::scaled(4);
+
+    subdirRowBounds = r.removeFromTop(metrics::scaled(28));
+    {
+        constexpr int kSwitchW = 28;
+        constexpr int kSwitchH = 16;
+        subdirSwitchBounds = juce::Rectangle<int>(
+            subdirRowBounds.getRight() - kSwitchW,
+            subdirRowBounds.getY() + (subdirRowBounds.getHeight() - kSwitchH) / 2,
+            kSwitchW, kSwitchH);
+    }
+    r.removeFromTop(metrics::scaled(8));
 
     keyGrid.setBounds(r.removeFromTop(keyGrid.idealHeight()));
     r.removeFromTop(gap);
@@ -340,12 +406,13 @@ void FavoritesSidebar::FilterPanel::resized()
     r.removeFromTop(gap);
     timeSigGrid.setBounds(r.removeFromTop(timeSigGrid.idealHeight()));
     r.removeFromTop(gap);
-    bpmRange.setBounds(r.removeFromTop(rh));
+    bpmRange.setBounds(r.removeFromTop(bpmRange.idealHeight()));
     r.removeFromTop(gap);
-    barsRange.setBounds(r.removeFromTop(rh));
+    barsRange.setBounds(r.removeFromTop(barsRange.idealHeight()));
     r.removeFromTop(gap);
-    complexityRange.setBounds(r.removeFromTop(rh));
+    complexityRange.setBounds(r.removeFromTop(complexityRange.idealHeight()));
     r.removeFromTop(gap);
+    r.removeFromTop(metrics::scaled(4));
     auto row = r.removeFromTop(24);
     const auto font = uiFontFixed(fx::kAnnotPt, false);
     auto chipW = [&](const juce::String& label)
@@ -593,6 +660,13 @@ FavoritesSidebar::FavoritesSidebar()
         searchQuery.setFilterActive(filterOpen || activeFilterGroupCount() > 0);
         repaint();
     };
+    filterPanel.onLayoutChanged = [this] { notifyHeightChanged(); };
+    filterPanel.onSubdirsChanged = [this](bool on)
+    {
+        includeSubdirs = on;
+        if (onScanSubdirs)
+            onScanSubdirs();
+    };
     addChildComponent(filterPanel);
 
     searchQuery.onActivate = [this]
@@ -640,6 +714,7 @@ BrowserSearch FavoritesSidebar::getFilter() const
 
 void FavoritesSidebar::setIncludeSubdirs(bool on)
 {
+    filterPanel.setIncludeSubdirs(on);
     if (includeSubdirs == on) return;
     includeSubdirs = on;
     repaint();
@@ -678,6 +753,7 @@ void FavoritesSidebar::setScanning(bool on)
     {
         stopTimer();
     }
+    filterPanel.setScanning(on);
     repaint();
 }
 
@@ -811,21 +887,6 @@ std::vector<FavoritesSidebar::LayoutItem> FavoritesSidebar::collectLayout() cons
 
     if (!collapsed)
     {
-        const int qh = searchQuery.idealHeight();
-        out.push_back({ LayoutKind::Query, -1,
-                        juce::Rectangle<int>(padH, y, W - padH * 2, qh) });
-        y += qh;
-
-        if (filterOpen)
-        {
-            y += metrics::scaled(8);
-            const int fh = filterPanel.idealHeight();
-            out.push_back({ LayoutKind::Filter, -1,
-                            juce::Rectangle<int>(padH, y, W - padH * 2, fh) });
-            y += fh;
-        }
-
-        y += sidebarSectionGap();
         placeSection(SectionId::Library);
         for (int i = 0; i < (int) rows.size(); ++i)
             if (rows[(size_t) i].kind == RowKind::SavedDir
@@ -833,10 +894,20 @@ std::vector<FavoritesSidebar::LayoutItem> FavoritesSidebar::collectLayout() cons
                 placeRow(i);
 
         y += sidebarSectionGap() - gap;
-        placeSection(SectionId::Saved);
-        for (int i = 0; i < (int) rows.size(); ++i)
-            if (rows[(size_t) i].kind == RowKind::SavedSearch)
-                placeRow(i);
+        const int contentW = juce::jmax(0, W - padH * 2);
+        const int qh = searchQuery.idealHeight();
+        out.push_back({ LayoutKind::Query, -1,
+                        juce::Rectangle<int>(padH, y, contentW, qh) });
+        y += qh;
+
+        if (filterOpen)
+        {
+            y += metrics::scaled(8);
+            const int fh = filterPanel.idealHeight();
+            out.push_back({ LayoutKind::Filter, -1,
+                            juce::Rectangle<int>(padH, y, contentW, fh) });
+            y += fh;
+        }
     }
     else
     {
@@ -955,9 +1026,6 @@ void FavoritesSidebar::rebuildNavItems()
         for (int i = 0; i < (int) rows.size(); ++i)
             if (rows[(size_t) i].kind == RowKind::SavedDir
                 || rows[(size_t) i].kind == RowKind::Starred)
-                navItems.push_back({ NavKind::Row, i });
-        for (int i = 0; i < (int) rows.size(); ++i)
-            if (rows[(size_t) i].kind == RowKind::SavedSearch)
                 navItems.push_back({ NavKind::Row, i });
     }
     else
@@ -1174,9 +1242,17 @@ void FavoritesSidebar::layoutChildren()
                 }
                 break;
             case LayoutKind::Filter:
-                filterPanel.setBounds(item.bounds);
+            {
+                auto b = item.bounds;
+                if (searchQuery.getWidth() > 0)
+                {
+                    b.setX(searchQuery.getX());
+                    b.setWidth(searchQuery.getWidth());
+                }
+                filterPanel.setBounds(b);
                 filterPanel.setVisible(true);
                 break;
+            }
             case LayoutKind::Query:
                 searchQuery.setBounds(item.bounds);
                 searchQuery.setVisible(true);
@@ -1755,7 +1831,6 @@ void FavoritesSidebar::paint(juce::Graphics& g)
     if (!collapsed)
     {
         paintSectionLabel(g, "LIBRARY", libraryHeaderBounds);
-        paintSectionLabel(g, "SAVED SEARCHES", savedHeaderBounds);
         if (!libraryPlusBounds.isEmpty())
         {
             const bool plusHot = hoverChrome == ChromeHit::OpenFolder

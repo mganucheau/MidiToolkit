@@ -69,7 +69,7 @@ struct SavedSearchEntry
     juce::StringArray resultPaths;
 };
 
-// Sidebar: joined search → LIBRARY (+ opens a folder) → SAVED SEARCHES.
+// Sidebar: LIBRARY (+ opens a folder) → joined search → foldable filters.
 
 class FavoritesSidebar : public juce::Component,
                          public juce::SettableTooltipClient,
@@ -271,13 +271,18 @@ private:
         void setHistograms(const std::vector<StepClip>& clips);
         int idealHeight() const;
         int activeGroupCount() const;
+        void setIncludeSubdirs(bool on);
+        void setScanning(bool on);
         std::function<void()> onCriteriaChanged;
+        std::function<void(bool)> onSubdirsChanged;
+        std::function<void()> onLayoutChanged;
     private:
-        int rowH() const;
-        int rangeH() const;
         void mouseDown(const juce::MouseEvent&) override;
         bool hideDuplicates = true;
+        bool includeSubdirs = false;
+        bool scanning = false;
         juce::Rectangle<int> hideDupesBounds, resetBounds;
+        juce::Rectangle<int> subdirRowBounds, subdirSwitchBounds;
         fx::ChipGrid keyGrid;
         fx::ChipGrid kindGrid;
         fx::ChipGrid timeSigGrid;
