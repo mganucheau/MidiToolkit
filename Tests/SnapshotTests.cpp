@@ -179,6 +179,17 @@ TEST_CASE("Snapshot the Groove Panel editor states", "[snapshot]")
     browser->toggleEditorFold();
     browser->toggleEffectsForTesting();
 
+    // Through mode: Toolkit only, then with the input roll.
+    browser->setPassthroughForTesting(true);
+    pumpFor(400);
+    save(*ed, "08-through");
+    browser->toggleEditorFold();
+    pumpFor(400);
+    save(*ed, "09-through-roll");
+    browser->toggleEditorFold();
+    browser->setPassthroughForTesting(false);
+    pumpFor(300);
+
     browser->setSidebarCollapsedForTesting(true);
     ed->setSize(460, 720);
     pumpFor(300);

@@ -48,6 +48,7 @@ public:
     void setGridViewForTesting(bool on) { if (gridView != on && browserBar.onToggleGrid) browserBar.onToggleGrid(); }
     void setFilterOpenForTesting(bool on) { sidebar.setFilterOpen(on); }
     void setSidebarCollapsedForTesting(bool on) { sidebar.setCollapsed(on); }
+    void setPassthroughForTesting(bool on) { if (processorRef.passthrough != on) togglePassthrough(); }
 
 private:
     void applyNativeWindowChrome();
@@ -342,6 +343,9 @@ private:
     int savedNonPassW = 0;
     int savedNonPassH = 0;
     int passthroughWindowHeight() const;
+    /** Through mode is as wide as the Toolkit, plus the input roll when it is open. */
+    int passthroughWindowWidth() const;
+    bool recordFromThrough = false;
     void syncPassthroughWindowHeight();
     double layoutAnimStartMs = 0.0;
     static constexpr double kLayoutAnimMs = 220.0;

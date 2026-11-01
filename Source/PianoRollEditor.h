@@ -81,6 +81,11 @@ public:
     /** Feed the selected clip + its edit + groove. The editor never mutates
         the clip; user actions come back through the callbacks. */
     void setClip(const StepClip& clip, const ClipEdit& edit, const GrooveParams& groove);
+    /** Notes take the clip kind's colour (Groove clip-1 … clip-8). */
+    juce::Colour noteColour { 0xff6fb5f0 };
+    /** Shown over an empty roll (e.g. "Play MIDI in, then press record" in Through). */
+    void setEmptyHint(const juce::String& h) { emptyHint = h; repaint(); }
+    juce::String emptyHint;
     void clearClip();
     /** Live take: notes grow in place and loop handles stay hidden. */
     void beginRecording(const StepClip& clip);

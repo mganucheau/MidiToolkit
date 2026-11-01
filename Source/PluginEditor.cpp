@@ -2612,7 +2612,22 @@ void MidiToolkitEditor::applyPassthroughUi()
     previewHeader.setAlpha(1.0f);
     rollEditor.setAlpha(1.0f);
     fileList.setEnabled(!pass);
-    rollEditor.setEnabled(!pass);
+    rollEditor.setEnabled(true);
+    if (pass)
+    {
+        // The roll shows live input in Through: the last take, or an empty roll.
+        rollEditor.setEmptyHint("Play MIDI into the plug-in, then press record to capture it.");
+        if (hasRecording && !recordedClip.notes.empty())
+            rollEditor.setClip(recordedClip, effectsInspector.getEdit(), effectsInspector.getGroove());
+        else
+            rollEditor.clearClip();
+    }
+    else
+    {
+        rollEditor.setEmptyHint("Select a MIDI file to edit it here.");
+        if (const auto* clip = selectedClip())
+            rollEditor.setClip(*clip, selectedEdit(), selectedGroove());
+    }
     previewHeader.setEnabled(!pass);
     passthroughVeil.setVisible(false);
     applyLayoutState();
@@ -2633,6 +2648,7 @@ void MidiToolkitEditor::toggleRecord()
 {
     if (!recording)
     {
+        recordFromThrough = processorRef.passthrough;
         if (processorRef.passthrough)
         {
             processorRef.passthrough = false;
@@ -2660,6 +2676,15 @@ void MidiToolkitEditor::toggleRecord()
     processorRef.setRecordingEnabled(false);
     transport.setRecording(false);
     finishRecording(processorRef.recordSnapshot());
+    if (recordFromThrough)
+    {
+        recordFromThrough = false;
+        processorRef.passthrough = true;
+        persistBrowserSession();
+        applyPassthroughUi();
+        pushLiveFxToProcessor();
+        return;
+    }
     applyLayoutState();
 }
 
@@ -2994,7 +3019,14 @@ void MidiToolkitEditor::saveCurrentViewAsDefault()
 
 int MidiToolkitEditor::passthroughWindowHeight() const
 {
-    return metrics::transportH() + effectsInspector.contentHeight();
+    const int fx = metrics::transportH() + effectsInspector.contentHeight();
+    // With the input roll open the window needs room for the roll, not just the Toolkit.
+    return processorRef.editorOpen ? juce::jmax(fx, metrics::transportH() + metrics::scaled(520)) : fx;
+}
+
+int MidiToolkitEditor::passthroughWindowWidth() const
+{
+    return metrics::effectsPaneWidth() + (processorRef.editorOpen ? metrics::editorPaneWidth() : 0);
 }
 
 void MidiToolkitEditor::syncPassthroughWindowHeight()
@@ -3002,7 +3034,7 @@ void MidiToolkitEditor::syncPassthroughWindowHeight()
     if (!processorRef.passthrough || getHeight() <= 0)
         return;
     const int h = passthroughWindowHeight();
-    const int w = metrics::effectsPaneWidth();
+    const int w = passthroughWindowWidth();
     setResizeLimits(w, h, w, h);
     if (std::abs(getHeight() - h) > 1 || getWidth() != w)
         setSize(w, h);
@@ -3015,7 +3047,7 @@ void MidiToolkitEditor::updateWindowLimits()
     const int browserW = browserContentWidth();
     const int recordW = metrics::editorPaneWidth()
                       + (processorRef.effectsOpen ? metrics::effectsPaneWidth() : 0);
-    int maxW = pass ? metrics::effectsPaneWidth()
+    int maxW = pass ? passthroughWindowWidth()
                     : rec ? recordW
                           : visibleWorkspaceWidth(sidebar.isCollapsed(),
                                                   processorRef.editorOpen,
@@ -3063,11 +3095,11 @@ void MidiToolkitEditor::applyLayoutState()
     const int recordW = metrics::editorPaneWidth() + (fxOpen ? metrics::effectsPaneWidth() : 0);
     const bool rec = recording;
     const int maxW = processorRef.passthrough
-        ? metrics::effectsPaneWidth()
+        ? passthroughWindowWidth()
         : rec ? recordW
               : visibleWorkspaceWidth(side, edOpen, fxOpen, browserContentW);
     const int minW = processorRef.passthrough
-        ? metrics::effectsPaneWidth()
+        ? passthroughWindowWidth()
         : maxW;
     const bool contentChanged = browserContentW != trackedBrowserContentW;
     trackedBrowserContentW = browserContentW;
@@ -3078,7 +3110,7 @@ void MidiToolkitEditor::applyLayoutState()
     {
         savedNonPassW = juce::jmax(targetW, visibleWorkspaceWidth(side, edOpen, fxOpen, browserContentW));
         savedNonPassH = getHeight() > 0 ? getHeight() : lastWindowH;
-        targetW = metrics::effectsPaneWidth();
+        targetW = passthroughWindowWidth();
         targetH = passthroughWindowHeight();
     }
     else if (!pass && trackedPassthrough)
@@ -3089,6 +3121,7 @@ void MidiToolkitEditor::applyLayoutState()
     }
     else if (pass)
     {
+        targetW = passthroughWindowWidth();
         targetH = passthroughWindowHeight();
     }
     else if (rec && !trackedRecording)
@@ -3198,11 +3231,22 @@ void MidiToolkitEditor::layoutContent()
         fileList.setVisible(false);
         previewHeader.setVisible(false);
         miniRoll.setVisible(false);
-        rollEditor.setVisible(false);
         passthroughVeil.setVisible(false);
-        effectsInspector.setVisible(true);
-        effectsInspector.setBounds(r);
         browserRollSplitter.setVisible(false);
+        effectsInspector.setVisible(true);
+        if (edOpen)
+        {
+            // Through + Piano Roll: the input roll on the left, the Toolkit on the right.
+            auto row = r;
+            effectsInspector.setBounds(row.removeFromRight(juce::jmin(metrics::effectsPaneWidth(), row.getWidth())));
+            rollEditor.setVisible(true);
+            rollEditor.setBounds(row);
+        }
+        else
+        {
+            rollEditor.setVisible(false);
+            effectsInspector.setBounds(r);
+        }
         return;
     }
 

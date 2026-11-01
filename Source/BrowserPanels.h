@@ -591,7 +591,7 @@ inline juce::Colour kindClipColour(ClipKind k)
         case ClipKind::Bass:   return ds::clip(6);
         case ClipKind::Piano:  return ds::clip(7);
         case ClipKind::Lead:   return ds::clip(5);
-        case ClipKind::Single: return ds::clip(2);
+        case ClipKind::Single: return ds::clip(8);
     }
     return ds::clip(6);
 }

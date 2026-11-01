@@ -367,6 +367,14 @@ void PianoRollEditor::setClip(const StepClip& c, const ClipEdit& e, const Groove
     const int prevBars = hasClip ? resolved.bars : -1;
     hasClip = true;
     clip = c;
+    switch (c.kind)
+    {
+        case ClipKind::Drums:  noteColour = ds::clip(1); break;
+        case ClipKind::Bass:   noteColour = ds::clip(6); break;
+        case ClipKind::Piano:  noteColour = ds::clip(7); break;
+        case ClipKind::Lead:   noteColour = ds::clip(5); break;
+        case ClipKind::Single: noteColour = ds::clip(8); break;
+    }
     edit = e;
     groove = k;
     rebuildResolved();
@@ -1270,6 +1278,13 @@ void PianoRollEditor::paint(juce::Graphics& g)
 
 void PianoRollEditor::paintOverChildren(juce::Graphics& g)
 {
+    if (!hasClip && emptyHint.isNotEmpty())
+    {
+        auto area = rollViewport.getBounds();
+        g.setColour(ds::inkMuted());
+        g.setFont(uiFontFixed(12.0f, false));
+        g.drawFittedText(emptyHint, area.reduced(24), juce::Justification::centred, 2);
+    }
     g.setColour(colours::line());
     g.fillRect(0, 0, 1, getHeight());
     g.fillRect(getWidth() - 1, 0, 1, getHeight());
@@ -1330,16 +1345,18 @@ void PianoRollEditor::RollContent::paint(juce::Graphics& g)
         if (!r.intersects(clipB)) continue;
 
         const double v = effectiveVelocity(n, ed.groove);
-        juce::Colour fill = (n.moved || inDrag) ? ds::note().brighter(0.12f) : ds::note();
-        g.setColour(fill.withAlpha((float) (0.85 + 0.15 * v)));
-        g.fillRoundedRectangle(r, 3.0f);
-        g.setColour(ds::note().darker(0.25f));
-        g.drawRoundedRectangle(r, 3.0f, 1.0f);
+        // Groove: square notes in the clip colour; brightness follows velocity.
+        const auto base = ed.noteColour;
+        juce::Colour fill = (n.moved || inDrag) ? base.brighter(0.12f) : base;
+        g.setColour(fill.withAlpha((float) (0.55 + 0.45 * v)));
+        g.fillRect(r);
+        g.setColour(juce::Colours::black.withAlpha(0.35f));
+        g.drawRect(r, 1.0f);
 
         if (isSelected)
         {
             g.setColour(ds::acc());
-            g.drawRoundedRectangle(r.expanded(1.0f), 3.0f, 1.25f);
+            g.drawRect(r.expanded(1.0f), 1.5f);
         }
     }
 
@@ -1352,14 +1369,15 @@ void PianoRollEditor::RollContent::paint(juce::Graphics& g)
         g.drawRect(marquee, 1.0f);
     }
 
-    // Playhead — accent line (§1).
+    // Playhead: the play colour (it moves because the music does).
     if (ed.playing)
     {
-        g.setColour(ds::acc());
+        g.setColour(ds::play());
         g.fillRect((float) (ed.playheadStep * ed.timeStretch) * pps, clipB.getY(), 1.5f, clipB.getHeight());
     }
 
-    ed.paintLoopOverlay(g, clipB, clipB.getY(), clipB.getBottom());
+    if (ed.hasClip)
+        ed.paintLoopOverlay(g, clipB, clipB.getY(), clipB.getBottom());
 }
 
 void PianoRollEditor::RollContent::mouseDown(const juce::MouseEvent& e)
@@ -1699,17 +1717,17 @@ void PianoRollEditor::KeyGutter::mouseDown(const juce::MouseEvent& e)
 void PianoRollEditor::VelocityLane::paint(juce::Graphics& g)
 {
     auto& ed = owner;
-    g.fillAll(inspectorTokens().panelBg);
-    g.setColour(colours::line());
+    g.fillAll(ds::surface100());
+    g.setColour(ds::line());
     g.fillRect(getLocalBounds().removeFromTop(1));
 
-    auto header = getLocalBounds().removeFromTop(headerH).reduced(10, 0);
+    auto header = getLocalBounds().removeFromTop(headerH).reduced(8, 0);
     auto caret = header.removeFromLeft(12).toFloat().withSizeKeepingCentre(9.0f, 9.0f);
-    drawIcon(g, ed.velocityOpen ? icons::caretDown : icons::caretUp, caret, colours::text3(), 1.5f);
+    fx::drawStrokedChevron(g, caret, ds::inkMuted(), ed.velocityOpen);
     header.removeFromLeft(4);
-    g.setColour(colours::text2());
-    g.setFont(uiFont(9.5f, true));
-    g.drawText("VELOCITY", header, juce::Justification::centredLeft);
+    g.setColour(ds::inkMuted());
+    g.setFont(uiFontFixed(11.0f, false));
+    g.drawText("Velocity", header, juce::Justification::centredLeft);
 
     if (!ed.hasClip || !ed.velocityOpen) return;
 
@@ -1724,7 +1742,7 @@ void PianoRollEditor::VelocityLane::paint(juce::Graphics& g)
         return laneTop + (1.0f - t) * laneH;
     };
 
-    g.setFont(uiFont(9.0f, false));
+    g.setFont(monoFontFixed(10.0f));
     const int ticks[] = { 127, 96, 64, 32, 0 };
     for (int vel : ticks)
     {
@@ -1744,10 +1762,11 @@ void PianoRollEditor::VelocityLane::paint(juce::Graphics& g)
         const int vel = ed.velocityForNote(n);
         const float top = yForVel(vel);
         const float bh = juce::jmax(2.0f, (float) lane.getBottom() - top);
-        g.setColour(colours::accent().withAlpha(0.85f));
-        g.fillRect(x, top, noteW, bh);
-        g.setColour(colours::accent().brighter(0.15f));
-        g.fillRect(x, top, noteW, 2.0f);
+        // Stem + cap in the clip colour, like the preview's velocity lane.
+        g.setColour(ed.noteColour.withAlpha(0.55f));
+        g.fillRect(x, top, juce::jmin(noteW, 3.0f), bh);
+        g.setColour(ed.noteColour);
+        g.fillRect(x, top, juce::jmax(4.0f, juce::jmin(noteW, 8.0f)), 3.0f);
     }
 }
 

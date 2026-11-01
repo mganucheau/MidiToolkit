@@ -578,7 +578,7 @@ void TransportBar::resized()
     btnStop.setVisible(false);
     btnEffects.setVisible(!passthrough);
     btnDragToDaw.setVisible(false);   // Drag lives in the preview header (Groove)
-    btnEditor.setVisible(!passthrough);   // the Input roll in Through arrives with the piano-roll phase
+    btnEditor.setVisible(true);   // in Through it opens the input roll
 
     const int pillW = statusPill.idealWidth();
     const int leftW = pillW + groupGap + btn + tight + btn + groupGap + btn + tight + btn;
