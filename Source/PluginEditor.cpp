@@ -869,6 +869,12 @@ MidiToolkitEditor::MidiToolkitEditor(MidiToolkitProcessor& p)
     };
     processorRef.syncLockFlagsFromSections();
     effectsInspector.setSectionLocks(processorRef.sectionLocks);
+    effectsInspector.setSectionOrder(processorRef.toolkitSectionOrder);
+    effectsInspector.onSectionOrderChanged = [this](const juce::String& order)
+    {
+        processorRef.toolkitSectionOrder = order;
+        persistBrowserSession();
+    };
     effectsInspector.setBpmMultiplier(processorRef.bpmMultiplier.load());
     effectsInspector.onActivated = [this] { claimKeyNav(KeyNavTarget::Effects); };
     effectsInspector.onContentHeightChanged = [this] { syncPassthroughWindowHeight(); };

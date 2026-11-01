@@ -15,11 +15,11 @@ constexpr float kAnnotPt = 11.0f;
 constexpr float kPopupFontPt = 12.0f;
 constexpr float kSectionTitlePt = 11.0f;
 constexpr float kPaneTitlePt = 13.0f;
-constexpr int kSectionHeaderH = 38;
+constexpr int kSectionHeaderH = 22;   // Groove device header (control-md + padding)
 constexpr int kSectionPadH = 12;       // chevron starts here
 constexpr int kSectionRowInset = 22;   // content indent past the chevron
-constexpr int kContentPadX = 34;       // left
-constexpr int kContentPadR = 16;       // right pad is smaller than the left
+constexpr int kContentPadX = 10;       // left (inside the section frame)
+constexpr int kContentPadR = 10;
 constexpr int kRowMinH = 24;
 constexpr int kControlH = 24;
 constexpr int kSliderRowH = 24;
@@ -37,11 +37,11 @@ inline int toolkitDensity(int compact)
     const int v = currentDensity() == Density::Comfortable ? compact + 2 : compact;
     return metrics::scaled(v);
 }
-inline int toolkitRowGap()           { return toolkitDensity(10); }
+inline int toolkitRowGap()           { return toolkitDensity(8); }
 inline int toolkitSectionPadT()      { return 0; }
-inline int toolkitSectionPadB()      { return toolkitDensity(16); }
-inline int toolkitSectionPadBFolded(){ return toolkitDensity(14); }
-inline int toolkitTitleGap()         { return 0; }
+inline int toolkitSectionPadB()      { return toolkitDensity(8); }
+inline int toolkitSectionPadBFolded(){ return toolkitDensity(8); }
+inline int toolkitTitleGap()         { return toolkitDensity(8); }
 inline int toolkitBodyPadB()         { return toolkitDensity(8); }
 
 /** Solid accent behind type. Dark-mode blue is bright enough that black type
@@ -69,12 +69,11 @@ inline juce::Font paneTitleFont() { return uiFontFixed(kPaneTitlePt, true); }
 
 inline void fillTallWell(juce::Graphics& g, juce::Rectangle<float> r, bool hot)
 {
-    g.setColour(hot ? (usesDarkAppearance() ? ds::ctl().brighter(0.08f) : ds::ctl().darker(0.03f))
-                    : ds::ctl());
-    g.fillRoundedRectangle(r, kTallRadius);
-    g.setColour(ds::ctlb());
-    g.drawRoundedRectangle(r.reduced(0.5f), kTallRadius, 1.0f);
-    ds::shadow::control(g, r, kTallRadius);
+    // Groove field: surface-300, edge border (accent while hot), radius-sm.
+    g.setColour(ds::surface300());
+    g.fillRoundedRectangle(r, ds::radius::sm);
+    g.setColour(hot ? ds::acc() : ds::edge());
+    g.drawRoundedRectangle(r.reduced(0.5f), ds::radius::sm, 1.0f);
 }
 
 inline void drawCaretDown(juce::Graphics& g, juce::Rectangle<float> area, juce::Colour colour)
@@ -190,25 +189,24 @@ public:
 
     void paintButton(juce::Graphics& g, bool, bool) override
     {
-        const auto& t = inspectorTokens();
+        // Groove toggle: "On" lit in accent, "Off" on the unlit face.
         const bool on = getToggleState();
-        auto track = getLocalBounds().toFloat().withSizeKeepingCentre(30.0f, 18.0f);
-        g.setColour(on ? t.accent : t.switchOffTrack);
-        g.fillRoundedRectangle(track, 9.0f);
-        const float knob = 14.0f;
-        const float kx = on ? track.getRight() - 2.0f - knob : track.getX() + 2.0f;
-        g.setColour(juce::Colours::white);
-        g.fillEllipse(kx, track.getCentreY() - knob * 0.5f, knob, knob);
-        if (!t.dark && !on)
+        auto face = getLocalBounds().toFloat().withSizeKeepingCentre(36.0f, 18.0f);
+        g.setColour(on ? ds::acc() : (isMouseOver() ? ds::surface300() : ds::surface200()));
+        g.fillRoundedRectangle(face, ds::radius::sm);
+        if (!on)
         {
-            g.setColour(t.controlHairline);
-            g.drawEllipse(kx, track.getCentreY() - knob * 0.5f, knob, knob, 0.5f);
+            g.setColour(ds::edge());
+            g.drawRoundedRectangle(face.reduced(0.5f), ds::radius::sm, 1.0f);
         }
+        g.setColour(on ? ds::onAccent() : (isEnabled() ? ds::ink() : ds::inkFaint()));
+        g.setFont(uiFontFixed(11.0f, true));
+        g.drawText(on ? "On" : "Off", face.toNearestInt(), juce::Justification::centred, false);
         if (hasKeyboardFocus(true))
-            drawFocusRing(g, getLocalBounds().toFloat(), 4.0f);
+            drawFocusRing(g, face, ds::radius::sm);
     }
 
-    int idealWidth() const { return 30; }
+    int idealWidth() const { return 36; }
 };
 
 // ── FlatPopup ────────────────────────────────────────────────────────────────
@@ -279,26 +277,19 @@ public:
 
     void paint(juce::Graphics& g) override
     {
-        auto r = getLocalBounds().toFloat();
-        g.setColour(ds::ctl());
-        g.fillRoundedRectangle(r, 6.0f);
-        g.setColour(ds::ctlb());
-        g.drawRoundedRectangle(r.reduced(0.5f), 6.0f, 1.0f);
-        if (isMouseOver() || hasKeyboardFocus(true))
-        {
-            g.setColour(ds::acc().withAlpha(0.10f));
-            g.fillRoundedRectangle(r, 6.0f);
-        }
+        // Groove field with a chevron: surface-300, edge border, accent outline on hover.
+        auto r = getLocalBounds().toFloat().withSizeKeepingCentre((float) getWidth(), juce::jmin((float) getHeight(), 20.0f));
+        g.setColour(ds::surface300());
+        g.fillRoundedRectangle(r, ds::radius::sm);
+        g.setColour(isMouseOver() ? ds::acc() : ds::edge());
+        g.drawRoundedRectangle(r.reduced(0.5f), ds::radius::sm, 1.0f);
 
-        auto capsule = r.removeFromRight(18.0f)
-                           .withSizeKeepingCentre(14.0f, 16.0f);
-        g.setColour(ds::acc());
-        g.fillRoundedRectangle(capsule, 4.0f);
-        drawCaretUpDown(g, capsule, juce::Colours::white);
+        auto caret = r.removeFromRight(16.0f).withSizeKeepingCentre(10.0f, 10.0f);
+        drawStrokedChevron(g, caret, ds::inkMuted(), true);
 
-        auto textArea = r.reduced(9.0f, 0.0f);
-        g.setColour(ds::tx());
-        g.setFont(popupFont());
+        auto textArea = r.reduced(6.0f, 0.0f);
+        g.setColour(ds::ink());
+        g.setFont(monoFontFixed(11.0f));
         const juce::String val = labels.size() > index ? labels[index] : juce::String();
         g.drawText(val, textArea.toNearestInt(), juce::Justification::centredLeft, false);
 
@@ -571,35 +562,27 @@ public:
 
     void paint(juce::Graphics& g) override
     {
-        const auto& t = inspectorTokens();
-        auto r = getLocalBounds().toFloat();
-        g.setColour(ds::well());
-        g.fillRoundedRectangle(r, 7.0f);
-        g.setColour(t.divider);
-        g.drawRoundedRectangle(r.reduced(0.5f), 7.0f, 1.0f);
-
-        auto inner = r.reduced(2.0f, 2.0f);
-        auto left = inner.withTrimmedRight(inner.getWidth() * 0.5f);
-        auto right = inner.withTrimmedLeft(inner.getWidth() * 0.5f);
-        auto seg = left.withHeight(20.0f).withCentre(left.getCentre());
-        if (selected == Sel::Half)
+        // Two Groove toggles side by side (2 px apart).
+        auto r = getLocalBounds().toFloat().withSizeKeepingCentre((float) getWidth(), 18.0f);
+        auto left = r.withTrimmedRight(r.getWidth() * 0.5f + 1.0f);
+        auto right = r.withTrimmedLeft(r.getWidth() * 0.5f + 1.0f);
+        for (auto [cell, sel] : { std::pair<juce::Rectangle<float>, Sel>{ left, Sel::Half },
+                                  std::pair<juce::Rectangle<float>, Sel>{ right, Sel::Double } })
         {
-            g.setColour(accentFillColour());
-            g.fillRoundedRectangle(seg, 5.0f);
+            const bool on = selected == sel;
+            g.setColour(on ? ds::acc() : ds::surface200());
+            g.fillRoundedRectangle(cell, ds::radius::sm);
+            if (!on)
+            {
+                g.setColour(ds::edge());
+                g.drawRoundedRectangle(cell.reduced(0.5f), ds::radius::sm, 1.0f);
+            }
         }
-        seg = right.withHeight(20.0f).withCentre(right.getCentre());
-        if (selected == Sel::Double)
-        {
-            g.setColour(accentFillColour());
-            g.fillRoundedRectangle(seg, 5.0f);
-        }
-        left = r.withTrimmedRight(r.getWidth() * 0.5f);
-        right = r.withTrimmedLeft(r.getWidth() * 0.5f);
 
-        g.setFont(inspectorFont());
+        g.setFont(uiFontFixed(11.0f, true));
         auto textCol = [&](Sel s)
         {
-            return selected == s ? onAccentColour() : t.rowLabel;
+            return selected == s ? ds::onAccent() : ds::ink();
         };
         g.setColour(textCol(Sel::Half));
         g.drawText("Half", left.toNearestInt(), juce::Justification::centred, false);
@@ -1369,31 +1352,30 @@ public:
         g.drawText(title, header, juce::Justification::centredLeft, true);
         if (summary.isNotEmpty())
         {
-            g.setColour(summaryDefault ? t.valueText : t.accent);
+            g.setColour(summaryDefault ? ds::inkMuted() : ds::ink());
             g.drawText(summary, header, juce::Justification::centredRight, true);
         }
 
         r.removeFromTop(7);
         auto track = r.removeFromTop(kTrackH).toFloat();
-        g.setColour(ds::well());
-        g.fillRoundedRectangle(track, 7.0f);
-        g.setColour(t.divider);
-        g.drawRoundedRectangle(track.reduced(0.5f), 7.0f, 1.0f);
 
         if (labels.isEmpty()) return;
-        auto inner = track.reduced(2.0f, 2.0f);
-        const float cellW = inner.getWidth() / (float) labels.size();
+        // A row of Groove toggles, 2 px apart; the lit one is the selection.
+        const float gapX = 2.0f;
+        const float cellW = (track.getWidth() - gapX * (float) (labels.size() - 1)) / (float) labels.size();
         for (int i = 0; i < labels.size(); ++i)
         {
-            auto cell = juce::Rectangle<float>(inner.getX() + cellW * (float) i,
-                                               inner.getY(), cellW, 20.0f);
-            if (i == index)
+            auto cell = juce::Rectangle<float>(track.getX() + (cellW + gapX) * (float) i,
+                                               track.getCentreY() - 9.0f, cellW, 18.0f);
+            g.setColour(i == index ? ds::acc() : ds::surface200());
+            g.fillRoundedRectangle(cell, ds::radius::sm);
+            if (i != index)
             {
-                g.setColour(accentFillColour());
-                g.fillRoundedRectangle(cell.reduced(1.0f, 0.0f), 5.0f);
+                g.setColour(ds::edge());
+                g.drawRoundedRectangle(cell.reduced(0.5f), ds::radius::sm, 1.0f);
             }
-            g.setFont(uiFontFixed(kAnnotPt, i == index));
-            g.setColour(i == index ? onAccentColour() : t.headerText);
+            g.setFont(uiFontFixed(kAnnotPt, true));
+            g.setColour(i == index ? ds::onAccent() : ds::ink());
             g.drawText(labels[i], cell.toNearestInt(), juce::Justification::centred, false);
             if (i == nativeIndex)
             {
@@ -2096,7 +2078,8 @@ private:
 
 // ── Section (fold chevron + large title + refresh + lock) ────────────────────
 
-class Section : public juce::Component
+class Section : public juce::Component,
+                private juce::Timer
 {
 public:
     explicit Section(const juce::String& t) : title(t) {}
@@ -2145,6 +2128,7 @@ public:
     }
 
     bool isLocked() const { return locked; }
+    bool isDragging() const { return dragging; }
 
     /** Re-evaluate dirty-row visibility (call after param changes). */
     void refreshDirtyRows()
@@ -2213,8 +2197,11 @@ public:
         }
     }
 
+    // Header interaction: click the chevron/title to fold; click lock or reset;
+    // press and hold anywhere else on the header to pick the section up and reorder it.
     void mouseDown(const juce::MouseEvent& e) override
     {
+        pressInHeader = false;
         if (e.y > kSectionHeaderH) return;
 
         if (lockBounds().contains(e.getPosition()) && onLockToggle)
@@ -2222,13 +2209,45 @@ public:
             onLockToggle();
             return;
         }
-        if (resetBounds().contains(e.getPosition()) && onReset)
+        if (resetBounds().contains(e.getPosition()))
         {
-            onReset();
+            if (onReset && modifiedCount() > 0 && !locked) onReset();
             return;
         }
         if (headerHitBounds().contains(e.getPosition()))
+        {
+            pressInHeader = true;
+            dragging = false;
+            if (onDragMove) startTimer(kHoldMs);
+        }
+    }
+
+    void mouseDrag(const juce::MouseEvent& e) override
+    {
+        if (!pressInHeader) return;
+        if (dragging)
+        {
+            if (onDragMove) onDragMove(e.getScreenY());
+            return;
+        }
+        if (e.getDistanceFromDragStart() > 6)
+            stopTimer();   // a drag that starts before the hold is not a reorder
+    }
+
+    void mouseUp(const juce::MouseEvent&) override
+    {
+        stopTimer();
+        if (dragging)
+        {
+            dragging = false;
+            repaint();
+            if (onDragEnd) onDragEnd();
+        }
+        else if (pressInHeader)
+        {
             setOpen(!open);
+        }
+        pressInHeader = false;
     }
 
     void mouseMove(const juce::MouseEvent& e) override
@@ -2255,60 +2274,85 @@ public:
 
     void paint(juce::Graphics& g) override
     {
-        const auto& t = inspectorTokens();
+        // Groove device frame: surface-200 body, surface-300 header band, 1px line
+        // border, radius-md. Lit lock = accent; the border turns accent while dragged.
         const int mods = modifiedCount();
-        auto titleR = getLocalBounds().removeFromTop(kSectionHeaderH);
+        auto b = getLocalBounds().toFloat();
+        const float rad = ds::radius::md;
+        g.setColour(ds::surface200());
+        g.fillRoundedRectangle(b, rad);
+
+        auto header = getLocalBounds().removeFromTop(kSectionHeaderH);
+        {
+            juce::Graphics::ScopedSaveState ss(g);
+            juce::Path clip;
+            clip.addRoundedRectangle(b, rad);
+            g.reduceClipRegion(clip);
+            g.setColour(headerHover || dragging ? ds::surface300().brighter(0.04f) : ds::surface300());
+            g.fillRect(header);
+            if (visibleRowCount() > 0)
+            {
+                g.setColour(ds::line());
+                g.fillRect(header.getX(), header.getBottom() - 1, header.getWidth(), 1);
+            }
+        }
+
         auto chev = chevronBounds().toFloat().withSizeKeepingCentre(10.0f, 10.0f);
-        drawStrokedChevron(g, chev, t.valueText, open);
+        drawStrokedChevron(g, chev, ds::inkMuted(), open);
 
-        titleR.removeFromLeft(kSectionPadH + 16 + 6);
-        titleR.removeFromRight(8 + 24 + 24);
-
-        g.setFont(sectionTitleFont());
-        g.setColour(t.rowLabel);
-        const auto upper = title.toUpperCase();
-        const int titleW = (int) std::ceil(g.getCurrentFont().getStringWidthFloat(upper));
-        g.drawText(upper, titleR.removeFromLeft(titleW), juce::Justification::centredLeft, false);
+        auto titleR = header.withTrimmedLeft(chevronBounds().getRight() + 2);
+        titleR.setRight(resetBounds().getX() - 4);
+        g.setFont(uiFontFixed(11.0f, true));
+        g.setColour(ds::ink());
+        const int titleW = (int) std::ceil(juce::GlyphArrangement::getStringWidth(g.getCurrentFont(), title)) + 2;
+        g.drawText(title, titleR.removeFromLeft(juce::jmin(titleW, titleR.getWidth())),
+                   juce::Justification::centredLeft, true);
 
         if (mods > 0)
         {
             titleR.removeFromLeft(6);
-            const auto badgeText = juce::String(mods);
-            g.setFont(uiFontFixed(10.0f, true));
-            const int textW = (int) std::ceil(g.getCurrentFont().getStringWidthFloat(badgeText));
-            const int badgeW = juce::jmax(16, textW + 10);
-            auto badge = titleR.removeFromLeft(badgeW).withSizeKeepingCentre(badgeW, 16).toFloat();
-            g.setColour(t.accent.withAlpha(usesDarkAppearance() ? 0.22f : 0.12f));
-            g.fillRoundedRectangle(badge, 8.0f);
-            g.setColour(t.accent);
-            g.drawText(badgeText, badge.toNearestInt(), juce::Justification::centred, false);
+            g.setFont(monoFontFixed(11.0f));
+            g.setColour(ds::acc());
+            g.drawText(juce::String(mods) + " changed", titleR, juce::Justification::centredLeft, true);
         }
 
-        const bool dirty = mods > 0;
-        const float rest = 0.40f;
-        auto resetCol = t.chevron.withAlpha((headerHover || dirty) ? 1.0f : rest);
-        auto lockCol = locked ? t.accent
-                              : t.chevron.withAlpha(headerHover ? 1.0f : rest);
-        drawIcon(g, icons::undo,
-                 resetBounds().toFloat().withSizeKeepingCentre(14.0f, 14.0f), resetCol, 1.4f);
-        drawIcon(g, locked ? icons::lockClosed : icons::lockOpen,
-                 lockBounds().toFloat().withSizeKeepingCentre(14.0f, 14.0f), lockCol, 1.4f);
+        // Reset: live when this section has changes and is not locked.
+        const bool canReset = mods > 0 && !locked;
+        drawIcon(g, icons::undo, resetBounds().toFloat().withSizeKeepingCentre(10.0f, 10.0f),
+                 canReset ? ds::ink() : ds::inkFaint(), 1.3f);
 
-        if (showBottomDivider)
+        // Lock: a control-sm toggle; lit (accent) while locked.
+        auto lock = lockBounds().toFloat().withSizeKeepingCentre(16.0f, 14.0f);
+        if (locked)
         {
-            g.setColour(t.divider);
-            g.fillRect(0, getHeight() - 1, getWidth(), 1);
+            g.setColour(ds::acc());
+            g.fillRoundedRectangle(lock, ds::radius::sm);
         }
+        else
+        {
+            g.setColour(ds::edge());
+            g.drawRoundedRectangle(lock.reduced(0.5f), ds::radius::sm, 1.0f);
+        }
+        drawIcon(g, locked ? icons::lockClosed : icons::lockOpen, lock.withSizeKeepingCentre(9.0f, 9.0f),
+                 locked ? ds::onAccent() : ds::inkMuted(), 1.2f);
+
+        g.setColour(dragging ? ds::acc() : ds::line());
+        g.drawRoundedRectangle(b.reduced(0.5f), rad, 1.0f);
     }
 
     juce::String title;
+    juce::String sectionId;
     /** Folded by default; when folded, dirty (changed) rows stay visible. */
     bool open = false;
     bool locked = false;
-    bool showBottomDivider = true;
+    bool showBottomDivider = false;   // legacy; frames replace dividers
     std::function<void()> onToggle;
     std::function<void()> onReset;
     std::function<void()> onLockToggle;
+    /** Hold-to-reorder: fired once the hold completes, while dragging (screen Y), and on release. */
+    std::function<void()> onDragStart;
+    std::function<void(int)> onDragMove;
+    std::function<void()> onDragEnd;
 
     struct Row
     {
@@ -2322,41 +2366,47 @@ public:
     std::vector<Row> rows;
 
 private:
-    juce::Rectangle<int> headerBounds() const
+    static constexpr int kHoldMs = 380;
+
+    void timerCallback() override
     {
-        return getLocalBounds().withTrimmedTop(toolkitSectionPadT())
-            .removeFromTop(kSectionHeaderH)
-            .reduced(kSectionPadH, 0);
+        stopTimer();
+        if (!pressInHeader) return;
+        dragging = true;
+        repaint();
+        if (onDragStart) onDragStart();
     }
 
     juce::Rectangle<int> lockBounds() const
     {
         auto h = getLocalBounds().removeFromTop(kSectionHeaderH);
-        h.removeFromRight(8);
-        return h.removeFromRight(24).withSizeKeepingCentre(24, 22);
+        h.removeFromRight(4);
+        return h.removeFromRight(20);
     }
 
     juce::Rectangle<int> resetBounds() const
     {
         auto h = getLocalBounds().removeFromTop(kSectionHeaderH);
-        h.removeFromRight(8 + 24);
-        return h.removeFromRight(24).withSizeKeepingCentre(24, 22);
+        h.removeFromRight(4 + 20);
+        return h.removeFromRight(20);
     }
 
     juce::Rectangle<int> chevronBounds() const
     {
-        return { kSectionPadH, 0, 16, kSectionHeaderH };
+        return { 4, 0, 16, kSectionHeaderH };
     }
 
     /** Whole header except the reset and lock cells. */
     juce::Rectangle<int> headerHitBounds() const
     {
         auto h = getLocalBounds().removeFromTop(kSectionHeaderH);
-        h.removeFromRight(8 + 24 + 24);
+        h.removeFromRight(4 + 20 + 20);
         return h;
     }
 
     bool headerHover = false;
+    bool pressInHeader = false;
+    bool dragging = false;
 
     bool isRowShowing(const Row& r) const
     {

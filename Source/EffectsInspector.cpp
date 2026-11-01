@@ -39,7 +39,7 @@ EffectsInspector::EffectsInspector()
 
     btnReset.setComponentID("btnEffectsReset");
     btnReset.setWantsKeyboardFocus(false);
-    btnReset.ghost = true;
+    btnReset.ghost = false;
     btnReset.iconScale = 1.0f;
     btnReset.setTooltip("Reset unlocked Toolkit sections");
     btnReset.onClick = [this] { resetUnlockedSections(); };
@@ -47,9 +47,7 @@ EffectsInspector::EffectsInspector()
 
     btnEffectsLock.setComponentID("btnLock");
     btnEffectsLock.setWantsKeyboardFocus(false);
-    btnEffectsLock.ghost = true;
-    btnReset.headerChrome = true;
-    btnEffectsLock.headerChrome = true;
+    btnEffectsLock.ghost = false;
     btnEffectsLock.iconScale = 1.0f;
     btnEffectsLock.setTooltip("Lock all Toolkit parameters while browsing");
     btnEffectsLock.onClick = [this]
@@ -425,8 +423,26 @@ EffectsInspector::EffectsInspector()
     effectsSec.onReset = [this] { resetEffectsSection(); };
     effectsSec.onLockToggle = [this] { toggleSectionLock(toolkitLock::Effects); };
 
-    for (auto* sec : { &playback, &timing, &performance, &pitchSec, &effectsSec })
+    playback.sectionId = "playback";
+    timing.sectionId = "timing";
+    performance.sectionId = "performance";
+    pitchSec.sectionId = "pitch";
+    effectsSec.sectionId = "effects";
+    sectionOrder = { &playback, &timing, &performance, &pitchSec, &effectsSec };
+    for (auto* sec : sectionOrder)
+    {
         body.addAndMakeVisible(*sec);
+        sec->onDragStart = [this, sec] { beginSectionDrag(sec); };
+        sec->onDragMove = [this](int screenY) { moveSectionDrag(screenY); };
+        sec->onDragEnd = [this] { endSectionDrag(); };
+    }
+
+    // "Changed": fold every section down to its changed rows (the default way of working).
+    btnChanged.setComponentID("btnToolkitChanged");
+    btnChanged.setWantsKeyboardFocus(false);
+    btnChanged.setTooltip("Fold sections to the controls you have changed");
+    btnChanged.onClick = [this] { foldAllSections(); if (onActivated) onActivated(); };
+    addAndMakeVisible(btnChanged);
 
     setGroove(GrooveParams{}, juce::dontSendNotification);
     setEdit(ClipEdit{}, juce::dontSendNotification);
@@ -820,14 +836,13 @@ void EffectsInspector::notifyEdit()
 
 void EffectsInspector::layoutSections()
 {
-    const int w = juce::jmax(1, body.getWidth());
-    int y = 0;
-    fx::Section* secs[] = { &playback, &timing, &performance, &pitchSec, &effectsSec };
-    const int n = (int) (sizeof(secs) / sizeof(secs[0]));
-    fx::Section* last = &effectsSec;
-    for (int i = 0; i < n; ++i)
+    // Groove: section frames stacked with 4 px gaps inside an 8 px inset.
+    const int pad = metrics::scaled(8);
+    const int gap = metrics::scaled(4);
+    const int w = juce::jmax(1, body.getWidth() - pad * 2);
+    int y = pad;
+    for (auto* sec : sectionOrder)
     {
-        auto* sec = secs[i];
         if (liveStream && sec == &playback)
         {
             sec->setVisible(false);
@@ -835,18 +850,14 @@ void EffectsInspector::layoutSections()
             continue;
         }
         sec->setVisible(true);
-        last = sec;
-        sec->showBottomDivider = true;
         const int h = sec->idealHeight();
-        sec->setBounds(0, y, w, h);
+        sec->setBounds(pad, y, w, h);
         sec->resized();
-        y += h;
+        y += h + gap;
     }
-    if (last != nullptr)
-        last->showBottomDivider = false;
-    // Match header / section top pad so the last control isn't flush to the scroll edge.
-    y += toolkitBodyPadB();
-    body.setSize(w, juce::jmax(y, viewport.getMaximumVisibleHeight()));
+    y += pad - gap;
+    body.setSize(body.getWidth(), juce::jmax(y, viewport.getMaximumVisibleHeight()));
+    refreshChangedButton();
     if (onContentHeightChanged != nullptr && !notifyingHeight)
     {
         notifyingHeight = true;
@@ -855,16 +866,109 @@ void EffectsInspector::layoutSections()
     }
 }
 
+void EffectsInspector::refreshChangedButton()
+{
+    const bool folded = !anySectionOpen();
+    if (btnChanged.active != folded)
+    {
+        btnChanged.active = folded;
+        btnChanged.repaint();
+    }
+}
+
+void EffectsInspector::setSectionOrder(const juce::String& ids)
+{
+    std::vector<fx::Section*> all { &playback, &timing, &performance, &pitchSec, &effectsSec };
+    std::vector<fx::Section*> next;
+    for (const auto& id : juce::StringArray::fromTokens(ids, ",", {}))
+        for (auto* sec : all)
+            if (sec->sectionId == id.trim() && std::find(next.begin(), next.end(), sec) == next.end())
+                next.push_back(sec);
+    for (auto* sec : all)
+        if (std::find(next.begin(), next.end(), sec) == next.end())
+            next.push_back(sec);
+    sectionOrder = next;
+    layoutSections();
+}
+
+juce::String EffectsInspector::getSectionOrder() const
+{
+    juce::StringArray ids;
+    for (auto* sec : sectionOrder)
+        ids.add(sec->sectionId);
+    return ids.joinIntoString(",");
+}
+
+void EffectsInspector::beginSectionDrag(fx::Section* sec)
+{
+    draggedSection = sec;
+    sec->toFront(false);
+    jiggleStartMs = juce::Time::getMillisecondCounterHiRes();
+    startTimerHz(60);
+}
+
+void EffectsInspector::moveSectionDrag(int screenY)
+{
+    if (draggedSection == nullptr)
+        return;
+    const int y = body.getLocalPoint(nullptr, juce::Point<int>(0, screenY)).y;
+    // Insert the dragged section before the first other section whose centre is below the pointer.
+    std::vector<fx::Section*> others;
+    for (auto* sec : sectionOrder)
+        if (sec != draggedSection)
+            others.push_back(sec);
+    size_t insertAt = others.size();
+    for (size_t i = 0; i < others.size(); ++i)
+        if (others[i]->isVisible() && y < others[i]->getBounds().getCentreY())
+        {
+            insertAt = i;
+            break;
+        }
+    others.insert(others.begin() + (std::ptrdiff_t) insertAt, draggedSection);
+    if (others != sectionOrder)
+    {
+        sectionOrder = others;
+        draggedSection->setTransform({});
+        layoutSections();
+    }
+}
+
+void EffectsInspector::endSectionDrag()
+{
+    stopTimer();
+    if (draggedSection != nullptr)
+        draggedSection->setTransform({});
+    draggedSection = nullptr;
+    layoutSections();
+    if (onSectionOrderChanged)
+        onSectionOrderChanged(getSectionOrder());
+}
+
+void EffectsInspector::timerCallback()
+{
+    // The picked-up section jiggles a little (about +/-0.7 degrees) until it is dropped.
+    if (draggedSection == nullptr)
+    {
+        stopTimer();
+        return;
+    }
+    const double t = (juce::Time::getMillisecondCounterHiRes() - jiggleStartMs) / 1000.0;
+    const float angle = 0.012f * (float) std::sin(t * 24.0);
+    const auto c = draggedSection->getLocalBounds().getCentre().toFloat();
+    draggedSection->setTransform(juce::AffineTransform::rotation(angle, c.x, c.y));
+}
+
 int EffectsInspector::contentHeight() const
 {
-    int y = metrics::toolkitHeaderH();
-    for (auto* sec : { &playback, &timing, &performance, &pitchSec, &effectsSec })
+    const int pad = metrics::scaled(8);
+    const int gap = metrics::scaled(4);
+    int y = metrics::toolkitHeaderH() + pad;
+    for (auto* sec : sectionOrder)
     {
         if (liveStream && sec == &playback) continue;
-        y += sec->idealHeight();
+        y += sec->idealHeight() + gap;
     }
-    y += toolkitBodyPadB();
-    return y;
+    return y + pad - gap;
 }
 
 bool EffectsInspector::anySectionOpen() const
@@ -875,9 +979,9 @@ bool EffectsInspector::anySectionOpen() const
 
 void EffectsInspector::foldAllSections()
 {
-    // Collapse keeps dirty (modified) rows visible — same as per-section chevrons.
+    // Folding keeps changed rows visible — same as the per-section chevrons.
     const bool expand = !anySectionOpen();
-    for (auto* sec : { &playback, &timing, &performance, &pitchSec, &effectsSec })
+    for (auto* sec : sectionOrder)
         sec->setOpen(expand);
     layoutSections();
     repaint();
@@ -885,19 +989,21 @@ void EffectsInspector::foldAllSections()
 
 void EffectsInspector::updateToolkitFoldBounds()
 {
-    auto header = getLocalBounds().removeFromTop(metrics::toolkitHeaderH());
-    toolkitFoldBounds = { 12, (header.getHeight() - 16) / 2, 16, 16 };
+    toolkitFoldBounds = {};   // the "Changed" toggle replaces the header chevron
 }
 
 void EffectsInspector::resized()
 {
     auto r = getLocalBounds();
     const int headerH = metrics::toolkitHeaderH();
-    auto header = r.removeFromTop(headerH);
-    auto icons = header.removeFromRight(10 + 24 + 24);
-    icons.removeFromRight(10);
-    btnEffectsLock.setBounds(icons.removeFromRight(24).withSizeKeepingCentre(24, 22));
-    btnReset.setBounds(icons.removeFromRight(24).withSizeKeepingCentre(24, 22));
+    auto header = r.removeFromTop(headerH).reduced(metrics::scaled(8), 0).withTrimmedBottom(1);
+    const int ctl = metrics::scaled(18);
+    btnReset.setBounds(header.removeFromRight(ctl).withSizeKeepingCentre(ctl, ctl));
+    header.removeFromRight(metrics::scaled(4));
+    btnEffectsLock.setBounds(header.removeFromRight(ctl).withSizeKeepingCentre(ctl, ctl));
+    header.removeFromRight(metrics::scaled(4));
+    const int cw = btnChanged.idealWidth();
+    btnChanged.setBounds(header.removeFromRight(cw).withSizeKeepingCentre(cw, ctl));
     updateToolkitFoldBounds();
 
     viewport.setBounds(r);
@@ -928,25 +1034,19 @@ void EffectsInspector::resized()
 
 void EffectsInspector::paint(juce::Graphics& g)
 {
-    const auto& t = inspectorTokens();
-    g.fillAll(ds::panel());
-    g.setColour(t.divider);
+    g.fillAll(ds::surface100());
+    g.setColour(ds::line());
     g.fillRect(getLocalBounds().removeFromLeft(1));
 
     auto header = getLocalBounds().removeFromTop(metrics::toolkitHeaderH());
-    g.setColour(ds::head());
+    g.setColour(ds::surface300());
     g.fillRect(header);
-    g.setColour(t.divider);
+    g.setColour(ds::line());
     g.fillRect(header.getX(), header.getBottom() - 1, header.getWidth(), 1);
 
-    updateToolkitFoldBounds();
-    auto chev = toolkitFoldBounds.toFloat().withSizeKeepingCentre(10.0f, 10.0f);
-    drawStrokedChevron(g, chev, t.valueText, anySectionOpen());
-
-    auto titleArea = header;
-    titleArea.removeFromLeft(12 + 16 + 8);
-    titleArea.removeFromRight(10 + 24 + 24);
-    g.setColour(t.headerText);
+    auto titleArea = header.reduced(metrics::scaled(8), 0);
+    titleArea.setRight(btnChanged.getX() - 4);
+    g.setColour(ds::ink());
     g.setFont(uiFontFixed(13.0f, true));
     g.drawText("Toolkit", titleArea, juce::Justification::centredLeft, false);
 }
@@ -977,7 +1077,7 @@ void EffectsInspector::mouseMove(const juce::MouseEvent& e)
     const bool overFold = local.y < metrics::toolkitHeaderH()
                        && toolkitFoldBounds.expanded(8, 6).contains(local);
     if (overFold)
-        setTooltip("Fold all — keeps modified controls");
+        setTooltip("Fold all, keeping changed controls");
     setMouseCursor(overFold ? juce::MouseCursor::PointingHandCursor
                             : juce::MouseCursor::NormalCursor);
 }

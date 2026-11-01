@@ -8,7 +8,8 @@
 namespace pflow {
 
 /** Flat macOS-style effects inspector (Playback / Timing / Performance / Pitch & Scale / Effects). */
-class EffectsInspector : public juce::Component, public juce::SettableTooltipClient
+class EffectsInspector : public juce::Component, public juce::SettableTooltipClient,
+                         private juce::Timer
 {
 public:
     EffectsInspector();
@@ -56,6 +57,11 @@ public:
     /** Fired when a section fold changes the preferred pane height. */
     std::function<void()> onContentHeightChanged;
 
+    /** Section order as comma-separated ids (playback,timing,performance,pitch,effects). */
+    void setSectionOrder(const juce::String& ids);
+    juce::String getSectionOrder() const;
+    std::function<void(const juce::String&)> onSectionOrderChanged;
+
     fx::Section& playbackSection() { return playback; }
     fx::Section& timingSection() { return timing; }
     fx::Section& performanceSection() { return performance; }
@@ -92,6 +98,11 @@ private:
     void foldAllSections();
     bool anySectionOpen() const;
     void updateToolkitFoldBounds();
+    void timerCallback() override;
+    void beginSectionDrag(fx::Section* sec);
+    void moveSectionDrag(int screenY);
+    void endSectionDrag();
+    void refreshChangedButton();
     void refreshDependentEnables();
     void refreshOctaveSummary();
 
@@ -110,6 +121,10 @@ private:
     IconBtn btnReset { icons::undo, "Reset effects to defaults" };
     IconBtn btnEffectsLock { icons::lockOpen, "Lock effects while browsing" };
     juce::Rectangle<int> toolkitFoldBounds;
+    ChipBtn btnChanged { "Changed" };
+    std::vector<fx::Section*> sectionOrder;
+    fx::Section* draggedSection = nullptr;
+    double jiggleStartMs = 0.0;
 
     fx::Section playback { "Playback" };
     fx::Section timing { "Timing" };

@@ -277,7 +277,7 @@ namespace metrics {
     inline int listRowH()         { return scaled(ds::region::listRowH); }
     inline int listHeaderH()      { return scaled(ds::region::listHeaderH); }
     inline int paneHeaderH()      { return scaled(28); }
-    inline int toolkitHeaderH()   { return scaled(44); }
+    inline int toolkitHeaderH()   { return scaled(24); }
     inline int padS()             { return scaled(currentDensity() == Density::Comfortable ? 12 : 8); }
     inline int miniRollH()        { return scaled(ds::region::previewH); }
     /** Scale with Text & icons setting so chrome stays proportional. */

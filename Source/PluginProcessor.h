@@ -94,6 +94,8 @@ public:
     // stamped onto every clip while browsing. lockAutoTrim reapplies empty-bar
     // trim on each file while Playback is locked with trim engaged.
     uint32_t sectionLocks = 0;
+    /** Toolkit section order, comma-separated ids (empty = default order). */
+    juce::String toolkitSectionOrder;
     bool lockAutoTrim = false;
     ClipEdit lockedEdit;
     GrooveParams lockedGroove;

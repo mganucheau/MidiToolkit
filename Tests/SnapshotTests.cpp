@@ -3,6 +3,7 @@
 
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include "EffectsInspector.h"
 #include "TestHelpers.h"
 #include <CoreFoundation/CoreFoundation.h>
 
@@ -158,6 +159,23 @@ TEST_CASE("Snapshot the Groove Panel editor states", "[snapshot]")
     ed->setSize(1500, 760);
     pumpFor(400);
     save(*ed, "04-roll-toolkit");
+
+    // Unfold every Toolkit section to check the controls.
+    std::function<juce::Component*(juce::Component*)> find = [&](juce::Component* c) -> juce::Component*
+    {
+        if (c->getComponentID() == "btnToolkitChanged") return c;
+        for (auto* k : c->getChildren())
+            if (auto* f = find(k)) return f;
+        return nullptr;
+    };
+    if (auto* changed = dynamic_cast<juce::Button*>(find(ed.get())); changed != nullptr && changed->onClick)
+    {
+        changed->onClick();
+        ed->setSize(1500, 1400);
+        pumpFor(400);
+        save(*ed, "07-toolkit-open");
+        changed->onClick();
+    }
     browser->toggleEditorFold();
     browser->toggleEffectsForTesting();
 
@@ -181,4 +199,19 @@ TEST_CASE("Snapshot the Groove Panel editor states", "[snapshot]")
     if (hadLib)
         libFile.replaceWithData(libBackup.getData(), libBackup.getSize());
     dir.deleteRecursively();
+}
+
+TEST_CASE("Toolkit section order round-trips and ignores unknown ids", "[editorui]")
+{
+    juce::ScopedJuceInitialiser_GUI gui;
+    EffectsInspector fx;
+    fx.setSize(300, 800);
+    CHECK(fx.getSectionOrder() == "playback,timing,performance,pitch,effects");
+
+    juce::String saved;
+    fx.onSectionOrderChanged = [&](const juce::String& s) { saved = s; };
+    fx.setSectionOrder("pitch,bogus,timing");
+    CHECK(fx.getSectionOrder() == "pitch,timing,playback,performance,effects");
+    CHECK(fx.pitchSection().getY() < fx.timingSection().getY());
+    CHECK(fx.timingSection().getY() < fx.playbackSection().getY());
 }

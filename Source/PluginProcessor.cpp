@@ -756,6 +756,7 @@ void MidiToolkitProcessor::getStateInformation(juce::MemoryBlock& dest)
     xml.setAttribute("nameColumnWidth", nameColumnWidth);
     syncLockFlagsFromSections();
     xml.setAttribute("sectionLocks", (int) sectionLocks);
+    xml.setAttribute("toolkitOrder", toolkitSectionOrder);
     xml.setAttribute("editLock", editLock ? 1 : 0);
     xml.setAttribute("effectsLock", effectsLock ? 1 : 0);
     xml.setAttribute("lockAutoTrim", lockAutoTrim ? 1 : 0);
@@ -1019,6 +1020,7 @@ void MidiToolkitProcessor::setStateInformation(const void* data, int sizeInBytes
             nameColumnWidth = juce::jlimit(120, 2400, xml->getIntAttribute("nameColumnWidth", 140));
             editLock = xml->getIntAttribute("editLock", 0) != 0;
             effectsLock = xml->getIntAttribute("effectsLock", 0) != 0;
+            toolkitSectionOrder = xml->getStringAttribute("toolkitOrder", {});
             if (xml->hasAttribute("sectionLocks"))
                 sectionLocks = (uint32_t) xml->getIntAttribute("sectionLocks", 0) & toolkitLock::All;
             else
