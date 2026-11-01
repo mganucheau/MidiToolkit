@@ -79,9 +79,9 @@ const InspectorTokens& inspectorTokens()
         p.tx3,             // valueText
         p.hl,              // divider
         p.trk,             // sliderTrack
-        juce::Colours::white,
+        ds::ink(),         // sliderKnob (Groove handle = solid ink block)
         p.ctl,             // controlSurface
-        d ? p.ctl.brighter(0.08f) : p.ctl.darker(0.03f),
+        ds::surface300(),  // controlSurfaceHi (hover raises one surface step)
         p.hl,              // controlSeparator
         p.trk,             // switchOffTrack
         p.tx3,             // chevron
@@ -89,7 +89,7 @@ const InspectorTokens& inspectorTokens()
         p.ctlb,            // controlHairline
         p.field,           // tallWell
         p.trk,             // tallFill
-        d ? p.ctl.brighter(0.12f) : p.ctl.darker(0.06f),
+        ds::surface300(),  // tallWellHot
         d,
     };
     return cached;

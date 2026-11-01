@@ -48,13 +48,12 @@ inline int toolkitBodyPadB()         { return toolkitDensity(8); }
     fails and white type needs a deeper fill. */
 inline juce::Colour accentFillColour()
 {
-    const auto acc = ds::acc();
-    return usesDarkAppearance() ? acc.darker(0.28f) : acc;
+    return ds::acc();   // Groove: lit = accent, text on it = on-accent
 }
 
 inline juce::Colour onAccentColour()
 {
-    return juce::Colours::white;
+    return ds::onAccent();
 }
 
 inline juce::Font inspectorFont(bool semibold = false) { return uiFontFixed(kFontPt, semibold); }
@@ -1138,8 +1137,8 @@ public:
         auto header = getLocalBounds().removeFromTop(headerStrip());
         if (sidebarLabelStyle)
         {
-            g.setFont(uiFontFixed(11.0f));
-            g.setColour(ds::tx2());
+            g.setFont(uiFontFixed(11.0f, true));
+            g.setColour(ds::inkMuted());
         }
         else
         {
@@ -1162,7 +1161,7 @@ public:
         }
         g.setFont(sidebarLabelStyle ? uiFontFixed(11.0f) : inspectorFont());
         const bool summaryDefault = getSelectedIndex() == neutralIndex;
-        g.setColour(summaryDefault ? t.valueText : t.accent);
+        g.setColour(summaryDefault ? ds::inkMuted() : ds::ink());
         g.drawText(selectedSummary(), header, juce::Justification::centredRight, true);
 
         if (collapsible && collapsed)
@@ -1175,24 +1174,14 @@ public:
             const bool on = i < (int) selected.size() && selected[(size_t) i];
             const bool cand = !on && i < 16
                 && (candidateMask & (uint16_t) (1u << i)) != 0;
-            if (on)
-                g.setColour(accentFillColour());
-            else if (cand)
-                g.setColour(t.accent.withAlpha(0.12f));
-            else
-                g.setColour(t.tallWell);
-            g.fillRoundedRectangle(cell, 6.0f);
-            if (cand)
+            // Groove toggle: accent when lit, surface-200 + edge when not; a candidate
+            // (suggested) chip keeps the unlit face with an accent outline.
+            g.setColour(on ? ds::acc() : ds::surface200());
+            g.fillRoundedRectangle(cell, ds::radius::sm);
+            if (!on)
             {
-                g.setColour(t.accent.withAlpha(0.12f));
-                g.fillRoundedRectangle(cell, 6.0f);
-                g.setColour(t.accent);
-                g.drawRoundedRectangle(cell.reduced(0.5f), 6.0f, 1.0f);
-            }
-            else if (!on)
-            {
-                g.setColour(t.controlHairline);
-                g.drawRoundedRectangle(cell.reduced(0.5f), 6.0f, 1.0f);
+                g.setColour(cand ? ds::acc() : ds::edge());
+                g.drawRoundedRectangle(cell.reduced(0.5f), ds::radius::sm, 1.0f);
             }
             float chipPt = kAnnotPt;
             if (sidebarLabelStyle)
@@ -1203,8 +1192,7 @@ public:
                     chipPt = 9.0f;
             }
             g.setFont(uiFontFixed(chipPt, on));
-            g.setColour(on ? onAccentColour()
-                           : (cand ? t.accent : t.headerText));
+            g.setColour(on ? ds::onAccent() : ds::ink());
             g.drawText(labels[i], cell.toNearestInt(), juce::Justification::centred, false);
         }
         if (hint.isNotEmpty())
@@ -1536,8 +1524,8 @@ public:
         auto header = r.removeFromTop(headerStrip());
         if (sidebarLabelStyle)
         {
-            g.setFont(uiFont(11.0f));
-            g.setColour(ds::tx2());
+            g.setFont(uiFontFixed(11.0f, true));
+            g.setColour(ds::inkMuted());
         }
         else
         {
@@ -1558,8 +1546,8 @@ public:
             g.drawText(label, header.removeFromLeft(header.getWidth() / 2),
                        juce::Justification::centredLeft, true);
         }
-        g.setColour(isFullRange() ? t.valueText : t.accent);
-        g.setFont(sidebarLabelStyle ? uiFont(11.0f, true) : inspectorFont());
+        g.setColour(isFullRange() ? ds::inkMuted() : ds::ink());
+        g.setFont(sidebarLabelStyle ? monoFontFixed(11.0f) : inspectorFont());
         const juce::String val = isFullRange() ? "Any"
             : (juce::String(lo) + juce::String::charToString((juce::juce_wchar) 0x2013) + juce::String(hi));
         g.drawText(val, header, juce::Justification::centredRight, true);
@@ -1586,39 +1574,44 @@ public:
                 hist.getX() + (float) i * (barW + gap),
                 hist.getBottom() - juce::jmax(2.0f, h),
                 barW, juce::jmax(2.0f, h));
-            g.setColour(inRange ? t.accent : t.tallFill);
-            g.fillRoundedRectangle(bar, 1.5f);
+            if (bins[(size_t) i] <= 0)
+            {
+                // Empty bin: a 1px hairline so the range still reads.
+                g.setColour(ds::surface300());
+                g.fillRect(bar.withTop(hist.getBottom() - 1.0f));
+            }
+            else
+            {
+                g.setColour(inRange ? ds::acc() : ds::inkFaint());
+                g.fillRect(bar);
+            }
         }
 
         r.removeFromTop(4);
         constexpr float kThumbD = 14.0f;
         const float thumbInset = kThumbD * 0.5f;
         auto lane = r.removeFromTop(kTrackH).toFloat();
-        auto track = lane.reduced(thumbInset, 0.0f).withSizeKeepingCentre(lane.getWidth() - thumbInset * 2.0f, 4.0f);
-        g.setColour(ds::trk());
-        g.fillRoundedRectangle(track, 2.0f);
+        auto track = lane.reduced(thumbInset, 0.0f).withSizeKeepingCentre(lane.getWidth() - thumbInset * 2.0f, 2.0f);
+        g.setColour(ds::inkFaint());
+        g.fillRect(track);
         const float trackSpan = (float) juce::jmax(1, maxV - minV);
         const float xLo = track.getX() + track.getWidth() * ((float) (lo - minV) / trackSpan);
         const float xHi = track.getX() + track.getWidth() * ((float) (hi - minV) / trackSpan);
         auto sel = juce::Rectangle<float>::leftTopRightBottom(xLo, track.getY(), xHi, track.getBottom());
-        g.setColour(t.accent);
-        g.fillRoundedRectangle(sel, 2.0f);
+        g.setColour(ds::acc());
+        g.fillRect(sel);
+        // Groove handles: solid ink blocks (10 x 12, radius-sm).
         auto thumbAt = [&](float x)
         {
-            return juce::Rectangle<float>(x - kThumbD * 0.5f,
-                                          lane.getCentreY() - kThumbD * 0.5f,
-                                          kThumbD, kThumbD);
+            return juce::Rectangle<float>(x - 5.0f, lane.getCentreY() - 6.0f, 10.0f, 12.0f);
         };
         ds::shadow::thumb(g, thumbAt(xLo));
         ds::shadow::thumb(g, thumbAt(xHi));
-        g.setColour(juce::Colours::black.withAlpha(0.15f));
-        g.drawEllipse(thumbAt(xLo), 0.5f);
-        g.drawEllipse(thumbAt(xHi), 0.5f);
     }
 
 private:
     static constexpr int kLabelH = 18;
-    static constexpr int kHistH = 16;
+    static constexpr int kHistH = 24;
     static constexpr int kTrackH = 20;
 
     int headerStrip() const { return collapsible ? 22 : kLabelH; }

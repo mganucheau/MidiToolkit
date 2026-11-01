@@ -49,6 +49,7 @@ public:
     /** Reset unlocked sections only (header refresh). */
     std::function<void()> onResetUnlocked;
     std::function<void()> onTrimClicked;
+    bool isTrimOn() const { return trimSwitch.getToggleState(); }
     std::function<void()> onActivated;
     /** Transport + toolkit header + current section heights. */
     int contentHeight() const;

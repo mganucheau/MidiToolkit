@@ -41,8 +41,8 @@ const Palette& palette()
         rgba(0, 0, 0, 0.0f),        // rowalt    (hairlines, no zebra)
         juce::Colour(0xff6fb5f0),   // note      = clip-6
         juce::Colour(0xffb94e00),   // stron     = accent
-        juce::Colour(0xff3e3e3e),   // kw
-        juce::Colour(0xffa3a3a3),   // kb
+        juce::Colour(0xfff4f4f4),   // kw (white keys)
+        juce::Colour(0xff3e3e3e),   // kb (black keys)
         rgba(0, 0, 0, 0.10f),       // laneb
         rgba(0, 0, 0, 0.16f),       // beat
         juce::Colour(0xffff7a6b),   // kindDrums = clip-1

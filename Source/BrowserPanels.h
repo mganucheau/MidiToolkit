@@ -145,6 +145,19 @@ public:
     /** Fired when × clears search — leave search results. */
     std::function<void()> onExitSearch;
 
+    /** The search field and the filter panel are owned here (they carry the
+        search logic) but hosted by the browser toolbar and the filter popover. */
+    juce::Component& searchComponent();
+    juce::Component& filterComponent();
+    int filterIdealHeight() const;
+    bool isFilterOpen() const { return filterOpen; }
+    void setFilterOpen(bool open);
+    int activeFilterCount() const;
+    void resetFilters();
+    bool isCurrentFolderSaved() const { return isCurrentFolderFavorited(); }
+    std::function<void(bool)> onFilterOpenChanged;
+    std::function<void()> onFilterLayoutChanged;
+
     /** Open/focus the SEARCH field (legacy name kept for editor wiring). */
     void setSearchFormOpen(bool open);
     bool isSearchFormOpen() const { return searchOpen; }
@@ -152,7 +165,7 @@ public:
 
 private:
     enum class RowKind { Open, Starred, SavedDir, SavedSearch };
-    enum class SectionId { Library, Search, Saved };
+    enum class SectionId { Library, Search, Saved };  // Folders · Favorites · Saved Searches
 
     struct RowHit
     {
@@ -286,9 +299,9 @@ private:
         fx::ChipGrid keyGrid;
         fx::ChipGrid kindGrid;
         fx::ChipGrid timeSigGrid;
-        fx::HistRangeSlider bpmRange { "TEMPO", 40, 240 };
-        fx::HistRangeSlider barsRange { "BARS", 1, 64 };
-        fx::HistRangeSlider complexityRange { "COMPLEXITY", 0, 100 };
+        fx::HistRangeSlider bpmRange { "Tempo", 40, 240 };
+        fx::HistRangeSlider barsRange { "Bars", 1, 64 };
+        fx::HistRangeSlider complexityRange { "Complexity", 0, 100 };
     };
 
     // ── Search query (field + Save chip when typed)
@@ -306,7 +319,7 @@ private:
         void focusQuery();
         void blurQuery();
         bool isQueryFocused() const;
-        int idealHeight() const { return metrics::scaled(28); }
+        int idealHeight() const { return metrics::scaled(18); }
         void setFilterActive(bool on);
         std::function<void()> onActivate;
         std::function<void()> onToggleFilter;
@@ -442,6 +455,10 @@ public:
     std::function<void(const BrowserColumnVisibility&)> onColumnVisibilityChanged;
     std::function<void(int logicalWidth)> onNameColumnWidthChanged;
 
+    std::function<void(const juce::String&)> onFolderNameChanged;
+    std::function<void()> onEntriesChanged;
+    juce::String getFolderName() const { return folderName; }
+
     std::function<void(int)> onSelect;       // entry index
     std::function<void(int)> onPlayRow;      // entry index
     std::function<void(int)> onToggleStar;   // entry index
@@ -492,15 +509,15 @@ private:
     static constexpr int kNameWMin = 120;
     static constexpr int kNameWMax = 2400;
     static constexpr int kKeyW = 44;
-    static constexpr int kTempoW = 52;
+    static constexpr int kTempoW = 40;
     static constexpr int kBarsW = 44;
-    static constexpr int kKindW = 56;
+    static constexpr int kKindW = 52;
     static constexpr int kComplexityW = 52;
     static constexpr int kDifNotesW = 56;
     static constexpr int kTimeSigW = 52;
     static constexpr int kNotesW = 48;
     static constexpr int kSortArrowW = 12;
-    static constexpr int kIconW = 23;
+    static constexpr int kIconW = 18;
     static constexpr int kResizeHitSlop = 8;
 
     int nameResizeHandleX() const;
@@ -563,6 +580,130 @@ private:
     friend class ListContent;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(FileListPanel)
+};
+
+/** Clip colour used for a kind (the user's labels: clip-1 … clip-8). */
+inline juce::Colour kindClipColour(ClipKind k)
+{
+    switch (k)
+    {
+        case ClipKind::Drums:  return ds::clip(1);
+        case ClipKind::Bass:   return ds::clip(6);
+        case ClipKind::Piano:  return ds::clip(7);
+        case ClipKind::Lead:   return ds::clip(5);
+        case ClipKind::Single: return ds::clip(2);
+    }
+    return ds::clip(6);
+}
+
+/** Grid browser: files as clip slots in one column per kind (Groove ClipSlot look). */
+class KindGridView : public juce::Component
+{
+public:
+    KindGridView();
+    static int idealWidth();
+    void setSource(const FileListPanel* list);
+    void refresh();
+    void setPlayhead(bool isPlaying, float loopPhase);
+
+    void paint(juce::Graphics&) override;
+    void resized() override;
+    void mouseDown(const juce::MouseEvent&) override;
+    void mouseDrag(const juce::MouseEvent&) override;
+    void mouseUp(const juce::MouseEvent&) override;
+    void mouseDoubleClick(const juce::MouseEvent&) override;
+    void mouseWheelMove(const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
+    bool keyPressed(const juce::KeyPress&) override;
+
+    std::function<void(int)> onSelect;                  // entry index
+    std::function<void(int)> onOpen;                    // entry index (double-click)
+    std::function<void(const juce::File&)> onDragFile;
+    std::function<void(int)> onStep;                    // -1 / +1 with arrow keys
+
+private:
+    struct Column { ClipKind kind; std::vector<int> entries; };
+    int entryAt(juce::Point<int> p) const;
+    int maxScroll() const;
+    juce::Rectangle<int> columnBounds(int c) const;
+
+    const FileListPanel* source = nullptr;
+    std::vector<Column> cols;
+    int scrollY = 0;
+    bool playing = false;
+    float phase = 0.0f;
+    int pressedEntry = -1;
+    bool dragStarted = false;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(KindGridView)
+};
+
+// Browser column header (Groove): folder title · count · Grid · Subfolders · Saved · Rescan,
+// then the search field and the Filters toggle.
+
+class BrowserToolbar : public juce::Component
+{
+public:
+    BrowserToolbar();
+
+    void resized() override;
+    void paint(juce::Graphics&) override;
+    int idealHeight() const;
+
+    /** Host the sidebar's search field in the search row. */
+    void setSearchComponent(juce::Component* c);
+    void setTitle(const juce::String& t);
+    void setCount(int shown, int total);
+    void setGrid(bool on);
+    void setSubfolders(bool on);
+    void setSaved(bool on, bool canSave);
+    void setFiltersActive(bool open, int activeCount);
+
+    std::function<void()> onToggleGrid;
+    std::function<void()> onToggleSubfolders;
+    std::function<void()> onToggleSaved;
+    std::function<void()> onRescan;
+    std::function<void()> onToggleFilters;
+
+private:
+    juce::String title { "Select a folder" };
+    juce::String countText;
+    juce::Component* search = nullptr;
+    ChipBtn btnGrid { "Grid" };
+    ChipBtn btnSubfolders { "Subfolders" };
+    IconBtn btnSaved { icons::star, "Save folder to Library" };
+    IconBtn btnRescan { icons::refresh, "Rescan folder" };
+    IconBtn btnFilters { icons::sliders, "Filters" };
+    juce::Rectangle<int> headerBounds, searchRowBounds;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(BrowserToolbar)
+};
+
+/** Floating filter menu (radius-md, shadow-popover) that hosts the sidebar's filter panel. */
+class FilterPopover : public juce::Component
+{
+public:
+    FilterPopover();
+    void setContent(juce::Component* panel, std::function<int()> idealPanelHeight);
+    void setCountText(const juce::String& t);
+    int idealHeight() const;
+    void resized() override;
+    void paint(juce::Graphics&) override;
+    bool keyPressed(const juce::KeyPress&) override;
+
+    std::function<void()> onDone;
+    std::function<void()> onSaveSearch;
+    std::function<void()> onReset;
+
+private:
+    juce::Component* panel = nullptr;
+    std::function<int()> panelHeight;
+    juce::String countText;
+    ChipBtn btnReset { "Reset" };
+    ChipBtn btnSave { "Save Search", icons::plus };
+    ChipBtn btnDone { "Done" };
+    juce::DropShadower shadower { juce::DropShadow(juce::Colours::black.withAlpha(0.6f), 12, { 0, 4 }) };
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(FilterPopover)
 };
 
 } // namespace pflow

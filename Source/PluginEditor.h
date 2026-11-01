@@ -43,6 +43,12 @@ public:
     void ensureAndSelectFile(const juce::File& file);
     void toggleEditorFold();
 
+    // Test / snapshot hooks.
+    void toggleEffectsForTesting() { toggleEffectsFold(); }
+    void setGridViewForTesting(bool on) { if (gridView != on && browserBar.onToggleGrid) browserBar.onToggleGrid(); }
+    void setFilterOpenForTesting(bool on) { sidebar.setFilterOpen(on); }
+    void setSidebarCollapsedForTesting(bool on) { sidebar.setCollapsed(on); }
+
 private:
     void applyNativeWindowChrome();
     /** Async folder scan — never parses MIDI on the message thread. */
@@ -83,6 +89,8 @@ private:
     void applyLayoutState();
     void updateWindowLimits();
     void layoutContent();
+    /** Push folder / count / subfolder / saved / filter state into the browser toolbar. */
+    void refreshBrowserBar();
     void applySavedDefaultView();
     void saveCurrentViewAsDefault();
     void toggleEffectsFold();
@@ -207,20 +215,54 @@ private:
 
     TransportBar transport;
     FavoritesSidebar sidebar;
+    BrowserToolbar browserBar;
+    FilterPopover filterPopover;
     FileListPanel fileList;
     PianoRollMini miniRoll;
     PianoRollEditor rollEditor;
     EffectsInspector effectsInspector;
 
+    /** Groove preview header: clip name · bars · key, then Vel · Trim · Mute · Drag. */
     class PreviewHeader : public juce::Component
     {
     public:
-        explicit PreviewHeader(MidiToolkitEditor& o) : owner(o) {}
+        explicit PreviewHeader(MidiToolkitEditor& o);
         void paint(juce::Graphics&) override;
-        void mouseDown(const juce::MouseEvent&) override;
+        void resized() override;
+        void refresh();
         MidiToolkitEditor& owner;
+
+        struct DragBtn : ChipBtn
+        {
+            using ChipBtn::ChipBtn;
+            std::function<void()> onDragStart;
+            bool started = false;
+            void mouseDrag(const juce::MouseEvent& e) override
+            {
+                if (!started && e.getDistanceFromDragStart() > 4 && onDragStart)
+                {
+                    started = true;
+                    onDragStart();
+                }
+            }
+            void mouseUp(const juce::MouseEvent& e) override
+            {
+                started = false;
+                ChipBtn::mouseUp(e);
+            }
+        };
+        ChipBtn btnVel { "Vel" };
+        ChipBtn btnTrim { "Trim" };
+        ChipBtn btnMute { "Mute" };
+        DragBtn btnDrag { "Drag", icons::dragOut };
+        juce::String name, meta;
     };
     PreviewHeader previewHeader { *this };
+    KindGridView kindGrid;
+    bool gridView = false;
+    bool showPreviewVelocity = false;
+    bool previewMuted = false;
+    int browserContentWidth() const;
 
     juce::File rootDir;
     std::vector<StepClip> clips;

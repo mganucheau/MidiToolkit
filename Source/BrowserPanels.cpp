@@ -7,36 +7,33 @@ namespace pflow {
 
 namespace {
 
-// 3c source-list metrics (Cupertino sidebar).
-constexpr int kSidebarHeaderH = 28;
-constexpr int kSidebarSectionH = 18;
-constexpr int kSidebarRowH = 28;
-constexpr int kOpenFolderH = 34;
+// Groove Panel library metrics.
+constexpr int kSidebarHeaderH = 24;   // panel header band
+constexpr int kSidebarSectionH = 18;  // section label row
+constexpr int kSidebarRowH = 22;      // list row
+constexpr int kOpenFolderH = 24;
 constexpr int kCardHeaderH = 22;
-constexpr int kSectionGap = 12;
-constexpr int kHeaderToRows = 4;
+constexpr int kSectionGap = 8;
+constexpr int kHeaderToRows = 2;
 constexpr int kBodyPadT = 8;
-constexpr int kBodyPadB = 10;
+constexpr int kBodyPadB = 8;
 constexpr int kPadH = 8;
-constexpr int kPadV = 12;
-constexpr int kRowPadX = 6;
-constexpr int kIconCol = 16;
+constexpr int kRowPadX = 8;
+constexpr int kIconCol = 12;
 constexpr int kRowIconGap = 6;
 constexpr int kCollapsedBtn = 28;
 constexpr float kCapPt = 11.0f;
-constexpr float kTitlePt = 12.5f;
-constexpr float kCtrlPt = 13.0f;
-constexpr float kSidebarIconStroke = 1.5f;
+constexpr float kTitlePt = 13.0f;
+constexpr float kCtrlPt = 11.0f;
+constexpr float kSidebarIconStroke = 1.3f;
 
 inline int sidebarHeaderH() { return metrics::scaled(kSidebarHeaderH); }
 inline int sidebarSectionH() { return metrics::scaled(kSidebarSectionH); }
 inline int sidebarRowH() { return metrics::scaled(kSidebarRowH); }
-inline int sidebarRowGap() { return metrics::scaled(2); }
 inline int sidebarSectionGap() { return metrics::scaled(kSectionGap); }
 inline int sidebarHeaderToRows() { return metrics::scaled(kHeaderToRows); }
 inline int sidebarBodyPadT() { return metrics::scaled(kBodyPadT); }
 inline int sidebarPadH() { return metrics::scaled(kPadH); }
-inline int sidebarPadV() { return metrics::scaled(kPadV); }
 inline int sidebarRowPadX() { return metrics::scaled(kRowPadX); }
 inline int sidebarIconCol() { return metrics::scaled(kIconCol); }
 inline int sidebarRowIconGap() { return metrics::scaled(kRowIconGap); }
@@ -50,32 +47,32 @@ struct SourceListPalette
 
 inline SourceListPalette sl()
 {
-    // All colours from ds:: tokens (§2) — no local hex.
+    // Groove Panel tokens.
     return {
-        ds::side(),
-        ds::panel(),
-        ds::ctl(),
-        ds::tx(),
-        ds::tx2(),
-        ds::tx3(),
-        ds::acc(),
-        ds::selsoft(),
-        ds::ctlb(),
-        ds::stron(),
-        juce::Colours::black.withAlpha(usesDarkAppearance() ? 0.30f : 0.14f),
+        ds::surface100(),   // tint
+        ds::surface100(),   // card
+        ds::surface200(),   // control
+        ds::ink(),          // text
+        ds::inkMuted(),     // text2
+        ds::inkMuted(),     // text3
+        ds::acc(),          // accent
+        ds::surface300(),   // selectWash (selected row)
+        ds::edge(),         // border
+        ds::acc(),          // gold (favorite star)
+        juce::Colours::transparentBlack,
     };
 }
 
 inline void fillControlSurface(juce::Graphics& g, juce::Rectangle<float> r, float radius,
                                 bool drawShadow = true)
 {
+    // Groove toggle face: surface-200, edge border, radius-sm, no shadow.
+    juce::ignoreUnused(radius, drawShadow);
     const auto p = sl();
     g.setColour(p.control);
-    g.fillRoundedRectangle(r, radius);
+    g.fillRoundedRectangle(r, ds::radius::sm);
     g.setColour(p.border);
-    g.drawRoundedRectangle(r.reduced(0.5f), radius, 1.0f);
-    if (drawShadow)
-        ds::shadow::control(g, r, radius);
+    g.drawRoundedRectangle(r.reduced(0.5f), ds::radius::sm, 1.0f);
 }
 
 } // namespace
@@ -87,12 +84,12 @@ FavoritesSidebar::FilterPanel::FilterPanel()
     juce::StringArray keys;
     for (int i = 0; i < 12; ++i)
         keys.add(kNoteNames[(size_t) i]);
-    keyGrid.title = "KEY";
+    keyGrid.title = "Key";
     keyGrid.columns = 6;
     keyGrid.multiSelect = true;
     keyGrid.sidebarLabelStyle = true;
     keyGrid.collapsible = true;
-    keyGrid.collapsed = true;
+    keyGrid.collapsed = false;
     keyGrid.onCollapsedChanged = [this] { if (onLayoutChanged) onLayoutChanged(); };
     keyGrid.setItems(keys);
     keyGrid.onChange = [this]
@@ -104,12 +101,12 @@ FavoritesSidebar::FilterPanel::FilterPanel()
     juce::StringArray kinds;
     for (int i = 0; i < 5; ++i)
         kinds.add(clipKindName((ClipKind) i));
-    kindGrid.title = "KIND";
+    kindGrid.title = "Kind";
     kindGrid.columns = 3;
     kindGrid.multiSelect = true;
     kindGrid.sidebarLabelStyle = true;
     kindGrid.collapsible = true;
-    kindGrid.collapsed = true;
+    kindGrid.collapsed = false;
     kindGrid.onCollapsedChanged = [this] { if (onLayoutChanged) onLayoutChanged(); };
     kindGrid.setItems(kinds);
     kindGrid.onChange = [this]
@@ -121,7 +118,7 @@ FavoritesSidebar::FilterPanel::FilterPanel()
     juce::StringArray timeSigs;
     for (int i = 0; i < kNumFilterTimeSigs; ++i)
         timeSigs.add(kFilterTimeSigs[i].label);
-    timeSigGrid.title = "TIME";
+    timeSigGrid.title = "Time";
     timeSigGrid.columns = 4;
     timeSigGrid.multiSelect = true;
     timeSigGrid.sidebarLabelStyle = true;
@@ -139,7 +136,7 @@ FavoritesSidebar::FilterPanel::FilterPanel()
     {
         range->sidebarLabelStyle = true;
         range->collapsible = true;
-        range->collapsed = true;
+        range->collapsed = false;
         range->onCollapsedChanged = [this] { if (onLayoutChanged) onLayoutChanged(); };
         range->onChange = [this](int, int)
         {
@@ -159,17 +156,14 @@ void FavoritesSidebar::FilterPanel::lookAndFeelChanged()
 
 int FavoritesSidebar::FilterPanel::idealHeight() const
 {
-    const int gap = metrics::scaled(4);
-    const int sub = metrics::scaled(28);
-    return sub + metrics::scaled(8)
-         + keyGrid.idealHeight() + gap
+    const int gap = metrics::scaled(8);
+    return keyGrid.idealHeight() + gap
          + kindGrid.idealHeight() + gap
          + timeSigGrid.idealHeight() + gap
          + bpmRange.idealHeight() + gap
          + barsRange.idealHeight() + gap
          + complexityRange.idealHeight() + gap
-         + metrics::scaled(4)
-         + 24;
+         + 18;
 }
 
 void FavoritesSidebar::FilterPanel::setIncludeSubdirs(bool on)
@@ -347,15 +341,15 @@ void FavoritesSidebar::FilterPanel::paint(juce::Graphics& g)
     {
         if (r.isEmpty()) return;
         auto cell = r.toFloat();
-        g.setColour(on ? fx::accentFillColour() : t.tallWell);
-        g.fillRoundedRectangle(cell, 6.0f);
+        g.setColour(on ? ds::acc() : ds::surface200());
+        g.fillRoundedRectangle(cell, ds::radius::sm);
         if (!on)
         {
-            g.setColour(t.controlHairline);
-            g.drawRoundedRectangle(cell.reduced(0.5f), 6.0f, 1.0f);
+            g.setColour(ds::edge());
+            g.drawRoundedRectangle(cell.reduced(0.5f), ds::radius::sm, 1.0f);
         }
-        g.setFont(uiFontFixed(fx::kAnnotPt, on));
-        g.setColour(on ? fx::onAccentColour() : t.headerText);
+        g.setFont(uiFontFixed(11.0f, true));
+        g.setColour(on ? ds::onAccent() : ds::ink());
         g.drawText(label, r, juce::Justification::centred, false);
     };
     paintChip(hideDupesBounds, "Hide duplicates", hideDuplicates);
@@ -387,18 +381,11 @@ void FavoritesSidebar::FilterPanel::mouseDown(const juce::MouseEvent& e)
 void FavoritesSidebar::FilterPanel::resized()
 {
     auto r = getLocalBounds();
-    const int gap = metrics::scaled(4);
+    const int gap = metrics::scaled(8);
 
-    subdirRowBounds = r.removeFromTop(metrics::scaled(28));
-    {
-        constexpr int kSwitchW = 28;
-        constexpr int kSwitchH = 16;
-        subdirSwitchBounds = juce::Rectangle<int>(
-            subdirRowBounds.getRight() - kSwitchW,
-            subdirRowBounds.getY() + (subdirRowBounds.getHeight() - kSwitchH) / 2,
-            kSwitchW, kSwitchH);
-    }
-    r.removeFromTop(metrics::scaled(8));
+    // Subfolders lives in the browser toolbar; Reset in the popover header.
+    subdirRowBounds = {};
+    subdirSwitchBounds = {};
 
     keyGrid.setBounds(r.removeFromTop(keyGrid.idealHeight()));
     r.removeFromTop(gap);
@@ -412,19 +399,17 @@ void FavoritesSidebar::FilterPanel::resized()
     r.removeFromTop(gap);
     complexityRange.setBounds(r.removeFromTop(complexityRange.idealHeight()));
     r.removeFromTop(gap);
-    r.removeFromTop(metrics::scaled(4));
-    auto row = r.removeFromTop(24);
-    const auto font = uiFontFixed(fx::kAnnotPt, false);
+    auto row = r.removeFromTop(18);
+    const auto font = uiFontFixed(11.0f, true);
     auto chipW = [&](const juce::String& label)
     {
         const int textW = (int) std::ceil(juce::GlyphArrangement::getStringWidth(font, label));
         return textW + 20;
     };
     constexpr int chipGap = 4;
+    juce::ignoreUnused(chipGap);
     hideDupesBounds = row.removeFromLeft(juce::jmin(chipW("Hide duplicates"), row.getWidth()));
-    if (row.getWidth() > chipGap)
-        row.removeFromLeft(chipGap);
-    resetBounds = row.removeFromLeft(juce::jmin(chipW("Reset"), row.getWidth()));
+    resetBounds = {};
 }
 
 // ── SearchQueryPanel ─────────────────────────────────────────────────────────
@@ -468,17 +453,16 @@ FavoritesSidebar::SearchQueryPanel::SearchQueryPanel()
 
 void FavoritesSidebar::SearchQueryPanel::styleEditors()
 {
-    const auto p = sl();
-    queryField.setTextToShowWhenEmpty("Search", p.text3);
-    queryField.setFont(uiFontFixed(13.0f));
+    queryField.setTextToShowWhenEmpty("Search", ds::inkMuted());
+    queryField.setFont(uiFontFixed(12.0f));
     queryField.setColour(juce::TextEditor::backgroundColourId, juce::Colours::transparentBlack);
     queryField.setColour(juce::TextEditor::focusedOutlineColourId, juce::Colours::transparentBlack);
     queryField.setColour(juce::TextEditor::outlineColourId, juce::Colours::transparentBlack);
-    queryField.setColour(juce::TextEditor::textColourId, p.text);
-    queryField.setColour(juce::TextEditor::highlightedTextColourId, colours::accentInk());
-    queryField.setColour(juce::TextEditor::highlightColourId, p.accent.withAlpha(0.35f));
-    queryField.setColour(juce::CaretComponent::caretColourId, p.accent);
-    queryField.setIndents(0, 2);
+    queryField.setColour(juce::TextEditor::textColourId, ds::ink());
+    queryField.setColour(juce::TextEditor::highlightedTextColourId, ds::onAccent());
+    queryField.setColour(juce::TextEditor::highlightColourId, ds::acc().withAlpha(0.45f));
+    queryField.setColour(juce::CaretComponent::caretColourId, ds::ink());
+    queryField.setIndents(0, 1);
 }
 
 void FavoritesSidebar::SearchQueryPanel::lookAndFeelChanged()
@@ -556,54 +540,27 @@ void FavoritesSidebar::SearchQueryPanel::mouseDown(const juce::MouseEvent& e)
 
 void FavoritesSidebar::SearchQueryPanel::paint(juce::Graphics& g)
 {
-    const auto p = sl();
-    const int iconCol = sidebarIconCol();
-    const bool active = queryField.hasKeyboardFocus(true);
-
-    if (!queryWell.isEmpty())
+    // Groove field: surface-300, edge border, radius-sm; magnifier in ink-muted.
+    const bool focused = queryField.hasKeyboardFocus(true);
+    auto well = queryWell.toFloat();
+    if (!well.isEmpty())
     {
-        auto well = queryWell.toFloat();
-        g.setColour(p.control);
-        g.fillRoundedRectangle(well, 6.0f);
-        if (filterActive && !filterCapBounds.isEmpty())
-        {
-            juce::Path clip;
-            clip.addRoundedRectangle(well, 6.0f);
-            g.saveState();
-            g.reduceClipRegion(clip);
-            g.setColour(p.accent);
-            g.fillRect(filterCapBounds);
-            g.restoreState();
-        }
-        g.setColour(p.border);
-        g.drawRoundedRectangle(well.reduced(0.5f), 6.0f, 1.0f);
-        if (!filterCapBounds.isEmpty())
-        {
-            g.setColour(p.border);
-            g.fillRect((float) filterCapBounds.getX(), well.getY() + 6.0f, 1.0f, well.getHeight() - 12.0f);
-        }
-        if (active)
-            drawFocusRing(g, well, 6.0f);
+        g.setColour(ds::surface300());
+        g.fillRoundedRectangle(well, ds::radius::sm);
+        g.setColour(ds::edge());
+        g.drawRoundedRectangle(well.reduced(0.5f), ds::radius::sm, 1.0f);
+        if (focused)
+            drawFocusRing(g, well, ds::radius::sm);
     }
-
-    auto iconArea = juce::Rectangle<float>((float) queryWell.getX() + 4.0f,
-                                           (float) queryWell.getY(),
-                                           (float) iconCol,
-                                           (float) queryWell.getHeight())
-                        .withSizeKeepingCentre(14.0f, 14.0f);
-    drawIcon(g, icons::search, iconArea, active ? p.accent : p.text3, kSidebarIconStroke);
-    if (!filterCapBounds.isEmpty())
-    {
-        drawIcon(g, icons::sliders,
-                 filterCapBounds.toFloat().withSizeKeepingCentre(14.0f, 14.0f),
-                 filterActive ? colours::accentInk() : p.text3, kSidebarIconStroke);
-    }
+    auto iconArea = juce::Rectangle<float>(well.getX() + 5.0f, well.getY(), 10.0f, well.getHeight())
+                        .withSizeKeepingCentre(10.0f, 10.0f);
+    drawIcon(g, icons::search, iconArea, ds::inkMuted(), 1.3f);
 
     if (saveVisible && !saveChipBounds.isEmpty())
     {
-        g.setColour(p.accent);
-        g.fillRoundedRectangle(saveChipBounds.toFloat(), (float) saveChipBounds.getHeight() * 0.5f);
-        g.setColour(colours::accentInk());
+        g.setColour(ds::acc());
+        g.fillRoundedRectangle(saveChipBounds.toFloat(), ds::radius::sm);
+        g.setColour(ds::onAccent());
         g.setFont(uiFontFixed(11.0f, true));
         g.drawText("Save", saveChipBounds, juce::Justification::centred, false);
     }
@@ -611,26 +568,18 @@ void FavoritesSidebar::SearchQueryPanel::paint(juce::Graphics& g)
 
 void FavoritesSidebar::SearchQueryPanel::resized()
 {
-    auto r = getLocalBounds();
-    const int rowH = idealHeight();
-    const int iconCol = sidebarIconCol();
-    const int iconGap = sidebarRowIconGap();
-
-    auto querySlot = r.removeFromTop(rowH);
+    auto querySlot = getLocalBounds();
     queryWell = querySlot;
-    filterCapBounds = querySlot.removeFromRight(rowH);
+    filterCapBounds = {};   // the browser toolbar's Filters toggle replaces the in-field cap
 
     saveChipBounds = {};
     if (saveVisible)
     {
-        constexpr int kChipW = 46;
-        constexpr int kChipH = 20;
-        saveChipBounds = querySlot.removeFromRight(kChipW + 6)
-                             .withTrimmedRight(5)
-                             .withSizeKeepingCentre(kChipW, juce::jmin(kChipH, rowH - 8));
+        const int chipW = 40;
+        saveChipBounds = querySlot.removeFromRight(chipW + 2).withTrimmedRight(2)
+                             .withSizeKeepingCentre(chipW, juce::jmax(10, querySlot.getHeight() - 4));
     }
-
-    queryField.setBounds(querySlot.withTrimmedLeft(iconCol + iconGap + 4).reduced(0, 3));
+    queryField.setBounds(querySlot.withTrimmedLeft(20).reduced(0, 1));
 }
 
 // ── FavoritesSidebar (3c compact action row) ─────────────────────────────────
@@ -638,6 +587,7 @@ void FavoritesSidebar::SearchQueryPanel::resized()
 FavoritesSidebar::FavoritesSidebar()
 {
     btnToggle.ghost = true;
+    btnToggle.headerChrome = true;
     btnToggle.iconScale = 1.0f;
     btnToggle.setWantsKeyboardFocus(true);
     btnToggle.setTooltip(collapsed ? "Expand sidebar" : "Collapse sidebar");
@@ -649,7 +599,7 @@ FavoritesSidebar::FavoritesSidebar()
     btnSettings.setWantsKeyboardFocus(true);
     btnSettings.setTooltip("Settings");
     btnSettings.onClick = [this] { if (onOpenSettings) onOpenSettings(); };
-    addAndMakeVisible(btnSettings);
+    addChildComponent(btnSettings);   // Settings lives in the header now
 
     expandedWidth = metrics::sidebarExpandedWidth();
     setWantsKeyboardFocus(true);
@@ -660,7 +610,7 @@ FavoritesSidebar::FavoritesSidebar()
         searchQuery.setFilterActive(filterOpen || activeFilterGroupCount() > 0);
         repaint();
     };
-    filterPanel.onLayoutChanged = [this] { notifyHeightChanged(); };
+    filterPanel.onLayoutChanged = [this] { if (onFilterLayoutChanged) onFilterLayoutChanged(); };
     filterPanel.onSubdirsChanged = [this](bool on)
     {
         includeSubdirs = on;
@@ -669,12 +619,7 @@ FavoritesSidebar::FavoritesSidebar()
     };
     addChildComponent(filterPanel);
 
-    searchQuery.onActivate = [this]
-    {
-        searchOpen = true;
-        if (collapsed)
-            setCollapsed(false);
-    };
+    searchQuery.onActivate = [this] { searchOpen = true; };
     searchQuery.onDeactivate = [this] { deactivateSearch(false); };
     searchQuery.onClear = [this]
     {
@@ -690,7 +635,7 @@ FavoritesSidebar::FavoritesSidebar()
     {
         if (onRunSearch) onRunSearch(getCriteria());
     };
-    searchQuery.onToggleFilter = [this] { toggleFilterPanel(); };
+    searchQuery.onToggleFilter = [this] { setFilterOpen(!filterOpen); };
     addChildComponent(searchQuery);
 
     rebuildRows();
@@ -699,9 +644,25 @@ FavoritesSidebar::FavoritesSidebar()
 void FavoritesSidebar::notifyHeightChanged()
 {
     layoutChildren();
-    resized();
     repaint();
     if (onContentHeightChanged) onContentHeightChanged();
+}
+
+juce::Component& FavoritesSidebar::searchComponent() { return searchQuery; }
+juce::Component& FavoritesSidebar::filterComponent() { return filterPanel; }
+int FavoritesSidebar::filterIdealHeight() const { return filterPanel.idealHeight(); }
+int FavoritesSidebar::activeFilterCount() const { return filterPanel.activeGroupCount(); }
+void FavoritesSidebar::resetFilters() { filterPanel.resetFilters(); }
+
+void FavoritesSidebar::setFilterOpen(bool open)
+{
+    if (filterOpen == open)
+        return;
+    filterOpen = open;
+    if (filterOpen)
+        filterPanel.setHistograms(histogramClips);
+    searchQuery.setFilterActive(filterOpen || activeFilterGroupCount() > 0);
+    if (onFilterOpenChanged) onFilterOpenChanged(filterOpen);
 }
 
 BrowserSearch FavoritesSidebar::getFilter() const
@@ -845,7 +806,7 @@ int FavoritesSidebar::folderCardHeight() const
 
 int FavoritesSidebar::contentTopY() const
 {
-    return sidebarHeaderH() + sidebarBodyPadT();
+    return sidebarHeaderH();
 }
 
 int FavoritesSidebar::footerPad() const
@@ -855,73 +816,74 @@ int FavoritesSidebar::footerPad() const
 
 int FavoritesSidebar::footerHeight() const
 {
-    return footerPad() + sidebarRowH() + metrics::scaled(kBodyPadB);
+    return metrics::scaled(kBodyPadB);
 }
 
 std::vector<FavoritesSidebar::LayoutItem> FavoritesSidebar::collectLayout() const
 {
+    // Expanded: Open Folder… button, then Folders / Favorites / Saved Searches, rows edge to edge.
+    // Collapsed: a rail of 28 px icon buttons.
     std::vector<LayoutItem> out;
-    const int rowH = collapsed ? collapsedBtnSize() : sidebarRowH();
-    const int gap = sidebarRowGap();
-    const int padH = sidebarPadH();
     const int W = getWidth();
+    const int padH = sidebarPadH();
     int y = contentTopY();
-    const int itemInset = padH + sidebarRowPadX();
 
-    auto placeRow = [&](int rowIdx)
+    if (collapsed)
     {
-        const auto r = collapsed
-            ? juce::Rectangle<int>(0, y, W, rowH).withSizeKeepingCentre(collapsedBtnSize(), collapsedBtnSize())
-            : juce::Rectangle<int>(padH, y, W - padH * 2, rowH);
-        out.push_back({ LayoutKind::Row, rowIdx, r });
-        y += rowH + gap;
-    };
+        const int btn = collapsedBtnSize();
+        const int gap = metrics::scaled(4);
+        y += gap;
+        auto placeBtn = [&](int rowIdx)
+        {
+            out.push_back({ LayoutKind::Row, rowIdx,
+                            juce::Rectangle<int>(0, y, W, btn).withSizeKeepingCentre(btn, btn) });
+            y += btn + gap;
+        };
+        for (int i = 0; i < (int) rows.size(); ++i)
+            if (rows[(size_t) i].kind == RowKind::Open) placeBtn(i);
+        y += gap;
+        for (int i = 0; i < (int) rows.size(); ++i)
+            if (rows[(size_t) i].kind == RowKind::SavedDir) placeBtn(i);
+        y += gap;
+        for (int i = 0; i < (int) rows.size(); ++i)
+            if (rows[(size_t) i].kind == RowKind::Starred) placeBtn(i);
+        for (int i = 0; i < (int) rows.size(); ++i)
+            if (rows[(size_t) i].kind == RowKind::SavedSearch) placeBtn(i);
+        out.push_back({ LayoutKind::End, -1, juce::Rectangle<int>(0, y, W, 0) });
+        return out;
+    }
+
+    y += sidebarBodyPadT();
+    out.push_back({ LayoutKind::OpenBtn, -1, juce::Rectangle<int>(padH, y, W - padH * 2, openFolderH()) });
+    y += openFolderH() + sidebarSectionGap();
 
     auto placeSection = [&](SectionId id)
     {
-        if (collapsed) return;
-        const auto header = juce::Rectangle<int>(itemInset, y, W - itemInset * 2, sidebarSectionH());
-        out.push_back({ LayoutKind::Section, (int) id, header });
+        out.push_back({ LayoutKind::Section, (int) id,
+                        juce::Rectangle<int>(padH, y, W - padH * 2, sidebarSectionH()) });
         y += sidebarSectionH() + sidebarHeaderToRows();
     };
-
-    if (!collapsed)
-    {
-        placeSection(SectionId::Library);
-        for (int i = 0; i < (int) rows.size(); ++i)
-            if (rows[(size_t) i].kind == RowKind::SavedDir
-                || rows[(size_t) i].kind == RowKind::Starred)
-                placeRow(i);
-
-        y += sidebarSectionGap() - gap;
-        const int contentW = juce::jmax(0, W - padH * 2);
-        const int qh = searchQuery.idealHeight();
-        out.push_back({ LayoutKind::Query, -1,
-                        juce::Rectangle<int>(padH, y, contentW, qh) });
-        y += qh;
-
-        if (filterOpen)
-        {
-            y += metrics::scaled(8);
-            const int fh = filterPanel.idealHeight();
-            out.push_back({ LayoutKind::Filter, -1,
-                            juce::Rectangle<int>(padH, y, contentW, fh) });
-            y += fh;
-        }
-    }
-    else
+    auto placeRows = [&](RowKind kind)
     {
         for (int i = 0; i < (int) rows.size(); ++i)
-            if (rows[(size_t) i].kind == RowKind::Open)
-                placeRow(i);
-        for (int i = 0; i < (int) rows.size(); ++i)
-            if (rows[(size_t) i].kind == RowKind::Starred)
-                placeRow(i);
-        for (int i = 0; i < (int) rows.size(); ++i)
-            if (rows[(size_t) i].kind == RowKind::SavedDir)
-                placeRow(i);
-    }
+            if (rows[(size_t) i].kind == kind)
+            {
+                out.push_back({ LayoutKind::Row, i, juce::Rectangle<int>(0, y, W - 1, sidebarRowH()) });
+                y += sidebarRowH();
+            }
+    };
 
+    placeSection(SectionId::Library);
+    placeRows(RowKind::SavedDir);
+    y += sidebarSectionGap();
+    placeSection(SectionId::Search);
+    placeRows(RowKind::Starred);
+    if (!savedSearches.empty())
+    {
+        y += sidebarSectionGap();
+        placeSection(SectionId::Saved);
+        placeRows(RowKind::SavedSearch);
+    }
     out.push_back({ LayoutKind::End, -1, juce::Rectangle<int>(0, y, W, 0) });
     return out;
 }
@@ -1020,21 +982,13 @@ void FavoritesSidebar::rebuildNavItems()
 {
     navItems.clear();
     if (!collapsed)
-    {
-        navItems.push_back({ NavKind::Filters, -1 });
         navItems.push_back({ NavKind::OpenFolder, -1 });
-        for (int i = 0; i < (int) rows.size(); ++i)
-            if (rows[(size_t) i].kind == RowKind::SavedDir
-                || rows[(size_t) i].kind == RowKind::Starred)
-                navItems.push_back({ NavKind::Row, i });
-    }
-    else
+    for (int i = 0; i < (int) rows.size(); ++i)
     {
-        for (int i = 0; i < (int) rows.size(); ++i)
-            if (rows[(size_t) i].kind != RowKind::SavedSearch)
-                navItems.push_back({ NavKind::Row, i });
+        const auto k = rows[(size_t) i].kind;
+        if (collapsed || k != RowKind::Open)
+            navItems.push_back({ NavKind::Row, i });
     }
-    navItems.push_back({ NavKind::Settings, -1 });
     if (!juce::isPositiveAndBelow(navIndex, (int) navItems.size()))
         navIndex = navItems.empty() ? -1 : 0;
 }
@@ -1183,85 +1137,27 @@ void FavoritesSidebar::layoutChildren()
     searchHeaderBounds = {};
     savedHeaderBounds = {};
 
-    filterPanel.setVisible(false);
+    // The search field and filter panel are hosted elsewhere; never position them here.
     if (collapsed)
-    {
-        searchQuery.setVisible(false);
         return;
-    }
 
     for (const auto& item : collectLayout())
     {
-        switch (item.kind)
+        if (item.kind == LayoutKind::OpenBtn)
         {
-            case LayoutKind::OpenBtn:
-                openFolderBounds = item.bounds;
-                break;
-            case LayoutKind::FolderCard:
+            openFolderBounds = item.bounds;
+            libraryPlusBounds = item.bounds;   // hit-testing / keyboard nav target
+        }
+        else if (item.kind == LayoutKind::Section)
+        {
+            switch ((SectionId) item.id)
             {
-                folderCardBounds = item.bounds;
-                auto inner = item.bounds.reduced(metrics::scaled(10), metrics::scaled(10));
-                auto header = inner.removeFromTop(metrics::scaled(kCardHeaderH));
-                starBounds = header.removeFromLeft(22).withSizeKeepingCentre(18, 18);
-                inner.removeFromTop(metrics::scaled(6));
-                auto action = inner.removeFromTop(24);
-                constexpr int chipGap = 4;
-                refreshBtnBounds = action.removeFromLeft(24);
-                action.removeFromLeft(juce::jmin(chipGap, action.getWidth()));
-                const auto font = uiFontFixed(fx::kAnnotPt, false);
-                const int filtersText = (int) std::ceil(
-                    juce::GlyphArrangement::getStringWidth(font, "Filters"));
-                const int filtersW = 10 + 14 + 4 + filtersText + 10;
-                filtersBtnBounds = action.removeFromRight(juce::jmin(filtersW, action.getWidth()));
-                if (action.getWidth() > chipGap)
-                    action.removeFromRight(chipGap);
-                scanBtnBounds = action;
-                if (filterOpen)
-                {
-                    inner.removeFromTop(metrics::scaled(12));
-                    const int fh = filterPanel.idealHeight();
-                    filterPanel.setBounds(inner.removeFromTop(fh));
-                    filterPanel.setVisible(true);
-                }
-                break;
+                case SectionId::Library: libraryHeaderBounds = item.bounds; break;
+                case SectionId::Search:  searchHeaderBounds = item.bounds; break;
+                case SectionId::Saved:   savedHeaderBounds = item.bounds; break;
             }
-            case LayoutKind::Section:
-                switch ((SectionId) item.id)
-                {
-                    case SectionId::Library:
-                    {
-                        auto header = item.bounds;
-                        const int plus = sidebarSectionH();
-                        libraryPlusBounds = header.removeFromRight(plus)
-                                                .withSizeKeepingCentre(plus, plus);
-                        libraryHeaderBounds = header;
-                        break;
-                    }
-                    case SectionId::Search:  searchHeaderBounds = item.bounds; break;
-                    case SectionId::Saved:   savedHeaderBounds = item.bounds; break;
-                }
-                break;
-            case LayoutKind::Filter:
-            {
-                auto b = item.bounds;
-                if (searchQuery.getWidth() > 0)
-                {
-                    b.setX(searchQuery.getX());
-                    b.setWidth(searchQuery.getWidth());
-                }
-                filterPanel.setBounds(b);
-                filterPanel.setVisible(true);
-                break;
-            }
-            case LayoutKind::Query:
-                searchQuery.setBounds(item.bounds);
-                searchQuery.setVisible(true);
-                break;
-            default:
-                break;
         }
     }
-
     searchQuery.setFilterActive(filterOpen || activeFilterGroupCount() > 0);
 }
 
@@ -1305,8 +1201,6 @@ FavoritesSidebar::ChromeHit FavoritesSidebar::chromeHitAt(juce::Point<int> pos) 
 
 void FavoritesSidebar::setSearchFormOpen(bool open)
 {
-    if (open && collapsed)
-        setCollapsed(false);
     searchOpen = open;
     if (open)
         searchQuery.focusQuery();
@@ -1323,54 +1217,20 @@ void FavoritesSidebar::deactivateSearch(bool clearCriteria)
 
 void FavoritesSidebar::toggleFilterPanel()
 {
-    filterOpen = !filterOpen;
-    if (filterOpen)
-        filterPanel.setHistograms(histogramClips);
-    notifyHeightChanged();
+    setFilterOpen(!filterOpen);
 }
 
 void FavoritesSidebar::resized()
 {
-    const int railW = metrics::sidebarRailWidth();
     const int headerH = sidebarHeaderH();
-    const int padH = sidebarPadH();
-    const int iconBtn = metrics::chromeIconButton();
-    const int iconColX = padH + sidebarRowPadX();
-    btnToggle.iconScale = 0.9f;
+    const int btn = juce::jmin(headerH - 4, metrics::scaled(18));
     if (collapsed)
-        btnToggle.setBounds(juce::Rectangle<int>(0, 0, railW, headerH)
-                                .withSizeKeepingCentre(iconBtn, iconBtn));
+        btnToggle.setBounds(juce::Rectangle<int>(0, 0, getWidth(), headerH).withSizeKeepingCentre(btn, btn));
     else
-        btnToggle.setBounds(juce::Rectangle<int>(getWidth() - padH - iconBtn, 0, iconBtn, headerH)
-                                .withSizeKeepingCentre(iconBtn, iconBtn));
-
-    const int footerH = footerHeight();
-    const int contentBottom = contentBottomY();
-    const int pad = juce::jmax(footerPad(), metrics::scaled(10));
-    const int settingsTop = juce::jmax(contentBottom + pad,
-                                       getHeight() - footerH + pad);
-    if (collapsed)
-    {
-        settingsRowBounds = juce::Rectangle<int>(0, settingsTop, getWidth(), sidebarRowH())
-                                .withSizeKeepingCentre(collapsedBtnSize(), collapsedBtnSize());
-    }
-    else
-    {
-        settingsRowBounds = juce::Rectangle<int>(padH, settingsTop,
-                                                 getWidth() - padH * 2,
-                                                 sidebarRowH());
-    }
-    {
-        if (collapsed)
-            btnSettings.setBounds(settingsRowBounds);
-        else
-        {
-            auto iconSlot = juce::Rectangle<int>(iconColX, settingsTop,
-                                                 sidebarIconCol(), sidebarRowH());
-            btnSettings.setBounds(iconSlot.withSizeKeepingCentre(iconBtn, iconBtn));
-        }
-        btnSettings.setVisible(true);
-    }
+        btnToggle.setBounds(juce::Rectangle<int>(getWidth() - metrics::scaled(4) - btn, 0, btn, headerH)
+                                .withSizeKeepingCentre(btn, btn));
+    settingsRowBounds = {};
+    btnSettings.setVisible(false);
     layoutChildren();
     rebuildNavItems();
 }
@@ -1415,8 +1275,6 @@ void FavoritesSidebar::mouseExit(const juce::MouseEvent&)
 
 void FavoritesSidebar::mouseDown(const juce::MouseEvent& e)
 {
-    if (searchQuery.isVisible() && searchQuery.getBounds().contains(e.getPosition()))
-        return;
     if (btnSettings.isVisible() && btnSettings.getBounds().contains(e.getPosition()))
         return;
     if (btnToggle.isVisible() && btnToggle.getBounds().contains(e.getPosition()))
@@ -1495,8 +1353,7 @@ bool FavoritesSidebar::keyPressed(const juce::KeyPress& key)
     {
         if (filterOpen)
         {
-            filterOpen = false;
-            notifyHeightChanged();
+            setFilterOpen(false);
             return true;
         }
         if (searchQuery.isQueryFocused())
@@ -1544,46 +1401,31 @@ void FavoritesSidebar::mouseUp(const juce::MouseEvent&)
 void FavoritesSidebar::paintSectionLabel(juce::Graphics& g, const juce::String& title,
                                          juce::Rectangle<int> bounds)
 {
+    // Groove `label`: 11 px Medium, title case, ink-muted.
     if (bounds.isEmpty()) return;
-    const auto p = sl();
-    g.setColour(p.text3);
-    g.setFont(uiFontFixed(kCapPt, true));
-    // Letter-spaced uppercase via drawText (JUCE lacks tracking; use spaced string).
-    juce::String spaced;
-    for (int i = 0; i < title.length(); ++i)
-    {
-        spaced += title[i];
-        if (i + 1 < title.length()) spaced += " ";
-    }
-    g.drawText(spaced, bounds, juce::Justification::centredLeft, false);
+    g.setColour(ds::inkMuted());
+    g.setFont(uiFontFixed(kCapPt, false));
+    g.drawText(title, bounds, juce::Justification::centredLeft, false);
 }
 
 void FavoritesSidebar::paintOpenFolderButton(juce::Graphics& g, juce::Rectangle<int> r,
                                              bool hover, bool focus)
 {
     if (r.isEmpty()) return;
-    const auto p = sl();
-    fillControlSurface(g, r.toFloat(), 7.0f);
-    if (hover)
-    {
-        g.setColour(p.accent.withAlpha(0.08f));
-        g.fillRoundedRectangle(r.toFloat(), 7.0f);
-    }
-    // Center the plus + label as one group (mock: "+ Open Folder...").
-    const juce::String label = "Open Folder...";
-    auto font = uiFontFixed(13.0f, true);
-    g.setFont(font);
-    const int textW = (int) std::ceil(font.getStringWidthFloat(label));
-    const int iconW = 14;
-    const int gap = 6;
-    auto group = r.withSizeKeepingCentre(iconW + gap + textW, r.getHeight());
-    auto icon = group.removeFromLeft(iconW).toFloat().withSizeKeepingCentre(12.0f, 12.0f);
-    drawIcon(g, icons::plus, icon, p.accent, 1.8f);
-    group.removeFromLeft(gap);
-    g.setColour(p.text);
-    g.drawText(label, group, juce::Justification::centredLeft, false);
+    auto face = r.toFloat();
+    g.setColour(hover ? ds::surface300() : ds::surface200());
+    g.fillRoundedRectangle(face, ds::radius::sm);
+    g.setColour(ds::edge());
+    g.drawRoundedRectangle(face.reduced(0.5f), ds::radius::sm, 1.0f);
+    auto inner = r.reduced(metrics::scaled(8), 0);
+    drawIcon(g, icons::plus, inner.removeFromLeft(10).toFloat().withSizeKeepingCentre(10.0f, 10.0f),
+             ds::ink(), 1.5f);
+    inner.removeFromLeft(6);
+    g.setColour(ds::ink());
+    g.setFont(uiFontFixed(11.0f, true));
+    g.drawText(juce::String::fromUTF8("Open Folder\xe2\x80\xa6"), inner, juce::Justification::centredLeft, true);
     if (focus)
-        drawFocusRing(g, r.toFloat(), 7.0f);
+        drawFocusRing(g, face, ds::radius::sm);
 }
 
 void FavoritesSidebar::paintActionButton(juce::Graphics& g, juce::Rectangle<int> r,
@@ -1721,108 +1563,113 @@ void FavoritesSidebar::paintRow(juce::Graphics& g, int rowIdx, const juce::Recta
         return;
 
     const auto& row = rows[(size_t) rowIdx];
-    const auto p = sl();
     const bool activeDir = row.kind == RowKind::SavedDir && dirs[row.index] == active;
-    const bool activeStar = row.kind == RowKind::Starred
-        && (starredFilter || browseMode == 1);
+    const bool activeStar = row.kind == RowKind::Starred && (starredFilter || browseMode == 1);
     const bool activeSearch = row.kind == RowKind::SavedSearch && row.index == activeSearchIdx;
     const bool isActive = activeDir || activeStar || activeSearch;
-    const bool lit = isActive || hovered || keyboardFocus;
 
     const char* icon = icons::folder;
     juce::String label;
-    juce::String countText;
-    juce::Colour iconCol = p.accent;
-
+    juce::Colour iconCol = ds::inkMuted();
     switch (row.kind)
     {
         case RowKind::Open:
-            icon = icons::folderOpen;
-            label = "Open";
-            iconCol = lit ? p.accent : p.text3;
+            icon = icons::plus;
+            label = "Open Folder";
+            iconCol = ds::ink();
             break;
         case RowKind::SavedDir:
         {
             const juce::File dir(dirs[row.index]);
             label = dir.getFileName().isNotEmpty() ? dir.getFileName() : dirs[row.index];
-            // Never enumerate disk for badge counts — that freezes on large libraries.
-            // Active folder shows the scanned clip count only.
-            if (dirs[row.index] == active && currentClipCount > 0)
-                countText = juce::String(currentClipCount);
             break;
         }
         case RowKind::Starred:
             icon = icons::star;
             label = "Favorite Files";
-            iconCol = p.gold;
-            if (starredCount > 0) countText = juce::String(starredCount);
+            iconCol = ds::acc();
             break;
         case RowKind::SavedSearch:
         {
             icon = icons::search;
             const auto& entry = savedSearches[(size_t) row.index];
-            label = entry.search.query.isNotEmpty() ? entry.search.query : "Search";
-            iconCol = lit ? p.accent : p.text3;
+            label = entry.name.isNotEmpty() ? entry.name
+                  : entry.search.query.isNotEmpty() ? entry.search.query : juce::String("Search");
             break;
         }
     }
 
     if (collapsed)
     {
-        if (hovered || keyboardFocus)
+        // Rail: 28 px icon buttons; the Open button keeps its control face.
+        auto b = r.toFloat();
+        if (row.kind == RowKind::Open)
         {
-            g.setColour(p.selectWash);
-            g.fillRoundedRectangle(r.toFloat(), 6.0f);
+            g.setColour(hovered ? ds::surface300() : ds::surface200());
+            g.fillRoundedRectangle(b, ds::radius::sm);
+            g.setColour(ds::edge());
+            g.drawRoundedRectangle(b.reduced(0.5f), ds::radius::sm, 1.0f);
         }
-        drawIcon(g, icon, r.toFloat().withSizeKeepingCentre(16.0f, 16.0f),
-                 iconCol, kSidebarIconStroke);
+        else if (isActive || hovered)
+        {
+            g.setColour(isActive ? ds::surface300() : ds::surface200());
+            g.fillRoundedRectangle(b, ds::radius::sm);
+        }
+        drawIcon(g, icon, b.withSizeKeepingCentre(12.0f, 12.0f),
+                 row.kind == RowKind::SavedDir ? ds::ink() : iconCol, kSidebarIconStroke);
         if (keyboardFocus)
-            drawFocusRing(g, r.toFloat(), 6.0f);
+            drawFocusRing(g, b, ds::radius::sm);
         return;
     }
 
+    // Expanded row: edge to edge, 1px line beneath; selected = surface-300 + label-strong.
     if (isActive || hovered)
     {
-        g.setColour(isActive ? p.selectWash : p.selectWash.withAlpha(0.5f));
-        g.fillRoundedRectangle(r.toFloat(), 6.0f);
+        g.setColour(isActive ? ds::surface300() : ds::surface200());
+        g.fillRect(r);
     }
+    g.setColour(ds::line());
+    g.fillRect(r.getX(), r.getBottom() - 1, r.getWidth(), 1);
 
     auto textArea = r.reduced(sidebarRowPadX(), 0);
-    auto iconSlot = textArea.removeFromLeft(sidebarIconCol()).toFloat();
-    drawIcon(g, icon, iconSlot.withSizeKeepingCentre(16.0f, 16.0f), iconCol, kSidebarIconStroke);
+    drawIcon(g, icon, textArea.removeFromLeft(sidebarIconCol()).toFloat().withSizeKeepingCentre(10.0f, 10.0f),
+             iconCol, kSidebarIconStroke);
     textArea.removeFromLeft(sidebarRowIconGap());
 
-    if ((hovered || keyboardFocus)
-        && (row.kind == RowKind::SavedDir || row.kind == RowKind::SavedSearch))
+    if ((hovered || keyboardFocus) && (row.kind == RowKind::SavedDir || row.kind == RowKind::SavedSearch))
     {
-        auto xArea = textArea.removeFromRight(18).toFloat().withSizeKeepingCentre(10.0f, 10.0f);
-        drawIcon(g, icons::x, xArea,
-                 removeZone ? p.text : p.text3, kSidebarIconStroke);
-    }
-    else if (countText.isNotEmpty())
-    {
-        auto countArea = textArea.removeFromRight(28);
-        g.setColour(p.text3);
-        g.setFont(monoFont(11.0f));
-        g.drawText(countText, countArea, juce::Justification::centredRight, false);
+        auto xArea = textArea.removeFromRight(14).toFloat().withSizeKeepingCentre(8.0f, 8.0f);
+        drawIcon(g, icons::x, xArea, removeZone ? ds::ink() : ds::inkMuted(), 1.3f);
     }
 
-    g.setColour(lit ? p.text : p.text2);
-    g.setFont(uiFontFixed(kCtrlPt, isActive || keyboardFocus));
+    g.setColour(ds::ink());
+    g.setFont(uiFontFixed(kCtrlPt, isActive));
     g.drawText(label, textArea, juce::Justification::centredLeft, true);
 
     if (keyboardFocus)
-        drawFocusRing(g, r.toFloat(), 6.0f);
+        drawFocusRing(g, r.toFloat().reduced(1.0f), 0.0f);
 }
 
 void FavoritesSidebar::paint(juce::Graphics& g)
 {
-    const auto p = sl();
-    auto b = getLocalBounds().toFloat();
-    g.setColour(p.tint);
-    g.fillRect(b);
-    g.setColour(p.border);
-    g.fillRect(getLocalBounds().removeFromRight(1));
+    g.setColour(ds::surface100());
+    g.fillRect(getLocalBounds());
+
+    // Header band: surface-300 with a 1px line beneath; "Library" title when expanded.
+    auto header = getLocalBounds().removeFromTop(sidebarHeaderH());
+    g.setColour(ds::surface300());
+    g.fillRect(header);
+    g.setColour(ds::line());
+    g.fillRect(header.removeFromBottom(1));
+    if (!collapsed)
+    {
+        g.setColour(ds::ink());
+        g.setFont(uiFontFixed(kTitlePt, true));
+        g.drawText("Library", header.withTrimmedLeft(sidebarPadH()).withTrimmedRight(30),
+                   juce::Justification::centredLeft, true);
+    }
+    g.setColour(ds::line());
+    g.fillRect(getWidth() - 1, 0, 1, getHeight());
 
     const bool kb = hasKeyboardFocus(true);
     const NavItem* focused = (kb && juce::isPositiveAndBelow(navIndex, (int) navItems.size()))
@@ -1830,51 +1677,20 @@ void FavoritesSidebar::paint(juce::Graphics& g)
 
     if (!collapsed)
     {
-        paintSectionLabel(g, "LIBRARY", libraryHeaderBounds);
-        if (!libraryPlusBounds.isEmpty())
-        {
-            const bool plusHot = hoverChrome == ChromeHit::OpenFolder
-                || (focused && focused->kind == NavKind::OpenFolder);
-            if (plusHot)
-            {
-                g.setColour(p.accent.withAlpha(0.12f));
-                g.fillRoundedRectangle(libraryPlusBounds.toFloat(), 4.0f);
-            }
-            drawIcon(g, icons::plus,
-                     libraryPlusBounds.toFloat().withSizeKeepingCentre(12.0f, 12.0f),
-                     p.accent, 1.6f);
-            if (focused && focused->kind == NavKind::OpenFolder)
-                drawFocusRing(g, libraryPlusBounds.toFloat(), 4.0f);
-        }
+        paintOpenFolderButton(g, openFolderBounds, hoverChrome == ChromeHit::OpenFolder,
+                              focused != nullptr && focused->kind == NavKind::OpenFolder);
+        paintSectionLabel(g, "Folders", libraryHeaderBounds);
+        paintSectionLabel(g, "Favorites", searchHeaderBounds);
+        paintSectionLabel(g, "Saved Searches", savedHeaderBounds);
     }
 
     for (int i = 0; i < (int) rows.size(); ++i)
     {
-        // Expanded: Open is the top button, not a list row.
         if (!collapsed && rows[(size_t) i].kind == RowKind::Open)
             continue;
         const auto r = rowBounds(i);
-        const bool rowFocus = focused != nullptr && focused->kind == NavKind::Row
-            && focused->rowIdx == i;
+        const bool rowFocus = focused != nullptr && focused->kind == NavKind::Row && focused->rowIdx == i;
         paintRow(g, i, r, i == hoverRow, i == hoverRow && hoverRemove, rowFocus);
-    }
-
-    if (!settingsRowBounds.isEmpty() && !collapsed)
-    {
-        const bool lit = hoverSettings
-            || (focused != nullptr && focused->kind == NavKind::Settings);
-        auto area = settingsRowBounds;
-        area.removeFromLeft(sidebarRowPadX() + sidebarIconCol() + sidebarRowIconGap());
-        g.setColour(lit ? p.text : p.text2);
-        g.setFont(uiFontFixed(kCtrlPt, lit));
-        g.drawText("Settings", area, juce::Justification::centredLeft, true);
-        if (focused != nullptr && focused->kind == NavKind::Settings)
-            drawFocusRing(g, settingsRowBounds.toFloat(), 6.0f);
-    }
-    else if (!settingsRowBounds.isEmpty() && collapsed
-             && focused != nullptr && focused->kind == NavKind::Settings)
-    {
-        drawFocusRing(g, settingsRowBounds.toFloat(), 6.0f);
     }
 }
 
@@ -1933,6 +1749,7 @@ void FileListPanel::setFolderName(const juce::String& name)
 {
     folderName = name;
     repaint();
+    if (onFolderNameChanged) onFolderNameChanged(name);
 }
 
 void FileListPanel::setEmptyHint(const juce::String& hint)
@@ -1953,6 +1770,7 @@ void FileListPanel::setEntries(std::vector<FileListEntry> e)
         updateContentSize();
     content.repaint();
     repaint();
+    if (onEntriesChanged) onEntriesChanged();
 }
 
 void FileListPanel::updateEntry(int index, const FileListEntry& entry)
@@ -2230,7 +2048,7 @@ bool FileListPanel::isColumnVisible(SortColumn col) const
 
 int FileListPanel::totalContentWidth() const
 {
-    int w = metrics::scaled(8) * 2 + metrics::scaled(nameColumnW) + metrics::scaled(14);
+    int w = metrics::scaled(8) * 2 + metrics::scaled(nameColumnW) + metrics::scaled(6);
     if (columnsVisible.key)        w += metrics::scaled(kKeyW);
     if (columnsVisible.tempo)      w += metrics::scaled(kTempoW);
     if (columnsVisible.bars)       w += metrics::scaled(kBarsW);
@@ -2362,7 +2180,7 @@ void FileListPanel::endNameColumnResize()
 
 void FileListPanel::paintNameColumnDivider(juce::Graphics& g, int x, int y, int h) const
 {
-    g.setColour(resizingNameColumn ? ds::acc().withAlpha(0.65f) : ds::ctlb());
+    g.setColour(resizingNameColumn ? ds::acc() : ds::line());
     g.fillRect(x, y, 1, h);
     // Wider invisible-feeling rail so the edge reads as a splitter.
     if (resizingNameColumn)
@@ -2438,8 +2256,8 @@ FileListPanel::ColumnRects FileListPanel::splitRowColumns(juce::Rectangle<int> r
     ColumnRects cols;
     row = row.reduced(metrics::scaled(8), 0);
     cols.name = row.removeFromLeft(metrics::scaled(nameColumnW));
-    // Extra gap so the name never crowds the first meta column.
-    row.removeFromLeft(metrics::scaled(14));
+    // Groove: a 6 px gutter keeps the key right beside the name.
+    row.removeFromLeft(metrics::scaled(6));
     if (columnsVisible.key)
         cols.key = row.removeFromLeft(metrics::scaled(kKeyW));
     if (columnsVisible.tempo)
@@ -2505,11 +2323,8 @@ void FileListPanel::resized()
 
 void FileListPanel::paint(juce::Graphics& g)
 {
-    g.fillAll(colours::panel());
+    g.fillAll(ds::surface100());
     paintColumnHeader(g);
-    // Match search-field / control border (--ctlb), not the darker hairline.
-    g.setColour(ds::ctlb());
-    g.fillRect(getLocalBounds().removeFromRight(1));
 
     if (searching)
     {
@@ -2672,14 +2487,14 @@ void FileListPanel::paintColumnHeader(juce::Graphics& g)
                 p.addTriangle(cx - 3.5f, cy + 2.0f, cx + 3.5f, cy + 2.0f, cx, cy - 2.5f);
             else
                 p.addTriangle(cx - 3.5f, cy - 2.0f, cx + 3.5f, cy - 2.0f, cx, cy + 2.5f);
-            g.setColour(ds::acc());
+            g.setColour(ds::inkMuted());
             g.fillPath(p);
         }
     };
 
     drawCol(SortColumn::Name, "Name");
     drawCol(SortColumn::Key, "Key");
-    drawCol(SortColumn::Tempo, "Tempo");
+    drawCol(SortColumn::Tempo, "BPM");
     drawCol(SortColumn::Bars, "Bars");
     drawCol(SortColumn::Kind, "Kind");
     drawCol(SortColumn::Complexity, "Cx");
@@ -2701,54 +2516,47 @@ void FileListPanel::paintRow(juce::Graphics& g, int displayIdx, juce::Rectangle<
     if (entryIdx < 0) return;
     const auto& e = entries[(size_t) entryIdx];
     const bool isSelected = entryIdx == selected;
-    auto rowR = r.toFloat().reduced(2.0f, 1.0f);
 
+    // Groove list row: edge to edge, 1px line beneath. Selected = accent fill, on-accent text.
     if (isSelected)
     {
         g.setColour(ds::acc());
-        g.fillRoundedRectangle(rowR, 5.0f);
+        g.fillRect(r);
     }
     else if (hovered)
     {
-        g.setColour(ds::hoverWash());
-        g.fillRoundedRectangle(rowR, 5.0f);
+        g.setColour(ds::surface200());
+        g.fillRect(r);
     }
-    else if ((displayIdx % 2) == 1)
-    {
-        g.setColour(ds::rowalt());
-        g.fillRoundedRectangle(rowR, 5.0f);
-    }
+    g.setColour(ds::line());
+    g.fillRect(r.getX(), r.getBottom() - 1, r.getWidth(), 1);
 
-    // Selection text: on-accent ink (dark in dark mode so blue highlight stays readable).
-    const auto ink = colours::accentInk();
-    const auto textCol = isSelected ? ink : ds::tx();
-    const auto metaCol = isSelected ? ink.withAlpha(0.80f) : ds::tx2();
+    const auto textCol = isSelected ? ds::onAccent() : ds::ink();
+    const auto metaCol = isSelected ? ds::onAccent() : ds::ink();
+    const auto mutedCol = isSelected ? ds::onAccent() : ds::inkMuted();
 
     auto cols = splitRowColumns(r);
     auto row = cols.name;
 
-    const float iconS = 13.0f;
-    auto iconArea = row.removeFromLeft(18).toFloat().withSizeKeepingCentre(iconS, iconS);
+    auto iconArea = row.removeFromLeft(metrics::scaled(kIconW)).toFloat().withSizeKeepingCentre(10.0f, 10.0f);
     if (e.isDirectory)
     {
-        drawIcon(g, icons::folder, iconArea,
-                 isSelected ? ink : ds::acc(), 1.35f);
+        drawIcon(g, icons::folder, iconArea, mutedCol, 1.3f);
     }
     else
     {
-        // Outline star (--trk tint) → --stron when favorited; on-accent when selected.
-        const auto starCol = e.starred
-            ? (isSelected ? ink : ds::stron())
-            : (hoverStar ? textCol : (isSelected ? ink.withAlpha(0.55f)
-                                                 : ds::trk()));
-        drawIcon(g, e.starred ? icons::star : icons::starOutline, iconArea, starCol, 1.35f);
+        // Favorite star: accent when starred, faint outline otherwise (ink on hover).
+        const auto starCol = e.starred ? (isSelected ? ds::onAccent() : ds::acc())
+                                       : (hoverStar ? textCol : (isSelected ? ds::onAccent().withAlpha(0.5f)
+                                                                            : ds::inkFaint()));
+        drawIcon(g, e.starred ? icons::star : icons::starOutline, iconArea, starCol, 1.3f);
     }
-    row.removeFromLeft(6);
 
+    const auto nameFont = uiFontFixed(11.0f, isSelected);
     if (e.isDirectory)
     {
         g.setColour(textCol);
-        g.setFont(ds::font(ds::Type::Body));
+        g.setFont(nameFont);
         g.drawText(e.name, row, juce::Justification::centredLeft, true);
         return;
     }
@@ -2761,26 +2569,6 @@ void FileListPanel::paintRow(juce::Graphics& g, int displayIdx, juce::Rectangle<
         g.drawText(juce::String((int) std::lround(e.bpm)), cols.tempo, juce::Justification::centredLeft);
     if (columnsVisible.bars && e.bars > 0)
         g.drawText(juce::String(e.bars), cols.bars, juce::Justification::centredLeft);
-    if (columnsVisible.kind)
-    {
-        // §2 kind chip: 7×7 r2 at 75% opacity + 11px label.
-        juce::Colour chip = ds::kindKeys();
-        switch (e.kind)
-        {
-            case ClipKind::Drums:  chip = ds::kindDrums(); break;
-            case ClipKind::Bass:   chip = ds::kindBass(); break;
-            case ClipKind::Piano:  chip = ds::kindKeys(); break;
-            case ClipKind::Lead:   chip = ds::kindKeys(); break;
-            case ClipKind::Single: chip = ds::kindPerc(); break;
-        }
-        auto kindR = cols.kind;
-        auto dot = kindR.removeFromLeft(10).toFloat().withSizeKeepingCentre(7.0f, 7.0f);
-        g.setColour(isSelected ? ink.withAlpha(0.75f) : chip.withAlpha(0.75f));
-        g.fillRoundedRectangle(dot, 2.0f);
-        g.setColour(metaCol);
-        g.setFont(ds::font(ds::Type::Metadata));
-        g.drawText(clipKindName(e.kind), kindR, juce::Justification::centredLeft, true);
-    }
     if (columnsVisible.complexity && e.complexity > 0)
         g.drawText(juce::String(e.complexity), cols.complexity, juce::Justification::centredLeft);
     if (columnsVisible.difNotes && e.difNotes > 0)
@@ -2790,9 +2578,16 @@ void FileListPanel::paintRow(juce::Graphics& g, int displayIdx, juce::Rectangle<
                    cols.timeSig, juce::Justification::centredLeft);
     if (columnsVisible.notes && e.noteCount > 0)
         g.drawText(juce::String(e.noteCount), cols.notes, juce::Justification::centredLeft);
+    if (columnsVisible.kind)
+    {
+        // Kind is a plain word in its own column.
+        g.setColour(mutedCol);
+        g.setFont(uiFontFixed(11.0f, false));
+        g.drawText(clipKindName(e.kind), cols.kind, juce::Justification::centredLeft, true);
+    }
 
     g.setColour(textCol);
-    g.setFont(ds::font(ds::Type::Body));
+    g.setFont(nameFont);
     g.drawText(e.name, row, juce::Justification::centredLeft, true);
 }
 
@@ -2800,8 +2595,8 @@ void FileListPanel::ListContent::paint(juce::Graphics& g)
 {
     if (owner.entries.empty())
     {
-        g.setColour(colours::text2());
-        g.setFont(uiFont(13.0f, false));
+        g.setColour(ds::inkMuted());
+        g.setFont(uiFontFixed(12.0f, false));
         g.drawText(owner.emptyHint, getLocalBounds().reduced(24, 32),
                    juce::Justification::centred);
         return;
@@ -2814,7 +2609,8 @@ void FileListPanel::ListContent::paint(juce::Graphics& g)
         owner.paintRow(g, i, { 0, y, getWidth(), rowH }, i == hoverRow,
                        i == hoverRow && hoverStar);
 
-    owner.paintNameColumnDivider(g, owner.nameColumnRightContentX(), 0, getHeight());
+    if (owner.resizingNameColumn)
+        owner.paintNameColumnDivider(g, owner.nameColumnRightContentX(), 0, getHeight());
 }
 
 void FileListPanel::ListContent::mouseMove(const juce::MouseEvent& e)
@@ -3001,6 +2797,493 @@ void FileListPanel::ListContent::mouseDrag(const juce::MouseEvent& e)
 
     if (owner.onDragFile)
         owner.onDragFile(file);
+}
+
+// ── BrowserToolbar ───────────────────────────────────────────────────────────
+
+BrowserToolbar::BrowserToolbar()
+{
+    for (auto* b : { &btnGrid, &btnSubfolders })
+    {
+        b->setClickingTogglesState(false);
+        b->setWantsKeyboardFocus(true);
+        addAndMakeVisible(*b);
+    }
+    btnGrid.setComponentID("btnGrid");
+    btnFilters.setComponentID("btnFilters");
+    btnGrid.setTooltip("Grid view: files as clips in columns by kind");
+    btnGrid.onClick = [this] { if (onToggleGrid) onToggleGrid(); };
+    btnSubfolders.setTooltip("Include files in subfolders");
+    btnSubfolders.onClick = [this] { if (onToggleSubfolders) onToggleSubfolders(); };
+
+    btnSaved.ghost = false;
+    btnSaved.setWantsKeyboardFocus(true);
+    btnSaved.onClick = [this] { if (onToggleSaved) onToggleSaved(); };
+    addAndMakeVisible(btnSaved);
+
+    btnRescan.ghost = false;
+    btnRescan.setWantsKeyboardFocus(true);
+    btnRescan.onClick = [this] { if (onRescan) onRescan(); };
+    addAndMakeVisible(btnRescan);
+
+    btnFilters.ghost = false;
+    btnFilters.caption = "Filters";
+    btnFilters.setWantsKeyboardFocus(true);
+    btnFilters.onClick = [this] { if (onToggleFilters) onToggleFilters(); };
+    addAndMakeVisible(btnFilters);
+}
+
+int BrowserToolbar::idealHeight() const
+{
+    return metrics::scaled(24) + metrics::scaled(30);
+}
+
+void BrowserToolbar::setSearchComponent(juce::Component* c)
+{
+    search = c;
+    if (search != nullptr)
+        addAndMakeVisible(*search);
+    resized();
+}
+
+void BrowserToolbar::setTitle(const juce::String& t)
+{
+    if (title == t) return;
+    title = t;
+    repaint();
+}
+
+void BrowserToolbar::setCount(int shown, int total)
+{
+    const auto next = (shown == total || total <= 0) ? juce::String(shown) + (shown == 1 ? " file" : " files")
+                                                     : juce::String(shown) + " of " + juce::String(total);
+    if (countText == next) return;
+    countText = next;
+    repaint();
+}
+
+void BrowserToolbar::setGrid(bool on)
+{
+    btnGrid.active = on;
+    btnGrid.repaint();
+}
+
+void BrowserToolbar::setSubfolders(bool on)
+{
+    btnSubfolders.active = on;
+    btnSubfolders.repaint();
+}
+
+void BrowserToolbar::setSaved(bool on, bool canSave)
+{
+    btnSaved.active = on;
+    btnSaved.setEnabled(canSave);
+    btnSaved.setTooltip(on ? "Saved to Library. Click to remove" : "Save folder to Library");
+    btnSaved.repaint();
+}
+
+void BrowserToolbar::setFiltersActive(bool open, int activeCount)
+{
+    btnFilters.active = open;
+    btnFilters.caption = activeCount > 0 ? "Filters " + juce::String(activeCount) : juce::String("Filters");
+    resized();
+    btnFilters.repaint();
+}
+
+void BrowserToolbar::resized()
+{
+    auto r = getLocalBounds();
+    headerBounds = r.removeFromTop(metrics::scaled(24));
+    searchRowBounds = r;
+
+    const int ctl = metrics::scaled(18);
+    const int gap = metrics::scaled(4);
+    auto h = headerBounds.reduced(metrics::scaled(8), 0).withTrimmedBottom(1);
+    auto place = [&](juce::Component& c, int w)
+    {
+        c.setBounds(h.removeFromRight(w).withSizeKeepingCentre(w, ctl));
+        h.removeFromRight(gap);
+    };
+    place(btnRescan, ctl);
+    place(btnSaved, ctl);
+    place(btnSubfolders, btnSubfolders.idealWidth());
+    place(btnGrid, btnGrid.idealWidth());
+
+    auto s = searchRowBounds.reduced(metrics::scaled(8), metrics::scaled(6)).withTrimmedBottom(1);
+    const int fw = btnFilters.captionWidth();
+    btnFilters.setBounds(s.removeFromRight(fw).withSizeKeepingCentre(fw, ctl));
+    s.removeFromRight(gap);
+    if (search != nullptr)
+        search->setBounds(s.withSizeKeepingCentre(s.getWidth(), ctl));
+}
+
+void BrowserToolbar::paint(juce::Graphics& g)
+{
+    g.setColour(ds::surface100());
+    g.fillRect(getLocalBounds());
+
+    g.setColour(ds::surface300());
+    g.fillRect(headerBounds);
+    g.setColour(ds::line());
+    g.fillRect(headerBounds.getX(), headerBounds.getBottom() - 1, headerBounds.getWidth(), 1);
+    g.fillRect(searchRowBounds.getX(), searchRowBounds.getBottom() - 1, searchRowBounds.getWidth(), 1);
+
+    auto t = headerBounds.reduced(metrics::scaled(8), 0).withTrimmedBottom(1);
+    t.setRight(btnGrid.getX() - metrics::scaled(6));
+    const auto titleFont = uiFontFixed(13.0f, true);
+    const auto countFont = monoFontFixed(11.0f);
+    const int countW = (int) std::ceil(juce::GlyphArrangement::getStringWidth(countFont, countText)) + 2;
+    const int titleW = juce::jmin(t.getWidth() - countW - 6,
+                                  (int) std::ceil(juce::GlyphArrangement::getStringWidth(titleFont, title)) + 2);
+    g.setColour(ds::ink());
+    g.setFont(titleFont);
+    g.drawText(title, t.removeFromLeft(juce::jmax(0, titleW)), juce::Justification::centredLeft, true);
+    t.removeFromLeft(6);
+    g.setColour(ds::inkMuted());
+    g.setFont(countFont);
+    g.drawText(countText, t, juce::Justification::centredLeft, true);
+}
+
+// ── FilterPopover ────────────────────────────────────────────────────────────
+
+FilterPopover::FilterPopover()
+{
+    setWantsKeyboardFocus(true);
+    btnReset.onClick = [this] { if (onReset) onReset(); };
+    btnSave.onClick = [this] { if (onSaveSearch) onSaveSearch(); };
+    btnDone.onClick = [this] { if (onDone) onDone(); };
+    for (auto* b : { &btnReset, &btnSave, &btnDone })
+        addAndMakeVisible(*b);
+    shadower.setOwner(this);
+}
+
+void FilterPopover::setContent(juce::Component* p, std::function<int()> idealPanelHeight)
+{
+    panel = p;
+    panelHeight = std::move(idealPanelHeight);
+    if (panel != nullptr)
+        addAndMakeVisible(*panel);
+    resized();
+}
+
+void FilterPopover::setCountText(const juce::String& t)
+{
+    if (countText == t) return;
+    countText = t;
+    repaint();
+}
+
+int FilterPopover::idealHeight() const
+{
+    const int header = metrics::scaled(26);
+    const int footer = metrics::scaled(30);
+    const int pad = metrics::scaled(12);
+    return header + pad + (panelHeight ? panelHeight() : 0) + pad + footer;
+}
+
+void FilterPopover::resized()
+{
+    auto r = getLocalBounds();
+    auto header = r.removeFromTop(metrics::scaled(26));
+    btnReset.setBounds(header.reduced(metrics::scaled(8), 0).removeFromRight(btnReset.idealWidth())
+                           .withSizeKeepingCentre(btnReset.idealWidth(), metrics::scaled(18)));
+    auto footer = r.removeFromBottom(metrics::scaled(30)).reduced(metrics::scaled(8), 0);
+    btnSave.setBounds(footer.removeFromLeft(btnSave.idealWidth()).withSizeKeepingCentre(btnSave.idealWidth(), metrics::scaled(18)));
+    const int doneW = btnDone.idealWidth() + metrics::scaled(12);
+    btnDone.setBounds(footer.removeFromRight(doneW).withSizeKeepingCentre(doneW, metrics::scaled(18)));
+    if (panel != nullptr)
+        panel->setBounds(r.reduced(metrics::scaled(12)));
+}
+
+void FilterPopover::paint(juce::Graphics& g)
+{
+    auto b = getLocalBounds().toFloat();
+    g.setColour(ds::surface100());
+    g.fillRoundedRectangle(b, ds::radius::md);
+
+    auto header = getLocalBounds().removeFromTop(metrics::scaled(26));
+    {
+        juce::Graphics::ScopedSaveState ss(g);
+        juce::Path clip;
+        clip.addRoundedRectangle(b, ds::radius::md);
+        g.reduceClipRegion(clip);
+        g.setColour(ds::surface300());
+        g.fillRect(header);
+        auto footer = getLocalBounds().removeFromBottom(metrics::scaled(30));
+        g.setColour(ds::surface200());
+        g.fillRect(footer);
+        g.setColour(ds::line());
+        g.fillRect(footer.removeFromTop(1));
+    }
+    g.setColour(ds::line());
+    g.fillRect(header.getX(), header.getBottom() - 1, header.getWidth(), 1);
+
+    auto t = header.reduced(metrics::scaled(12), 0);
+    t.setRight(btnReset.getX() - 6);
+    g.setColour(ds::ink());
+    g.setFont(uiFontFixed(13.0f, true));
+    const int tw = (int) std::ceil(juce::GlyphArrangement::getStringWidth(g.getCurrentFont(), "Filters")) + 2;
+    g.drawText("Filters", t.removeFromLeft(tw), juce::Justification::centredLeft, false);
+    t.removeFromLeft(8);
+    g.setColour(ds::inkMuted());
+    g.setFont(monoFontFixed(11.0f));
+    g.drawText(countText, t, juce::Justification::centredLeft, true);
+
+    g.setColour(ds::line());
+    g.drawRoundedRectangle(b.reduced(0.5f), ds::radius::md, 1.0f);
+}
+
+bool FilterPopover::keyPressed(const juce::KeyPress& key)
+{
+    if (key == juce::KeyPress::escapeKey)
+    {
+        if (onDone) onDone();
+        return true;
+    }
+    return false;
+}
+
+// ── KindGridView ─────────────────────────────────────────────────────────────
+
+namespace {
+constexpr int kGridCols = 5;
+constexpr int kGridHeadH = 22;
+constexpr int kGridCellH = 22;   // clip-height
+constexpr int kGridColW = 96;    // track-width
+}
+
+KindGridView::KindGridView()
+{
+    setWantsKeyboardFocus(true);
+    for (int i = 0; i < kGridCols; ++i)
+        cols.push_back({ (ClipKind) i, {} });
+}
+
+int KindGridView::idealWidth()
+{
+    return metrics::scaled(kGridColW) * kGridCols + (kGridCols - 1);
+}
+
+void KindGridView::setSource(const FileListPanel* list)
+{
+    source = list;
+    refresh();
+}
+
+void KindGridView::refresh()
+{
+    for (auto& c : cols)
+        c.entries.clear();
+    if (source != nullptr)
+        for (int i = 0; i < source->getNumEntries(); ++i)
+            if (const auto* e = source->entryAt(i); e != nullptr && !e->isDirectory)
+            {
+                const int k = juce::jlimit(0, kGridCols - 1, (int) e->kind);
+                cols[(size_t) k].entries.push_back(i);
+            }
+    scrollY = juce::jlimit(0, maxScroll(), scrollY);
+    repaint();
+}
+
+void KindGridView::setPlayhead(bool isPlaying, float loopPhase)
+{
+    if (playing == isPlaying && std::abs(phase - loopPhase) < 0.002f)
+        return;
+    playing = isPlaying;
+    phase = loopPhase;
+    repaint();
+}
+
+juce::Rectangle<int> KindGridView::columnBounds(int c) const
+{
+    const int w = (getWidth() - (kGridCols - 1)) / kGridCols;
+    const int x = c * (w + 1);
+    return { x, 0, c == kGridCols - 1 ? getWidth() - x : w, getHeight() };
+}
+
+int KindGridView::maxScroll() const
+{
+    size_t rows = 0;
+    for (const auto& c : cols)
+        rows = std::max(rows, c.entries.size());
+    const int contentH = (int) rows * metrics::scaled(kGridCellH);
+    return juce::jmax(0, contentH - (getHeight() - metrics::scaled(kGridHeadH)));
+}
+
+void KindGridView::resized()
+{
+    scrollY = juce::jlimit(0, maxScroll(), scrollY);
+}
+
+int KindGridView::entryAt(juce::Point<int> p) const
+{
+    const int headH = metrics::scaled(kGridHeadH);
+    const int cellH = metrics::scaled(kGridCellH);
+    if (p.y < headH) return -1;
+    for (int c = 0; c < kGridCols; ++c)
+    {
+        if (!columnBounds(c).contains(p)) continue;
+        const int row = (p.y - headH + scrollY) / cellH;
+        const auto& list = cols[(size_t) c].entries;
+        return juce::isPositiveAndBelow(row, (int) list.size()) ? list[(size_t) row] : -1;
+    }
+    return -1;
+}
+
+void KindGridView::paint(juce::Graphics& g)
+{
+    g.setColour(ds::line());
+    g.fillAll();
+
+    const int headH = metrics::scaled(kGridHeadH);
+    const int cellH = metrics::scaled(kGridCellH);
+    const int selected = source != nullptr ? source->getSelectedIndex() : -1;
+
+    for (int c = 0; c < kGridCols; ++c)
+    {
+        const auto colR = columnBounds(c);
+        const auto& col = cols[(size_t) c];
+        const auto clipCol = kindClipColour(col.kind);
+
+        g.setColour(ds::surface100());
+        g.fillRect(colR);
+
+        // Cells (clipped below the header so they scroll under it).
+        {
+            juce::Graphics::ScopedSaveState ss(g);
+            g.reduceClipRegion(colR.withTrimmedTop(headH));
+            const int rowsVisible = (colR.getHeight() - headH) / cellH + 2;
+            const int first = scrollY / cellH;
+            for (int r = first; r < first + rowsVisible; ++r)
+            {
+                auto cell = juce::Rectangle<int>(colR.getX(), headH + r * cellH - scrollY, colR.getWidth(), cellH);
+                const bool has = r < (int) col.entries.size();
+                auto inner = cell.withTrimmedBottom(1);
+                if (!has)
+                {
+                    // Empty slot: surface-200 with an outlined stop square in ink-faint.
+                    g.setColour(ds::surface200());
+                    g.fillRect(inner);
+                    auto sq = juce::Rectangle<float>((float) inner.getX() + 6.0f, (float) inner.getCentreY() - 3.0f, 6.0f, 6.0f);
+                    g.setColour(ds::inkFaint());
+                    g.drawRect(sq, 1.0f);
+                }
+                else
+                {
+                    const int entryIdx = col.entries[(size_t) r];
+                    const auto* e = source->entryAt(entryIdx);
+                    const bool isSel = entryIdx == selected;
+                    g.setColour(clipCol);
+                    g.fillRect(inner);
+
+                    // Launch glyph: solid triangle while playing, dimmed when stopped.
+                    auto tri = juce::Rectangle<float>((float) inner.getX() + 6.0f, (float) inner.getCentreY() - 5.0f, 10.0f, 10.0f);
+                    juce::Path p;
+                    p.addTriangle(tri.getX() + 2.0f, tri.getY() + 1.0f, tri.getRight() - 1.0f, tri.getCentreY(),
+                                  tri.getX() + 2.0f, tri.getBottom() - 1.0f);
+                    g.setColour(ds::onClip().withAlpha(isSel && playing ? 1.0f : 0.55f));
+                    g.fillPath(p);
+
+                    g.setColour(ds::onClip());
+                    g.setFont(uiFontFixed(11.0f, isSel));
+                    g.drawText(e != nullptr ? e->name : juce::String(),
+                               inner.withTrimmedLeft(20).withTrimmedRight(4), juce::Justification::centredLeft, true);
+
+                    if (isSel)
+                    {
+                        if (playing)
+                        {
+                            g.fillRect((float) inner.getX(), (float) inner.getBottom() - 2.0f,
+                                       (float) inner.getWidth() * juce::jlimit(0.0f, 1.0f, phase), 2.0f);
+                        }
+                        else
+                        {
+                            // Selected but stopped: dashed inset outline (queued look).
+                            juce::Path outline;
+                            outline.addRectangle(inner.toFloat().reduced(2.5f));
+                            juce::Path dashed;
+                            const float dash[] = { 3.0f, 2.0f };
+                            juce::PathStrokeType(1.0f).createDashedStroke(dashed, outline, dash, 2);
+                            g.fillPath(dashed);
+                        }
+                    }
+                }
+                g.setColour(ds::line());
+                g.fillRect(cell.getX(), cell.getBottom() - 1, cell.getWidth(), 1);
+            }
+        }
+
+        // Column head: surface-300, 2px top rule in the kind's clip colour.
+        auto head = colR.withHeight(headH);
+        g.setColour(ds::surface300());
+        g.fillRect(head);
+        g.setColour(clipCol);
+        g.fillRect(head.removeFromTop(2));
+        g.setColour(ds::line());
+        g.fillRect(head.getX(), head.getBottom() - 1, head.getWidth(), 1);
+        auto label = head.reduced(6, 0);
+        g.setColour(ds::inkMuted());
+        g.setFont(monoFontFixed(11.0f));
+        const auto count = juce::String((int) col.entries.size());
+        g.drawText(count, label.removeFromRight(24), juce::Justification::centredRight, false);
+        g.setColour(ds::ink());
+        g.setFont(uiFontFixed(11.0f, true));
+        g.drawText(clipKindName(col.kind), label, juce::Justification::centredLeft, true);
+    }
+
+    if (hasKeyboardFocus(false))
+        drawFocusRing(g, getLocalBounds().toFloat().reduced(1.5f), 0.0f);
+}
+
+void KindGridView::mouseDown(const juce::MouseEvent& e)
+{
+    grabKeyboardFocus();
+    dragStarted = false;
+    pressedEntry = entryAt(e.getPosition());
+    if (pressedEntry >= 0 && onSelect)
+        onSelect(pressedEntry);
+    repaint();
+}
+
+void KindGridView::mouseDrag(const juce::MouseEvent& e)
+{
+    if (dragStarted || pressedEntry < 0 || e.getDistanceFromDragStart() < 4 || source == nullptr)
+        return;
+    if (const auto* entry = source->entryAt(pressedEntry); entry != nullptr && onDragFile)
+    {
+        dragStarted = true;
+        onDragFile(entry->file);
+    }
+}
+
+void KindGridView::mouseUp(const juce::MouseEvent&)
+{
+    pressedEntry = -1;
+    dragStarted = false;
+}
+
+void KindGridView::mouseDoubleClick(const juce::MouseEvent& e)
+{
+    const int idx = entryAt(e.getPosition());
+    if (idx >= 0 && onOpen)
+        onOpen(idx);
+}
+
+void KindGridView::mouseWheelMove(const juce::MouseEvent&, const juce::MouseWheelDetails& w)
+{
+    const int next = juce::jlimit(0, maxScroll(), scrollY - juce::roundToInt(w.deltaY * 240.0f));
+    if (next != scrollY)
+    {
+        scrollY = next;
+        repaint();
+    }
+}
+
+bool KindGridView::keyPressed(const juce::KeyPress& key)
+{
+    if (key == juce::KeyPress::upKey)   { if (onStep) onStep(-1); return true; }
+    if (key == juce::KeyPress::downKey) { if (onStep) onStep(1);  return true; }
+    return false;
 }
 
 } // namespace pflow

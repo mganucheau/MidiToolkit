@@ -225,6 +225,7 @@ if(MIDITOOLKIT_BUILD_TESTS)
         Tests/LiveMidiFxTests.cpp
         Tests/FolderIndexTests.cpp
         Tests/ScanEfficiencyTests.cpp
+        Tests/SnapshotTests.cpp
     )
     target_link_libraries(MidiToolkitTests PRIVATE
         MidiToolkit

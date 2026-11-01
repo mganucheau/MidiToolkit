@@ -38,7 +38,18 @@ public:
     void setTimeStretch(double stretch);
     void paint(juce::Graphics&) override;
 
+    /** Groove: notes take the clip's kind colour; optional velocity lane under the roll. */
+    void setNoteColour(juce::Colour c) { noteColour = c; repaint(); }
+    void setShowVelocity(bool on) { showVelocity = on; repaint(); }
+    bool isShowingVelocity() const { return showVelocity; }
+    /** 0..1 position of the playhead through the (stretched) clip. */
+    double playheadFraction() const;
+    static constexpr int kRulerH = 14;
+    static constexpr int kVelocityH = 40;
+
 private:
+    juce::Colour noteColour { 0xff6fb5f0 };
+    bool showVelocity = false;
     std::vector<RollNote> notes;
     std::vector<RollNote> frameNotes; // stable pitch frame (usually source clip)
     GrooveParams knobs;
@@ -50,7 +61,7 @@ private:
     double playheadStep = 0.0;
     bool playing = false;
     double timeStretch = 1.0;
-    static constexpr float kGutterW = 28.0f;
+    static constexpr float kGutterW = 20.0f;
 };
 
 // Cupertino editor: clip header · toolbar · roll · velocity lane.

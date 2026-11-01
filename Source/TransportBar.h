@@ -51,6 +51,7 @@ public:
     std::function<void(double)> onFreeBpmChanged;
     std::function<void()> onDragToDaw;
     std::function<void()> onCopyToFolder;
+    std::function<void()> onOpenSettings;
 
 private:
     void applyHeaderCaptions(bool withText);
@@ -149,6 +150,7 @@ private:
     IconBtn btnPassthrough { icons::midi, "Through" };
     IconBtn btnEditor { icons::noteKeys, "Piano Roll" };
     IconBtn btnEffects { icons::sliders, "Effects" };
+    IconBtn btnSettings { icons::gear, "Settings" };
 
     juce::Rectangle<int> titleBounds, transportGroupBounds, dividerBounds;
 

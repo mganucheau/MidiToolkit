@@ -247,6 +247,11 @@ TransportBar::TransportBar()
     btnEffects.onClick = [this] { if (onToggleEffects) onToggleEffects(); };
     addAndMakeVisible(btnEffects);
 
+    prep(btnSettings);
+    btnSettings.setTooltip("Settings");
+    btnSettings.onClick = [this] { if (onOpenSettings) onOpenSettings(); };
+    addAndMakeVisible(btnSettings);
+
     setOpaque(true);
     refreshBpm();
     startTimerHz(8);
@@ -505,7 +510,7 @@ bool TransportBar::hitInteractive(juce::Point<int> p) const
     {
         return c.isVisible() && c.getBounds().contains(p);
     };
-    return covers(btnPlay) || covers(btnStop) || covers(btnRecord) || covers(statusPill) || covers(btnSync)
+    return covers(btnSettings) || covers(btnPlay) || covers(btnStop) || covers(btnRecord) || covers(statusPill) || covers(btnSync)
         || covers(btnDragToDaw) || covers(btnPassthrough) || covers(btnEditor)
         || covers(btnEffects);
 }
@@ -572,7 +577,7 @@ void TransportBar::resized()
 
     btnStop.setVisible(false);
     btnEffects.setVisible(!passthrough);
-    btnDragToDaw.setVisible(!passthrough && hasClip);
+    btnDragToDaw.setVisible(false);   // Drag lives in the preview header (Groove)
     btnEditor.setVisible(!passthrough);   // the Input roll in Through arrives with the piano-roll phase
 
     const int pillW = statusPill.idealWidth();
@@ -581,7 +586,7 @@ void TransportBar::resized()
 
     auto rightWidth = [&]()
     {
-        int w = 0;
+        int w = btn + groupGap;   // settings
         if (btnEditor.isVisible())  w += btnEditor.captionWidth();
         if (btnEffects.isVisible()) w += tight + btnEffects.captionWidth();
         if (chipW > 0)              w += groupGap + chipW;
@@ -621,6 +626,8 @@ void TransportBar::resized()
     dividerBounds = {};
 
     int xr = getWidth() - rightPad;
+    btnSettings.setBounds(xr - btn, y, btn, btn);
+    xr -= btn + groupGap;
     if (btnEffects.isVisible())
     {
         const int w = btnEffects.captionWidth();

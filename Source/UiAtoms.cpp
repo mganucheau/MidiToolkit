@@ -478,10 +478,11 @@ ChipBtn::ChipBtn(const juce::String& text, const juce::String& iconName)
 
 int ChipBtn::idealWidth() const
 {
-    const auto f = mono ? monoFont(13.0f, true) : uiFont(13.0f, true);
-    int w = (int) std::ceil(juce::GlyphArrangement::getStringWidth(f, label)) + 26;
-    if (icon.isNotEmpty()) w += 16;
-    if (trailingIcon.isNotEmpty()) w += 15;
+    // Matches paintButton: 6 px side padding, 10 px glyphs with 4 px gaps, 11 px label.
+    const auto f = mono ? monoFont(11.0f) : uiFont(11.0f, true);
+    int w = (int) std::ceil(juce::GlyphArrangement::getStringWidth(f, label)) + 16;
+    if (icon.isNotEmpty()) w += 14;
+    if (trailingIcon.isNotEmpty()) w += 14;
     return w;
 }
 
