@@ -73,6 +73,9 @@ bool clipMatchesFilter(const StepClip& clip, const BrowserSearch& s)
         && (s.kindMask & (uint8_t) (1u << (int) clip.kind)) == 0)
         return false;
 
+    if (s.tagMask != 0 && (clip.tagMask & s.tagMask) != s.tagMask)
+        return false;
+
     if (s.timeSigMask != 0)
     {
         const int bit = timeSigFilterBit(clip.timeSigNum, clip.timeSigDen);
@@ -1885,6 +1888,7 @@ void MidiToolkitEditor::saveCurrentSearch()
         && criteria.barsMin <= 0 && criteria.barsMax <= 0
         && criteria.complexityMin <= 0 && criteria.complexityMax <= 0
         && criteria.kindMask == 0
+        && criteria.tagMask == 0
         && criteria.timeSigMask == 0
         && !criteria.subdirs
         && !criteria.removeDuplicates;
@@ -2540,7 +2544,8 @@ MidiClip MidiToolkitEditor::buildRenderedClip() const
     const auto edit = hasRecording ? effectsInspector.getEdit() : selectedEdit();
     const auto groove = hasRecording ? effectsInspector.getGroove() : selectedGroove();
     const auto resolved = resolveClip(*clip, edit);
-    auto notes = applyGroove(resolved.notes, groove, clip->complexity);
+    auto notes = applyGroove(resolved.notes, groove, clip->complexity,
+                             clip->kind, clip->root, edit.mode);
     // Complexity morph can invent ±1/±2 ornaments — keep Fit to Scale honest.
     if (edit.fitScale && edit.root >= 0)
         refitNotesToScale(notes, edit.root, edit.mode);
@@ -2827,7 +2832,8 @@ void MidiToolkitEditor::updateMiniPreview()
         const auto groove = effectsInspector.getGroove();
         const auto resolved = resolveClip(recordedClip, edit);
         const int rootPc = edit.root >= 0 ? edit.root : 0;
-        auto grooved = applyGroove(resolved.notes, groove, recordedClip.complexity);
+        auto grooved = applyGroove(resolved.notes, groove, recordedClip.complexity,
+                                   recordedClip.kind, recordedClip.root, edit.mode);
         if (edit.fitScale && edit.root >= 0)
             refitNotesToScale(grooved, edit.root, edit.mode);
         miniRoll.setNotes(grooved, resolved.bars, groove, rootPc, recordedClip.notes,
@@ -2857,7 +2863,8 @@ void MidiToolkitEditor::updateMiniPreview()
     // (fitting to resolved notes would re-center and hide transposition).
     const int rootPc = edit.root >= 0 ? edit.root : (clip->root >= 0 ? clip->root : 0);
     miniRoll.setNoteColour(kindClipColour(clip->kind));
-    auto grooved = applyGroove(resolved.notes, groove, clip->complexity);
+    auto grooved = applyGroove(resolved.notes, groove, clip->complexity,
+                               clip->kind, clip->root, edit.mode);
     if (edit.fitScale && edit.root >= 0)
         refitNotesToScale(grooved, edit.root, edit.mode);
     miniRoll.setNotes(grooved, resolved.bars, groove,

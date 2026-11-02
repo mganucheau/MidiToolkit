@@ -290,3 +290,116 @@ TEST_CASE("grooveValueText formats bipolar and percent", "[groove]")
     CHECK(grooveValueText(kKnobDefs[0], 50) == "50%");
     CHECK(grooveValueText(kKnobDefs[5], 100) == "100%");
 }
+
+TEST_CASE("drum complexity keeps kick/snare backbeat anchors", "[groove]")
+{
+    // Channel-1 backbeat: kick on 1/3, snare on 2/4, hats on 8ths.
+    std::vector<RollNote> drums = {
+        { 0, 36, 0.0, 0.5, 100, 1 },   // kick
+        { 1, 42, 0.0, 0.5, 80, 1 },    // hat
+        { 2, 42, 2.0, 0.5, 70, 1 },
+        { 3, 38, 4.0, 0.5, 110, 1 },   // snare
+        { 4, 42, 4.0, 0.5, 80, 1 },
+        { 5, 42, 6.0, 0.5, 70, 1 },
+        { 6, 36, 8.0, 0.5, 100, 1 },
+        { 7, 42, 8.0, 0.5, 80, 1 },
+        { 8, 42, 10.0, 0.5, 70, 1 },
+        { 9, 38, 12.0, 0.5, 110, 1 },
+        { 10, 42, 12.0, 0.5, 80, 1 },
+        { 11, 42, 14.0, 0.5, 70, 1 },
+    };
+
+    GrooveParams k;
+    k.complexityTarget = 85;
+    const auto denser = applyGroove(drums, k, 40, ClipKind::Drums);
+
+    auto hasKickAt = [&](double step)
+    {
+        for (const auto& n : denser)
+            if (n.pitch == 36 && std::abs(n.start - step) < 0.35)
+                return true;
+        return false;
+    };
+    auto hasSnareAt = [&](double step)
+    {
+        for (const auto& n : denser)
+            if (n.pitch == 38 && std::abs(n.start - step) < 0.35)
+                return true;
+        return false;
+    };
+    CHECK(hasKickAt(0.0));
+    CHECK(hasKickAt(8.0));
+    CHECK(hasSnareAt(4.0));
+    CHECK(hasSnareAt(12.0));
+
+    // New pitches must stay on the kit map.
+    for (const auto& n : denser)
+        CHECK((n.pitch >= 35 && n.pitch <= 81));
+
+    k.complexityTarget = 15;
+    const auto sparser = applyGroove(drums, k, 70, ClipKind::Drums);
+    CHECK(sparser.size() <= drums.size());
+    bool kickOk = false, snareOk = false;
+    for (const auto& n : sparser)
+    {
+        if (n.pitch == 36 && std::abs(n.start - 0.0) < 0.35) kickOk = true;
+        if (n.pitch == 38 && std::abs(n.start - 4.0) < 0.35) snareOk = true;
+    }
+    CHECK(kickOk);
+    CHECK(snareOk);
+}
+
+TEST_CASE("piano complexity adds in-scale tones, not chromatic neighbors", "[groove]")
+{
+    // C major triad repeating.
+    std::vector<RollNote> piano = {
+        { 0, 60, 0.0, 4.0, 90, 1 },
+        { 1, 64, 0.0, 4.0, 85, 1 },
+        { 2, 67, 0.0, 4.0, 85, 1 },
+        { 3, 60, 8.0, 4.0, 90, 1 },
+        { 4, 64, 8.0, 4.0, 85, 1 },
+        { 5, 67, 8.0, 4.0, 85, 1 },
+    };
+
+    GrooveParams k;
+    k.complexityTarget = 80;
+    const auto denser = applyGroove(piano, k, 35, ClipKind::Piano, 0, Mode::Ionian);
+
+    for (const auto& n : denser)
+    {
+        const bool fromSource = (n.pitch == 60 || n.pitch == 64 || n.pitch == 67);
+        CHECK((fromSource || pitchInScale(n.pitch, 0, Mode::Ionian)));
+        // No random ±1/±2 chromatic ornaments off the triad.
+        CHECK(n.pitch != 61);
+        CHECK(n.pitch != 62);
+        CHECK(n.pitch != 63);
+        CHECK(n.pitch != 65);
+        CHECK(n.pitch != 66);
+    }
+}
+
+TEST_CASE("drum variation leaves kick/snare anchors in place", "[groove]")
+{
+    std::vector<RollNote> drums = {
+        { 0, 36, 0.0, 0.5, 100, 1 },
+        { 1, 42, 2.0, 0.5, 70, 1 },
+        { 2, 38, 4.0, 0.5, 110, 1 },
+        { 3, 42, 6.0, 0.5, 70, 1 },
+        { 4, 36, 8.0, 0.5, 100, 1 },
+        { 5, 42, 10.0, 0.5, 70, 1 },
+        { 6, 38, 12.0, 0.5, 110, 1 },
+        { 7, 42, 14.0, 0.5, 70, 1 },
+    };
+    GrooveParams k;
+    k.variationIndex = 5;
+    const auto varied = applyGroove(drums, k, -1, ClipKind::Drums);
+    auto kickAt = [&](double step)
+    {
+        for (const auto& n : varied)
+            if (n.pitch == 36 && std::abs(n.start - step) < 0.2)
+                return true;
+        return false;
+    };
+    CHECK(kickAt(0.0));
+    CHECK(kickAt(8.0));
+}

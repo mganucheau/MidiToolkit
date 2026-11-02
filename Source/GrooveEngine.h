@@ -297,9 +297,13 @@ void applyGrooveSectionLock(const GrooveParams& locked, GrooveParams& target, ui
 void captureGrooveSectionLock(const GrooveParams& src, GrooveParams& locked, uint32_t locks,
                               int clipComplexity = -1);
 
-/** Timing + generative transforms. sourceComplexity is the clip's baseline (1..100). */
+/** Timing + generative transforms. sourceComplexity is the clip's baseline (1..100).
+    kind / root / mode steer complexity morph and variation so edits stay musical. */
 std::vector<RollNote> applyGroove(const std::vector<RollNote>& notes, const GrooveParams& k,
-                                  int sourceComplexity = -1);
+                                  int sourceComplexity = -1,
+                                  ClipKind kind = ClipKind::Lead,
+                                  int rootPc = -1,
+                                  Mode mode = Mode::Ionian);
 
 /** Build CC64 sustain points (beat domain) for export/preview. Empty when Off. */
 std::vector<AutomationPoint> buildSustainPedalAutomation(const std::vector<RollNote>& notes,

@@ -28,15 +28,49 @@ struct RollNote
     bool   moved = false;   // set by resolveClip when a manual move applies
 };
 
-enum class ClipKind { Bass, Piano, Lead, Drums, Single };
+enum class ClipKind { Bass, Piano, Lead, Drums };
+constexpr int kNumClipKinds = 4;
 
 const char* clipKindName(ClipKind k);
+
+/** Best-effort kind guess from a file name / path (keywords like bass, kit, keys). */
+ClipKind hintKindFromFileName(const juce::String& nameOrPath);
+
+/** Content tags derived from note analysis. Bitmask on StepClip / BrowserSearch. */
+namespace clipTag
+{
+    constexpr uint16_t Swing         = 1u << 0;
+    constexpr uint16_t SixteenthHats = 1u << 1;
+    constexpr uint16_t Backbeat      = 1u << 2;
+    constexpr uint16_t SeventhChords = 1u << 3;
+    constexpr uint16_t Sparse        = 1u << 4;
+    constexpr int kCount = 5;
+}
+
+inline const char* clipTagName(int bit)
+{
+    switch (bit)
+    {
+        case 0: return "Swing";
+        case 1: return "16th Hats";
+        case 2: return "Backbeat";
+        case 3: return "7ths";
+        case 4: return "Sparse";
+        default: return "";
+    }
+}
 
 struct StepClip
 {
     juce::String name;
     juce::String filePath;
     ClipKind kind = ClipKind::Lead;
+    /** 0..100 confidence in `kind`. Low values mean the nearest label is a guess. */
+    int    kindConfidence = 50;
+    /** True when a non-trivial share of notes sit on the GM drum map. */
+    bool   hasDrumContent = false;
+    /** Bitmask of clipTag::* derived from content. */
+    uint16_t tagMask = 0;
     int    root = -1;       // pitch-class 0..11, -1 = unknown
     double bpm  = 120.0;
     int    bars = 1;
@@ -49,6 +83,9 @@ struct StepClip
     bool   notesResident = false;
     std::vector<RollNote> notes;
 };
+
+/** True when pitch is in the General MIDI percussion key map (35–81). */
+bool isGmDrumPitch(int midi);
 
 // ── Music theory ─────────────────────────────────────────────────────────────
 

@@ -374,11 +374,10 @@ void PianoRollEditor::setClip(const StepClip& c, const ClipEdit& e, const Groove
     clip = c;
     switch (c.kind)
     {
-        case ClipKind::Drums:  noteColour = ds::clip(1); break;
-        case ClipKind::Bass:   noteColour = ds::clip(6); break;
-        case ClipKind::Piano:  noteColour = ds::clip(7); break;
-        case ClipKind::Lead:   noteColour = ds::clip(5); break;
-        case ClipKind::Single: noteColour = ds::clip(8); break;
+        case ClipKind::Drums: noteColour = ds::clip(1); break;
+        case ClipKind::Bass:  noteColour = ds::clip(6); break;
+        case ClipKind::Piano: noteColour = ds::clip(7); break;
+        case ClipKind::Lead:  noteColour = ds::clip(5); break;
     }
     edit = e;
     groove = k;
@@ -502,7 +501,8 @@ void PianoRollEditor::rebuildResolved()
 {
     if (!hasClip) return;
     resolved = resolveClip(clip, edit);
-    grooved = applyGroove(resolved.notes, groove, clip.complexity);
+    grooved = applyGroove(resolved.notes, groove, clip.complexity,
+                          clip.kind, clip.root, edit.mode);
     if (edit.fitScale && edit.root >= 0)
         refitNotesToScale(grooved, edit.root, edit.mode);
 

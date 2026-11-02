@@ -99,10 +99,10 @@ FavoritesSidebar::FilterPanel::FilterPanel()
     addAndMakeVisible(keyGrid);
 
     juce::StringArray kinds;
-    for (int i = 0; i < 5; ++i)
+    for (int i = 0; i < kNumClipKinds; ++i)
         kinds.add(clipKindName((ClipKind) i));
     kindGrid.title = "Kind";
-    kindGrid.columns = 3;
+    kindGrid.columns = 2;
     kindGrid.multiSelect = true;
     kindGrid.sidebarLabelStyle = true;
     kindGrid.collapsible = true;
@@ -114,6 +114,23 @@ FavoritesSidebar::FilterPanel::FilterPanel()
         if (onCriteriaChanged) onCriteriaChanged();
     };
     addAndMakeVisible(kindGrid);
+
+    juce::StringArray tags;
+    for (int i = 0; i < clipTag::kCount; ++i)
+        tags.add(clipTagName(i));
+    tagGrid.title = "Tags";
+    tagGrid.columns = 3;
+    tagGrid.multiSelect = true;
+    tagGrid.sidebarLabelStyle = true;
+    tagGrid.collapsible = true;
+    tagGrid.collapsed = true;
+    tagGrid.onCollapsedChanged = [this] { if (onLayoutChanged) onLayoutChanged(); };
+    tagGrid.setItems(tags);
+    tagGrid.onChange = [this]
+    {
+        if (onCriteriaChanged) onCriteriaChanged();
+    };
+    addAndMakeVisible(tagGrid);
 
     juce::StringArray timeSigs;
     for (int i = 0; i < kNumFilterTimeSigs; ++i)
@@ -159,6 +176,7 @@ int FavoritesSidebar::FilterPanel::idealHeight() const
     const int gap = metrics::scaled(8);
     return keyGrid.idealHeight() + gap
          + kindGrid.idealHeight() + gap
+         + tagGrid.idealHeight() + gap
          + timeSigGrid.idealHeight() + gap
          + bpmRange.idealHeight() + gap
          + barsRange.idealHeight() + gap
@@ -221,6 +239,7 @@ void FavoritesSidebar::FilterPanel::applyTo(BrowserSearch& s) const
             s.keyRoot = -1;
     }
     s.kindMask = (uint8_t) kindGrid.getSelectedMask();
+    s.tagMask = tagGrid.getSelectedMask();
     s.timeSigMask = timeSigGrid.getSelectedMask();
     s.removeDuplicates = hideDuplicates;
 }
@@ -230,6 +249,7 @@ int FavoritesSidebar::FilterPanel::activeGroupCount() const
     int n = 0;
     if (keyGrid.getSelectedMask() != 0) ++n;
     if (kindGrid.getSelectedMask() != 0) ++n;
+    if (tagGrid.getSelectedMask() != 0) ++n;
     if (timeSigGrid.getSelectedMask() != 0) ++n;
     if (!bpmRange.isFullRange()) ++n;
     if (!barsRange.isFullRange()) ++n;
@@ -264,6 +284,7 @@ void FavoritesSidebar::FilterPanel::loadFrom(const BrowserSearch& s)
         mask = (uint16_t) (1u << s.keyRoot);
     keyGrid.setSelectedMask(mask, juce::dontSendNotification);
     kindGrid.setSelectedMask(s.kindMask, juce::dontSendNotification);
+    tagGrid.setSelectedMask(s.tagMask, juce::dontSendNotification);
     timeSigGrid.setSelectedMask(s.timeSigMask, juce::dontSendNotification);
     hideDuplicates = s.removeDuplicates;
     repaint();
@@ -276,6 +297,7 @@ void FavoritesSidebar::FilterPanel::resetFilters()
     complexityRange.setRange(0, 100, juce::dontSendNotification);
     keyGrid.setSelectedMask(0, juce::dontSendNotification);
     kindGrid.setSelectedMask(0, juce::dontSendNotification);
+    tagGrid.setSelectedMask(0, juce::dontSendNotification);
     timeSigGrid.setSelectedMask(0, juce::dontSendNotification);
     hideDuplicates = true;
     repaint();
@@ -390,6 +412,8 @@ void FavoritesSidebar::FilterPanel::resized()
     keyGrid.setBounds(r.removeFromTop(keyGrid.idealHeight()));
     r.removeFromTop(gap);
     kindGrid.setBounds(r.removeFromTop(kindGrid.idealHeight()));
+    r.removeFromTop(gap);
+    tagGrid.setBounds(r.removeFromTop(tagGrid.idealHeight()));
     r.removeFromTop(gap);
     timeSigGrid.setBounds(r.removeFromTop(timeSigGrid.idealHeight()));
     r.removeFromTop(gap);
@@ -3046,7 +3070,7 @@ bool FilterPopover::keyPressed(const juce::KeyPress& key)
 // ── KindGridView ─────────────────────────────────────────────────────────────
 
 namespace {
-constexpr int kGridCols = 5;
+constexpr int kGridCols = kNumClipKinds;
 constexpr int kGridHeadH = 22;
 constexpr int kGridCellH = 22;   // clip-height
 constexpr int kGridColW = 96;    // track-width

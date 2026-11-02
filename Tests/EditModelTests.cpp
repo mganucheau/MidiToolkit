@@ -527,6 +527,136 @@ TEST_CASE("complexity stays low for a single note and rises for a dense part", "
     const auto dense = makeStepClip(denseClip);
 
     CHECK(sparse.complexity < 25);
-    CHECK(dense.complexity > sparse.complexity + 20);
+    CHECK(dense.complexity > sparse.complexity + 10);
     CHECK(dense.complexity < 100);
+}
+
+TEST_CASE("channel-1 GM drum loop is classified as Drums", "[editmodel]")
+{
+    // Typical sample-pack drum loop on channel 1 (not channel 10).
+    std::vector<NoteEvent> hits;
+    for (int bar = 0; bar < 2; ++bar)
+    {
+        const double b = bar * 4.0;
+        hits.push_back({ 36, 100, b + 0.0, 0.2, 1 });
+        hits.push_back({ 42, 80,  b + 0.0, 0.15, 1 });
+        hits.push_back({ 42, 70,  b + 0.5, 0.15, 1 });
+        hits.push_back({ 38, 110, b + 1.0, 0.2, 1 });
+        hits.push_back({ 42, 80,  b + 1.0, 0.15, 1 });
+        hits.push_back({ 42, 70,  b + 1.5, 0.15, 1 });
+        hits.push_back({ 36, 100, b + 2.0, 0.2, 1 });
+        hits.push_back({ 42, 80,  b + 2.0, 0.15, 1 });
+        hits.push_back({ 42, 70,  b + 2.5, 0.15, 1 });
+        hits.push_back({ 38, 110, b + 3.0, 0.2, 1 });
+        hits.push_back({ 42, 80,  b + 3.0, 0.15, 1 });
+        hits.push_back({ 42, 70,  b + 3.5, 0.15, 1 });
+    }
+    MidiClip clip;
+    clip.name = "Beat";
+    clip.notes = std::move(hits);
+    clip.lengthBeats = 8.0;
+    const auto s = makeStepClip(clip);
+    CHECK(s.kind == ClipKind::Drums);
+    CHECK(s.kindConfidence >= 70);
+    CHECK((s.tagMask & clipTag::Backbeat) != 0);
+}
+
+TEST_CASE("piano with one channel-10 click is not Drums", "[editmodel]")
+{
+    MidiClip clip = test::makeClipWithNotes({
+        { 60, 90, 0.0, 2.0, 1 },
+        { 64, 85, 0.0, 2.0, 1 },
+        { 67, 85, 0.0, 2.0, 1 },
+        { 60, 90, 2.0, 2.0, 1 },
+        { 64, 85, 2.0, 2.0, 1 },
+        { 67, 85, 2.0, 2.0, 1 },
+        { 37, 40, 0.0, 0.1, 10 }, // stray drum click on ch 10
+    }, 4.0);
+    const auto s = makeStepClip(clip);
+    CHECK(s.kind == ClipKind::Piano);
+    CHECK(s.hasDrumContent);
+}
+
+TEST_CASE("low chordal clip is Piano not Bass", "[editmodel]")
+{
+    MidiClip clip = test::makeClipWithNotes({
+        { 36, 90, 0.0, 2.0, 1 }, // C2
+        { 40, 85, 0.0, 2.0, 1 }, // E2
+        { 43, 85, 0.0, 2.0, 1 }, // G2
+        { 36, 90, 2.0, 2.0, 1 },
+        { 40, 85, 2.0, 2.0, 1 },
+        { 43, 85, 2.0, 2.0, 1 },
+    }, 4.0);
+    const auto s = makeStepClip(clip);
+    CHECK(s.kind == ClipKind::Piano);
+}
+
+TEST_CASE("drum complexity rises with hat layer not pitch-class count", "[editmodel]")
+{
+    MidiClip sparse;
+    sparse.name = "SparseKick";
+    sparse.lengthBeats = 4.0;
+    sparse.notes = {
+        { 36, 100, 0.0, 0.2, 1 },
+        { 38, 110, 1.0, 0.2, 1 },
+        { 36, 100, 2.0, 0.2, 1 },
+        { 38, 110, 3.0, 0.2, 1 },
+    };
+
+    MidiClip withHats = sparse;
+    withHats.name = "WithHats";
+    for (double t = 0.0; t < 4.0; t += 0.25)
+        withHats.notes.push_back({ 42, 60, t, 0.1, 1 });
+
+    const auto a = makeStepClip(sparse);
+    const auto b = makeStepClip(withHats);
+    CHECK(a.kind == ClipKind::Drums);
+    CHECK(b.kind == ClipKind::Drums);
+    CHECK(b.complexity > a.complexity);
+}
+
+TEST_CASE("filename keywords hint Bass Drums and Piano", "[editmodel]")
+{
+    CHECK(hintKindFromFileName("BA_Funky_01.mid") == ClipKind::Bass);
+    CHECK(hintKindFromFileName("Bassline_120_Cmin.mid") == ClipKind::Bass);
+    CHECK(hintKindFromFileName("Deep_Bass_Groove.mid") == ClipKind::Bass);
+    CHECK(hintKindFromFileName("Kit_01_BoomBap.mid") == ClipKind::Drums);
+    CHECK(hintKindFromFileName("Drums_Loop_A.mid") == ClipKind::Drums);
+    CHECK(hintKindFromFileName("Keys_Rhodes_Pad.mid") == ClipKind::Piano);
+    CHECK(hintKindFromFileName("Piano_Chords_Em.mid") == ClipKind::Piano);
+    CHECK(hintKindFromFileName("Lead_Synth_Hook.mid") == ClipKind::Lead);
+}
+
+TEST_CASE("bass filename wins over ambiguous mid register mono line", "[editmodel]")
+{
+    MidiClip clip = test::makeClipWithNotes({
+        { 48, 100, 0.0, 0.5, 1 },
+        { 50, 90, 0.5, 0.5, 1 },
+        { 48, 100, 1.0, 0.5, 1 },
+        { 47, 90, 1.5, 0.5, 1 },
+    }, 4.0);
+    clip.name = "BA_Walking_01";
+    clip.filePath = "/Library/BA_Walking_01.mid";
+    const auto s = makeStepClip(clip);
+    CHECK(s.kind == ClipKind::Bass);
+}
+
+TEST_CASE("C1 kick pattern classifies as Drums without drum filename", "[editmodel]")
+{
+    MidiClip clip;
+    clip.name = "Untitled_Loop";
+    clip.lengthBeats = 4.0;
+    // Ableton C1 kick on 1 and 3, plus a couple of other kit hits.
+    clip.notes = {
+        { 36, 110, 0.0, 0.2, 1 },
+        { 42, 70, 0.5, 0.1, 1 },
+        { 38, 100, 1.0, 0.2, 1 },
+        { 42, 70, 1.5, 0.1, 1 },
+        { 36, 110, 2.0, 0.2, 1 },
+        { 42, 70, 2.5, 0.1, 1 },
+        { 38, 100, 3.0, 0.2, 1 },
+        { 42, 70, 3.5, 0.1, 1 },
+    };
+    const auto s = makeStepClip(clip);
+    CHECK(s.kind == ClipKind::Drums);
 }

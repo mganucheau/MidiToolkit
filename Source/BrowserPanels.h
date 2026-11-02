@@ -21,6 +21,8 @@ struct BrowserSearch
     int complexityMax = 0; // 0 = no upper bound
     /** Bit i set = ClipKind i selected. 0 = any kind. */
     uint8_t kindMask = 0;
+    /** Bit i set = clipTag bit i required. 0 = any tags. */
+    uint16_t tagMask = 0;
     /** Bit i matches kFilterTimeSigs[i]. 0 = any time signature. */
     uint16_t timeSigMask = 0;
     bool subdirs = true;
@@ -298,6 +300,7 @@ private:
         juce::Rectangle<int> subdirRowBounds, subdirSwitchBounds;
         fx::ChipGrid keyGrid;
         fx::ChipGrid kindGrid;
+        fx::ChipGrid tagGrid;
         fx::ChipGrid timeSigGrid;
         fx::HistRangeSlider bpmRange { "Tempo", 40, 240 };
         fx::HistRangeSlider barsRange { "Bars", 1, 64 };
@@ -587,11 +590,10 @@ inline juce::Colour kindClipColour(ClipKind k)
 {
     switch (k)
     {
-        case ClipKind::Drums:  return ds::clip(1);
-        case ClipKind::Bass:   return ds::clip(6);
-        case ClipKind::Piano:  return ds::clip(7);
-        case ClipKind::Lead:   return ds::clip(5);
-        case ClipKind::Single: return ds::clip(8);
+        case ClipKind::Drums: return ds::clip(1);
+        case ClipKind::Bass:  return ds::clip(6);
+        case ClipKind::Piano: return ds::clip(7);
+        case ClipKind::Lead:  return ds::clip(5);
     }
     return ds::clip(6);
 }
