@@ -1,4 +1,5 @@
 #include "LibraryStore.h"
+#include "Theme.h"
 #include <algorithm>
 
 namespace pflow {
@@ -139,7 +140,8 @@ SharedUiSession LibraryStore::uiSessionFromXml(const juce::XmlElement& el)
     s.tweakDensity = juce::jlimit(0, 1, el.getIntAttribute("tweakDensity", 1));
     s.tweakSize = juce::jlimit(0, 2, el.getIntAttribute("tweakSize", 1));
     s.tweakTextScalePct = juce::jlimit(60, 150, el.getIntAttribute("tweakTextScalePct", 100));
-    s.tweakAppearance = juce::jlimit(0, 2, el.getIntAttribute("tweakAppearance", 0));
+    const bool themeCatalog = el.getIntAttribute("themeCatalog", 0) != 0;
+    s.tweakAppearance = migrateThemeIndex(el.getIntAttribute("tweakAppearance", 0), themeCatalog);
     s.tweakShowTooltips = el.getIntAttribute("tweakShowTooltips", 1) != 0 ? 1 : 0;
     s.hasDefaultView = el.getIntAttribute("hasDefaultView", 0) != 0;
     s.defEditorOpen = el.getIntAttribute("defEditorOpen", 0) != 0;
@@ -161,7 +163,7 @@ SharedUiSession LibraryStore::uiSessionFromXml(const juce::XmlElement& el)
     s.defTweakSize = juce::jlimit(0, 2, el.getIntAttribute("defTweakSize", 1));
     s.defTweakTextScalePct = juce::jlimit(60, 150, el.getIntAttribute("defTweakText", 100));
     s.defTweakDensity = juce::jlimit(0, 1, el.getIntAttribute("defTweakDensity", 1));
-    s.defTweakAppearance = juce::jlimit(0, 2, el.getIntAttribute("defTweakAppearance", 0));
+    s.defTweakAppearance = migrateThemeIndex(el.getIntAttribute("defTweakAppearance", 0), themeCatalog);
     s.browserSessionSearch = browserSearchFromXml(el);
 
     for (auto* child : el.getChildIterator())
@@ -211,6 +213,7 @@ void LibraryStore::uiSessionToXml(juce::XmlElement& el, const SharedUiSession& s
     el.setAttribute("tweakDensity", s.tweakDensity);
     el.setAttribute("tweakSize", s.tweakSize);
     el.setAttribute("tweakTextScalePct", s.tweakTextScalePct);
+    el.setAttribute("themeCatalog", 1);
     el.setAttribute("tweakAppearance", s.tweakAppearance);
     el.setAttribute("tweakShowTooltips", s.tweakShowTooltips);
     el.setAttribute("hasDefaultView", s.hasDefaultView ? 1 : 0);

@@ -880,16 +880,33 @@ MidiToolkitEditor::MidiToolkitEditor(MidiToolkitProcessor& p)
     };
     effectsInspector.setBpmMultiplier(processorRef.bpmMultiplier.load());
     effectsInspector.onActivated = [this] { claimKeyNav(KeyNavTarget::Effects); };
-    effectsInspector.onContentHeightChanged = [this] { syncPassthroughWindowHeight(); };
+    // Section folds scroll inside the viewport — they must not grow the window.
+    effectsInspector.onContentHeightChanged = [this]
+    {
+        if (processorRef.passthrough)
+            syncPassthroughWindowHeight();
+    };
     content.addAndMakeVisible(effectsInspector);
 
     passthroughVeil.setVisible(false);
     content.addChildComponent(passthroughVeil);
 
     restoreBrowserSession();
+#if JucePlugin_IsMidiEffect
+    processorRef.passthrough = true;
+    processorRef.passthroughActive.store(true);
+    processorRef.editorOpen = false;
+    transport.setPassthroughLocked(true);
+    effectsInspector.setGeneratorsEnabled(true);
+    effectsInspector.setPaneTab(0);
+#endif
     refreshSidebar();
 
     setResizable(true, true);
+#if JucePlugin_IsMidiEffect
+    lastWindowH = passthroughDefaultHeight();
+    setSize(passthroughWindowWidth(), lastWindowH);
+#else
     if (processorRef.hasDefaultView && processorRef.defWindowW > 200)
     {
         lastWindowH = juce::jmax(metrics::transportH() + metrics::scaled(240), processorRef.defWindowH);
@@ -900,6 +917,7 @@ MidiToolkitEditor::MidiToolkitEditor(MidiToolkitProcessor& p)
         lastWindowH = 700;
         setSize(700, 700);
     }
+#endif
     applyLayoutState();
     startTimerHz(30);
     setWantsKeyboardFocus(true);
@@ -1056,11 +1074,6 @@ void MidiToolkitEditor::applyNativeWindowChrome()
 
 void MidiToolkitEditor::darkModeSettingChanged()
 {
-    if (currentAppearance() != Appearance::System)
-        return;
-    lnf.refreshColours();
-    sendLookAndFeelChange();
-    repaint();
 }
 
 // ── data ─────────────────────────────────────────────────────────────────────
@@ -2611,6 +2624,9 @@ void MidiToolkitEditor::applyPassthroughUi()
     transport.setPassthrough(pass);
     processorRef.setPassthroughEnabled(pass);
     effectsInspector.setLiveStreamMode(pass);
+    effectsInspector.setGeneratorsEnabled(pass);
+    if (!pass)
+        effectsInspector.setPaneTab(1);
 
     fileList.setAlpha(1.0f);
     miniRoll.setAlpha(1.0f);
@@ -2642,12 +2658,14 @@ void MidiToolkitEditor::applyPassthroughUi()
 
 void MidiToolkitEditor::togglePassthrough()
 {
+#if !JucePlugin_IsMidiEffect
     if (recording)
         return;
     processorRef.passthrough = !processorRef.passthrough;
     persistBrowserSession();
     applyPassthroughUi();
     pushLiveFxToProcessor();
+#endif
 }
 
 void MidiToolkitEditor::toggleRecord()
@@ -3027,11 +3045,41 @@ void MidiToolkitEditor::saveCurrentViewAsDefault()
     flushBrowserSession();
 }
 
+int MidiToolkitEditor::passthroughDefaultHeight() const
+{
+    const int fold = metrics::transportH() + effectsInspector.defaultFoldHeight();
+    const int withRoll = processorRef.editorOpen
+                             ? juce::jmax(fold, metrics::transportH() + metrics::scaled(520))
+                             : fold;
+    auto& displays = juce::Desktop::getInstance().getDisplays();
+    const auto* display = displays.getDisplayForRect(getScreenBounds());
+    if (display == nullptr)
+        display = displays.getPrimaryDisplay();
+    const int limit = display != nullptr ? juce::jmax(360, display->userArea.getHeight() - 48) : 900;
+    return juce::jmin(withRoll, limit);
+}
+
 int MidiToolkitEditor::passthroughWindowHeight() const
 {
-    const int fx = metrics::transportH() + effectsInspector.contentHeight();
-    // With the input roll open the window needs room for the roll, not just the Toolkit.
-    return processorRef.editorOpen ? juce::jmax(fx, metrics::transportH() + metrics::scaled(520)) : fx;
+    // Default screenshot fold. User may have dragged the window taller.
+    const int def = passthroughDefaultHeight();
+    if (userPassthroughH > def)
+        return userPassthroughH;
+    return def;
+}
+
+int MidiToolkitEditor::passthroughMinHeight() const
+{
+    return metrics::transportH() + metrics::scaled(200);
+}
+
+int MidiToolkitEditor::passthroughMaxHeight() const
+{
+    auto& displays = juce::Desktop::getInstance().getDisplays();
+    const auto* display = displays.getDisplayForRect(getScreenBounds());
+    if (display == nullptr)
+        display = displays.getPrimaryDisplay();
+    return display != nullptr ? juce::jmax(360, display->userArea.getHeight() - 48) : 900;
 }
 
 int MidiToolkitEditor::passthroughWindowWidth() const
@@ -3043,11 +3091,19 @@ void MidiToolkitEditor::syncPassthroughWindowHeight()
 {
     if (!processorRef.passthrough || getHeight() <= 0)
         return;
-    const int h = passthroughWindowHeight();
     const int w = passthroughWindowWidth();
-    setResizeLimits(w, h, w, h);
+    const int minH = passthroughMinHeight();
+    const int maxH = passthroughMaxHeight();
+    setResizeLimits(w, minH, w, maxH);
+    // Opening sections never grows the window — only width / clamp changes.
+    int h = getHeight();
+    if (h < minH)
+        h = passthroughDefaultHeight();
+    h = juce::jlimit(minH, maxH, h);
     if (std::abs(getHeight() - h) > 1 || getWidth() != w)
         setSize(w, h);
+    if (getHeight() > passthroughDefaultHeight())
+        userPassthroughH = getHeight();
 }
 
 void MidiToolkitEditor::updateWindowLimits()
@@ -3072,8 +3128,7 @@ void MidiToolkitEditor::updateWindowLimits()
         minW = maxW;
     if (pass)
     {
-        const int h = passthroughWindowHeight();
-        setResizeLimits(minW, h, maxW, h);
+        setResizeLimits(minW, passthroughMinHeight(), maxW, passthroughMaxHeight());
         return;
     }
     const int minH = openedWindowH > 0
@@ -3132,7 +3187,8 @@ void MidiToolkitEditor::applyLayoutState()
     else if (pass)
     {
         targetW = passthroughWindowWidth();
-        targetH = passthroughWindowHeight();
+        // Keep the user's height while sections fold; only snap on enter.
+        targetH = getHeight() > 0 ? getHeight() : passthroughWindowHeight();
     }
     else if (rec && !trackedRecording)
     {
@@ -3199,6 +3255,8 @@ void MidiToolkitEditor::resized()
 {
     content.setTransform({});
     content.setBounds(getLocalBounds());
+    if (processorRef.passthrough && getHeight() > passthroughDefaultHeight() + 2)
+        userPassthroughH = getHeight();
     layoutContent();
 }
 
@@ -3415,7 +3473,7 @@ void MidiToolkitEditor::paint(juce::Graphics& g)
 
 namespace {
 
-/** In-app settings — Caps B2 rows with roomier vertical rhythm. */
+/** In-app settings — Output / Design / Info tabs sized to the default FX height. */
 class SettingsPanel : public juce::Component
 {
 public:
@@ -3423,35 +3481,43 @@ public:
     std::function<void()> onClose;
     std::function<void()> onSaveDefault;
 
-    // Percents relative to the new 100% baseline (former 115% size).
     static constexpr int kTextPctChoices[] = { 70, 85, 100, 115, 130 };
     static constexpr int kPanelW = 400;
-    static constexpr int kPanelH = 440;
     static constexpr int kHeaderH = 44;
-    static constexpr int kFooterH = 62;
+    static constexpr int kTabH = 28;
+    static constexpr int kFooterH = 8;
+
+    static bool narrowWidth(int width) { return width < 360; }
+
+    static int heightForDefaultWindow(int windowH)
+    {
+        return juce::jmax(320, windowH - metrics::transportH());
+    }
 
     SettingsPanel()
     {
-        appearancePopup.setItems({ "System", "Light", "Dark" }, tweaks().appearance.load());
+        juce::StringArray themeNames;
+        for (int i = 0; i < kNumThemes; ++i)
+            themeNames.add(juce::String(themeAt(i).dark ? "Dark  " : "Light  ") + themeAt(i).name);
+        appearancePopup.setItems(themeNames, themeIndex());
         sizePopup.setItems({ "Small", "Medium", "Large" }, tweaks().size.load());
         spacingPopup.setItems({ "Compact", "Comfortable" }, tweaks().density.load());
+        fontPopup.setItems({ "Archivo", "System", "Helvetica Neue", "Avenir Next" },
+                           juce::jlimit(0, (int) FontFamily::Count - 1, tweaks().fontFamily.load()));
+        surfacePopup.setItems({ "Flat", "Depth", "Liquid" },
+                              juce::jlimit(0, (int) SurfaceStyle::Count - 1, tweaks().surfaceStyle.load()));
 
         juce::StringArray pctLabels;
-        int pctIdx = 2; // 100%
+        int pctIdx = 2;
         const int currentPct = tweaks().textScalePct.load();
         int bestDist = 1000;
         for (int i = 0; i < (int) (sizeof(kTextPctChoices) / sizeof(kTextPctChoices[0])); ++i)
         {
             pctLabels.add(juce::String(kTextPctChoices[i]) + "%");
             const int d = std::abs(kTextPctChoices[i] - currentPct);
-            if (d < bestDist)
-            {
-                bestDist = d;
-                pctIdx = i;
-            }
+            if (d < bestDist) { bestDist = d; pctIdx = i; }
         }
         textPopup.setItems(pctLabels, pctIdx);
-
         tooltipsSwitch.setToggleState(tweaks().showTooltips.load() != 0, juce::dontSendNotification);
         tooltipsSwitch.setTooltip("Show hover tips on controls");
 
@@ -3472,6 +3538,8 @@ public:
             tweaks().textScalePct.store(kTextPctChoices[juce::jlimit(0, n - 1, i)]);
         });
         wire(spacingPopup, [](int i) { tweaks().density.store(i); });
+        wire(fontPopup, [](int i) { tweaks().fontFamily.store(i); });
+        wire(surfacePopup, [](int i) { tweaks().surfaceStyle.store(i); });
 
         tooltipsSwitch.onClick = [this]
         {
@@ -3491,79 +3559,127 @@ public:
         saveDefaultBtn.onClick = [this] { if (onSaveDefault) onSaveDefault(); };
         addAndMakeVisible(saveDefaultBtn);
 
-        setSize(kPanelW, kPanelH + 28);
+        setSize(kPanelW, 440);
+        setTab(1); // Design
+    }
+
+    void setTab(int t)
+    {
+        tab = juce::jlimit(0, 2, t);
+        const bool design = tab == 1;
+        const bool output = tab == 0;
+        appearancePopup.setVisible(design);
+        sizePopup.setVisible(design);
+        textPopup.setVisible(design);
+        spacingPopup.setVisible(design);
+        fontPopup.setVisible(design);
+        surfacePopup.setVisible(design);
+        tooltipsSwitch.setVisible(design);
+        saveDefaultBtn.setVisible(output);
+        resized();
+        repaint();
     }
 
     void paint(juce::Graphics& g) override
     {
         const auto& t = inspectorTokens();
         auto bounds = getLocalBounds().toFloat();
-        g.setColour(t.panelBg);
+        if (currentSurfaceStyle() == SurfaceStyle::Depth)
+        {
+            g.setColour(juce::Colours::black.withAlpha(0.20f));
+            g.fillRoundedRectangle(bounds.translated(0, 3), 10.0f);
+        }
+        g.setColour(currentSurfaceStyle() == SurfaceStyle::Liquid ? t.panelBg.withAlpha(0.92f) : t.panelBg);
         g.fillRoundedRectangle(bounds, 10.0f);
         g.setColour(t.controlHairline);
         g.drawRoundedRectangle(bounds.reduced(0.5f), 10.0f, 1.0f);
 
         auto header = getLocalBounds().removeFromTop(kHeaderH).reduced(18, 0);
-        header.removeFromRight(28); // room for close
-        auto cap = uiFont(11.0f, true);
-        g.setFont(cap);
+        header.removeFromRight(28);
+        g.setFont(uiFont(11.0f, true));
         g.setColour(t.valueText);
         g.drawText("SETTINGS", header, juce::Justification::centredLeft, false);
 
         g.setColour(t.divider);
         g.fillRect(18, kHeaderH, getWidth() - 36, 1);
 
-        auto body = getLocalBounds().withTrimmedTop(kHeaderH + 8).reduced(18, 10);
-        const int rowH = 44;
-        const int rowGap = 10;
-        const char* labels[] = {
-            "Appearance",
-            "UI size",
-            "Text size",
-            "Row spacing",
-            "Show tooltips",
-            "Default view"
-        };
-        const char* hints[] = {
-            "Light, dark, or follow the system",
-            "Scales spacing, panels, and controls",
-            "Scales type and icons only",
-            "Tighter or roomier list rows",
-            "",
-            "Open with this layout next time"
-        };
-        for (int i = 0; i < 6; ++i)
+        auto tabRow = getLocalBounds().withTrimmedTop(kHeaderH).removeFromTop(kTabH).reduced(18, 0);
+        const char* tabs[] = { "Output", "Design", "Info" };
+        for (int i = 0; i < 3; ++i)
+        {
+            auto r = tabRow.removeFromLeft(70);
+            tabBounds[i] = r;
+            g.setFont(uiFont(12.0f, tab == i));
+            g.setColour(tab == i ? colours::text() : colours::text2());
+            g.drawText(tabs[i], r, juce::Justification::centredLeft, false);
+            if (tab == i)
+            {
+                g.setColour(ds::acc());
+                g.fillRect(r.getX(), r.getBottom() - 2, r.getWidth() - 12, 2);
+            }
+            tabRow.removeFromLeft(8);
+        }
+        g.setColour(t.divider);
+        g.fillRect(18, kHeaderH + kTabH, getWidth() - 36, 1);
+
+        auto body = getLocalBounds().withTrimmedTop(kHeaderH + kTabH + 8).reduced(18, 10);
+        const bool narrow = narrowWidth(getWidth());
+        const int rowH = narrow ? 56 : 40;
+        const int rowGap = 6;
+
+        auto paintRow = [&](const char* label, const char* hint)
         {
             auto row = body.removeFromTop(rowH);
-            // Leave room for the control on the right.
-            auto textCol = row.withTrimmedRight(150);
+            auto textCol = narrow ? row.removeFromTop(28) : row.withTrimmedRight(150);
             g.setColour(colours::text());
             g.setFont(uiFont(12.0f, false));
-            g.drawText(labels[i], textCol.removeFromTop(hints[i][0] != 0 ? 18 : rowH),
+            g.drawText(label, textCol.removeFromTop(hint[0] ? 16 : textCol.getHeight()),
                        juce::Justification::centredLeft, false);
-            if (hints[i][0] != 0)
+            if (hint[0])
             {
                 g.setColour(colours::text2());
                 g.setFont(uiFont(10.5f, false));
-                g.drawText(hints[i], textCol, juce::Justification::centredLeft, false);
+                g.drawText(hint, textCol, juce::Justification::centredLeft, false);
             }
             body.removeFromTop(rowGap);
-        }
+        };
 
-        // Build stamp for testers — larger type, 12-hour clock (from BuildInfo).
-        auto footer = getLocalBounds().removeFromBottom(kFooterH).reduced(18, 0);
-        g.setColour(t.divider);
-        g.fillRect(18, footer.getY(), getWidth() - 36, 1);
-        footer.removeFromTop(8);
-        g.setFont(uiFont(15.0f, true));
-        g.setColour(colours::text());
-        g.drawText(build_info::version(), footer.removeFromTop(22),
-                   juce::Justification::centredLeft, true);
-        g.setFont(uiFont(12.5f, false));
-        g.setColour(colours::text2());
-        const juce::String meta = juce::String(build_info::buildTime())
-                                  + "  ·  " + build_info::gitHash();
-        g.drawText(meta, footer, juce::Justification::centredLeft, true);
+        if (tab == 0)
+        {
+            paintRow("Default view", "Open with this layout next time");
+        }
+        else if (tab == 1)
+        {
+            paintRow("Theme", "Ten light themes, then ten dark");
+            paintRow("UI size", "Scales spacing, panels, and controls");
+            paintRow("Text size", "Scales type and icons only");
+            paintRow("Font", "Interface typeface; values stay mono");
+            paintRow("Surface", "Flat, drop shadows, or frosted");
+            paintRow("Row spacing", "Tighter or roomier list rows");
+            paintRow("Show tooltips", "");
+        }
+        else
+        {
+            g.setFont(uiFont(15.0f, true));
+            g.setColour(colours::text());
+            g.drawText(build_info::version(), body.removeFromTop(24),
+                       juce::Justification::centredLeft, true);
+            body.removeFromTop(6);
+            g.setFont(uiFont(12.5f, false));
+            g.setColour(colours::text2());
+            g.drawText(juce::String(build_info::buildTime()) + "  ·  " + build_info::gitHash(),
+                       body.removeFromTop(20), juce::Justification::centredLeft, true);
+        }
+    }
+
+    void mouseDown(const juce::MouseEvent& e) override
+    {
+        for (int i = 0; i < 3; ++i)
+            if (tabBounds[i].contains(e.getPosition()))
+            {
+                setTab(i);
+                return;
+            }
     }
 
     void resized() override
@@ -3572,36 +3688,63 @@ public:
         closeBtn.setBounds(juce::Rectangle<int>(getWidth() - 18 - iconBtn, 0, iconBtn, kHeaderH)
                                .withSizeKeepingCentre(iconBtn, iconBtn));
 
-        auto body = getLocalBounds().withTrimmedTop(kHeaderH + 8)
-                        .withTrimmedBottom(kFooterH)
-                        .reduced(18, 10);
-        const int rowH = 44;
-        const int rowGap = 10;
+        const bool narrow = narrowWidth(getWidth());
+        auto body = getLocalBounds().withTrimmedTop(kHeaderH + kTabH + 8).reduced(18, 10);
+        const int rowH = narrow ? 56 : 40;
+        const int rowGap = 6;
         const int ctrlH = metrics::scaled(26);
         auto placePopup = [&](fx::FlatPopup& p)
         {
             auto row = body.removeFromTop(rowH);
-            const int w = juce::jmin(juce::jmax(p.idealWidth(), 110), row.getWidth() / 2);
-            p.setBounds(row.removeFromRight(w).withSizeKeepingCentre(w, ctrlH));
+            if (narrow)
+                p.setBounds(row.removeFromBottom(ctrlH));
+            else
+            {
+                const int w = juce::jmin(juce::jmax(p.idealWidth(), 140), row.getWidth() / 2);
+                p.setBounds(row.removeFromRight(w).withSizeKeepingCentre(w, ctrlH));
+            }
             body.removeFromTop(rowGap);
         };
-        placePopup(appearancePopup);
-        placePopup(sizePopup);
-        placePopup(textPopup);
-        placePopup(spacingPopup);
 
-        auto tipRow = body.removeFromTop(rowH);
-        const int sw = tooltipsSwitch.idealWidth();
-        tooltipsSwitch.setBounds(tipRow.removeFromRight(sw).withSizeKeepingCentre(sw, 18));
-        body.removeFromTop(rowGap);
+        appearancePopup.setBounds({});
+        sizePopup.setBounds({});
+        textPopup.setBounds({});
+        spacingPopup.setBounds({});
+        fontPopup.setBounds({});
+        surfacePopup.setBounds({});
+        tooltipsSwitch.setBounds({});
+        saveDefaultBtn.setBounds({});
 
-        auto saveRow = body.removeFromTop(rowH);
-        const int saveW = saveDefaultBtn.captionWidth();
-        saveDefaultBtn.setBounds(saveRow.removeFromRight(saveW).withSizeKeepingCentre(saveW, ctrlH));
+        if (tab == 0)
+        {
+            auto saveRow = body.removeFromTop(rowH);
+            const int saveW = saveDefaultBtn.captionWidth();
+            if (narrow)
+                saveDefaultBtn.setBounds(saveRow.removeFromBottom(ctrlH).removeFromLeft(saveW));
+            else
+                saveDefaultBtn.setBounds(saveRow.removeFromRight(saveW).withSizeKeepingCentre(saveW, ctrlH));
+        }
+        else if (tab == 1)
+        {
+            placePopup(appearancePopup);
+            placePopup(sizePopup);
+            placePopup(textPopup);
+            placePopup(fontPopup);
+            placePopup(surfacePopup);
+            placePopup(spacingPopup);
+            auto tipRow = body.removeFromTop(rowH);
+            const int sw = tooltipsSwitch.idealWidth();
+            if (narrow)
+                tooltipsSwitch.setBounds(tipRow.removeFromBottom(18).removeFromLeft(sw));
+            else
+                tooltipsSwitch.setBounds(tipRow.removeFromRight(sw).withSizeKeepingCentre(sw, 18));
+        }
     }
 
 private:
-    fx::FlatPopup appearancePopup, sizePopup, textPopup, spacingPopup;
+    int tab = 1;
+    juce::Rectangle<int> tabBounds[3];
+    fx::FlatPopup appearancePopup, sizePopup, textPopup, spacingPopup, fontPopup, surfacePopup;
     fx::FlatSwitch tooltipsSwitch;
     IconBtn closeBtn { icons::x, "Close" };
     IconBtn saveDefaultBtn { icons::save, "Save" };
@@ -3615,38 +3758,63 @@ void MidiToolkitEditor::showTweaksMenu()
     {
         content.removeChildComponent(existing);
         delete existing;
+        if (settingsRaisedHeight)
+        {
+            setSize(getWidth(), juce::jmax(passthroughMinHeight(), heightBeforeSettings));
+            settingsRaisedHeight = false;
+        }
         return;
     }
 
     struct Overlay : juce::Component
     {
         SettingsPanel panel;
+        juce::Viewport view;
         std::function<void()> onDismiss;
 
         Overlay()
         {
-            addAndMakeVisible(panel);
-            panel.setSize(panel.getWidth(), panel.getHeight());
+            view.setViewedComponent(&panel, false);
+            view.setScrollBarsShown(false, false);
+            view.setScrollBarThickness(10);
+            addAndMakeVisible(view);
         }
 
         void resized() override
         {
-            panel.setBounds(getLocalBounds().withSizeKeepingCentre(panel.getWidth(), panel.getHeight()));
+            const int margin = 12;
+            const int w = juce::jmin(SettingsPanel::kPanelW,
+                                     juce::jmax(220, getWidth() - margin * 2));
+            const int h = juce::jmax(280, getHeight() - margin * 2);
+            view.setBounds(getLocalBounds().withSizeKeepingCentre(w, h));
+            panel.setSize(w, h);
         }
 
         void paint(juce::Graphics& g) override
         {
-            // Soft scrim, no drop shadow on the panel itself.
             g.setColour(juce::Colours::black.withAlpha(0.18f));
             g.fillAll();
         }
 
         void mouseDown(const juce::MouseEvent& e) override
         {
-            if (!panel.getBounds().contains(e.getPosition()) && onDismiss)
+            if (!view.getBounds().contains(e.getPosition()) && onDismiss)
                 onDismiss();
         }
     };
+
+    const int defH = passthroughDefaultHeight();
+    if (getHeight() < defH)
+    {
+        heightBeforeSettings = getHeight();
+        settingsRaisedHeight = true;
+        setSize(getWidth(), defH);
+    }
+    else
+    {
+        settingsRaisedHeight = false;
+        heightBeforeSettings = getHeight();
+    }
 
     auto* overlay = new Overlay();
     overlay->setComponentID("settingsOverlay");
@@ -3663,6 +3831,11 @@ void MidiToolkitEditor::showTweaksMenu()
     {
         content.removeChildComponent(overlay);
         delete overlay;
+        if (settingsRaisedHeight)
+        {
+            setSize(getWidth(), juce::jmax(passthroughMinHeight(), heightBeforeSettings));
+            settingsRaisedHeight = false;
+        }
     };
     overlay->panel.onClose = overlay->onDismiss;
     overlay->panel.onSaveDefault = [this] { saveCurrentViewAsDefault(); };
@@ -3794,8 +3967,27 @@ void MidiToolkitEditor::claimKeyNav(KeyNavTarget target)
         rollEditor.grabKeyboardFocus();
 }
 
+void MidiToolkitEditor::syncTooltipHighlight()
+{
+    if (! tooltips.isVisible() || tooltips.getWidth() <= 0)
+    {
+        setTooltipHighlightTarget(nullptr);
+        return;
+    }
+    const auto screen = juce::Desktop::getMousePosition();
+    auto* hit = getComponentAt(getLocalPoint(nullptr, screen));
+    for (auto* c = hit; c != nullptr; c = c->getParentComponent())
+        if (dynamic_cast<juce::TooltipClient*>(c) != nullptr)
+        {
+            setTooltipHighlightTarget(c);
+            return;
+        }
+    setTooltipHighlightTarget(hit);
+}
+
 void MidiToolkitEditor::timerCallback()
 {
+    syncTooltipHighlight();
     refreshBrowserBar();
 
     if (sessionDirty

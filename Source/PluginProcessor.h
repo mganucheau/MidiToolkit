@@ -26,7 +26,14 @@ public:
     bool acceptsMidi() const override { return true; }
     bool producesMidi() const override { return true; }
 
-    const juce::String getName() const override { return "Midi Toolkit"; }
+    const juce::String getName() const override
+    {
+#if JucePlugin_IsMidiEffect
+        return "Midi Toolkit FX";
+#else
+        return "Midi Toolkit";
+#endif
+    }
 
     bool hasEditor() const override { return true; }
     juce::AudioProcessorEditor* createEditor() override;
@@ -40,9 +47,20 @@ public:
     bool isBusesLayoutSupported(const BusesLayout& layouts) const override
     {
         const auto mainOut = layouts.getMainOutputChannelSet();
+#if JucePlugin_IsMidiEffect
+        const auto mainIn = layouts.getMainInputChannelSet();
+        const auto audioOk = [](const juce::AudioChannelSet& set)
+        {
+            return set.isDisabled()
+                || set == juce::AudioChannelSet::stereo()
+                || set == juce::AudioChannelSet::mono();
+        };
+        return audioOk(mainIn) && audioOk(mainOut);
+#else
         if (mainOut.isDisabled()) return false;
         return mainOut == juce::AudioChannelSet::stereo()
             || mainOut == juce::AudioChannelSet::mono();
+#endif
     }
 
     double getTailLengthSeconds() const override { return 0.0; }
@@ -191,8 +209,12 @@ public:
     /** Publish Toolkit pitch/groove snapshot for Passthrough mode. */
     void setLiveFxState(const LiveFxState& state);
 
-    /** Enable/disable passthrough; flushes held notes on transition. */
+    /** Enable/disable passthrough; flushes held notes on transition.
+        The MIDI FX build ignores attempts to turn this off. */
     void setPassthroughEnabled(bool enabled);
+
+    /** MIDI FX stays in passthrough and never writes that into the shared UI session. */
+    void lockMidiFxPassthrough();
 
     /** Capture incoming MIDI while on. Stopping closes held notes. */
     void setRecordingEnabled(bool enabled);

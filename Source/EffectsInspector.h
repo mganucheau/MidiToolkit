@@ -54,8 +54,16 @@ public:
     std::function<void()> onActivated;
     /** Transport + toolkit header + current section heights. */
     int contentHeight() const;
+    /** Screenshot fold: Timing + Performance open, Pitch & Effects closed (Playback hidden in live). */
+    int defaultFoldHeight() const;
     /** Fired when a section fold changes the preferred pane height. */
     std::function<void()> onContentHeightChanged;
+    /** 0 = Generators, 1 = Effects. Generators is only interactive in passthrough. */
+    void setPaneTab(int tab);
+    int getPaneTab() const { return paneTab; }
+    void setGeneratorsEnabled(bool on);
+    bool getGeneratorsEnabled() const { return generatorsEnabled; }
+    std::function<void(int)> onPaneTabChanged;
 
     /** Section order as comma-separated ids (playback,timing,performance,pitch,effects). */
     void setSectionOrder(const juce::String& ids);
@@ -67,6 +75,9 @@ public:
     fx::Section& performanceSection() { return performance; }
     fx::Section& pitchSection() { return pitchSec; }
     fx::Section& effectsSection() { return effectsSec; }
+    fx::Section& arpSection() { return arpSec; }
+    fx::Section& melodySection() { return melodySec; }
+    fx::Section& drumSection() { return drumSec; }
     bool delayPairVisible() const
     {
         return delayBlock.isVisible() && delayTimePopup.isVisible() && delayAmountSl.isVisible();
@@ -112,6 +123,8 @@ private:
     uint32_t sectionLocks = 0;
     bool hasClip = false;
     bool liveStream = false;
+    bool generatorsEnabled = false;
+    int paneTab = 1; // Effects by default; Generators is 0
     int clipRootPc = -1;
     int clipSourceOctave = 4;
     int clipComplexity = 50;
@@ -121,11 +134,15 @@ private:
     IconBtn btnReset { icons::undo, "Reset effects to defaults" };
     IconBtn btnEffectsLock { icons::lockOpen, "Lock effects while browsing" };
     juce::Rectangle<int> toolkitFoldBounds;
+    juce::Rectangle<int> generatorsTabBounds, effectsTabBounds;
     ChipBtn btnChanged { "Changed" };
     std::vector<fx::Section*> sectionOrder;
     fx::Section* draggedSection = nullptr;
     double jiggleStartMs = 0.0;
 
+    fx::Section arpSec { "Arpeggiator" };
+    fx::Section melodySec { "Melody" };
+    fx::Section drumSec { "Drum Groove" };
     fx::Section playback { "Playback" };
     fx::Section timing { "Timing" };
     fx::Section performance { "Performance" };
@@ -150,7 +167,8 @@ private:
 
     fx::FlatSliderRow dynamicsSl;
     fx::FlatSliderRow intensitySl;
-    fx::ChipGrid articulationGrid;
+    fx::FlatPopup articulationPopup;
+    fx::InlineRow articulationRow;
     fx::FlatSliderRow articulationStrengthSl;
     fx::FlatRangeSliderRow velocityRangeSl;
     fx::FlatPopup sustainPopup;
@@ -163,12 +181,42 @@ private:
     fx::GridAmountBlock delayBlock { "Delay", delayTimePopup, delayAmountSl };
     fx::FlatSliderRow delayFeedbackSl;
 
-    fx::SegmentedSelector octaveSelector;
+    fx::FlatPopup arpModePopup;
+    fx::InlineRow arpModeRow;
+    fx::FlatPopup arpRatePopup;
+    fx::InlineRow arpRateRow;
+    fx::FlatSliderRow arpGateSl;
+    fx::FlatPopup arpOctavesPopup;
+    fx::InlineRow arpOctavesRow;
+    fx::FlatSwitch arpLatchSwitch;
+    fx::InlineRow arpLatchRow;
+
+    fx::FlatSwitch melodyEnableSwitch;
+    fx::InlineRow melodyEnableRow;
+    fx::FlatPopup melodyStylePopup;
+    fx::InlineRow melodyStyleRow;
+    fx::FlatPopup melodyRatePopup;
+    fx::InlineRow melodyRateRow;
+    fx::FlatSliderRow melodyDensitySl;
+    fx::FlatSliderRow melodyRangeSl;
+    fx::FlatSliderRow melodyVariationSl;
+
+    fx::FlatSwitch drumsEnableSwitch;
+    fx::InlineRow drumsEnableRow;
+    fx::FlatPopup drumStylePopup;
+    fx::InlineRow drumStyleRow;
+    fx::FlatSliderRow drumDensitySl;
+    fx::FlatSliderRow drumVariationSl;
+
+    fx::PitchRow octaveRow;
     fx::FlatPopup octaveRangePopup;
     fx::InlineRow octaveRangeRow;
+    fx::FlatPopup outsideRangePopup;
+    fx::InlineRow outsideRangeRow;
     fx::PitchRow pitchRow;
     fx::ChipGrid keyGrid;
-    fx::ChipGrid modeGrid;
+    fx::FlatPopup modePopup;
+    fx::InlineRow modeRow;
     fx::FlatSwitch fitSwitch;
     fx::FlatSwitch mapSwitch;
     fx::NoteFilterBlock noteFilter;

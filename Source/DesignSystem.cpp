@@ -98,13 +98,41 @@ const Palette& palette()
         juce::Colour(0xff2e2e2e),   // lensFill
         juce::Colour(0xffff8b3d),   // logoNoteHi
     };
-    return usesDarkAppearance() ? dark : light;
+
+    auto tinted = [](const Palette& src)
+    {
+        Palette p = src;
+#define TINT(field) p.field = tintForTheme(p.field)
+        TINT(bg); TINT(chrome); TINT(side); TINT(panel); TINT(rollchrome); TINT(hl);
+        TINT(tx); TINT(tx2); TINT(tx3); TINT(acc); TINT(selsoft); TINT(ctl); TINT(ctlb);
+        TINT(field); TINT(trk); TINT(rowalt); TINT(note); TINT(stron);
+        TINT(kw); TINT(kb); TINT(laneb); TINT(beat);
+        TINT(kindDrums); TINT(kindBass); TINT(kindKeys); TINT(kindPerc);
+        TINT(winbrd); TINT(hoverWash); TINT(head); TINT(well);
+        TINT(kfInW); TINT(kfInB); TINT(kfOutW); TINT(kfOutB);
+        TINT(lensFill); TINT(logoNoteHi);
+#undef TINT
+        return p;
+    };
+
+    static Palette cached;
+    static int cachedTheme = -1;
+    const int theme = themeIndex();
+    if (theme != cachedTheme)
+    {
+        cached = tinted(themeAt(theme).dark ? dark : light);
+        cachedTheme = theme;
+    }
+    return cached;
 }
 
 // ── Groove Panel tokens not covered by the legacy slots ─────────────────────
 
 #define GP_TOKEN(fn, darkHex, lightHex) \
-    juce::Colour fn() { return juce::Colour(usesDarkAppearance() ? (juce::uint32) darkHex : (juce::uint32) lightHex); }
+    juce::Colour fn() { \
+        const auto base = juce::Colour(usesDarkAppearance() ? (juce::uint32) darkHex : (juce::uint32) lightHex); \
+        return tintForTheme(base); \
+    }
 
 GP_TOKEN(surface000, 0xff141414, 0xffa3a3a3)
 GP_TOKEN(surface100, 0xff232323, 0xffc9c9c9)
@@ -115,12 +143,12 @@ GP_TOKEN(edge,       0xff808080, 0xff6e6e6e)
 GP_TOKEN(ink,        0xffececec, 0xff111111)
 GP_TOKEN(inkMuted,   0xffa8a8a8, 0xff3e3e3e)
 GP_TOKEN(inkFaint,   0xff7a7a7a, 0xff5e5e5e)
-GP_TOKEN(onAccent,   0xff141414, 0xffffffff)
+juce::Colour onAccent() { return juce::Colour(usesDarkAppearance() ? (juce::uint32) 0xff141414 : (juce::uint32) 0xffffffff); }
 GP_TOKEN(play,       0xff7ad35a, 0xff2c7a1c)
 GP_TOKEN(record,     0xffff5b52, 0xffc0241a)
 GP_TOKEN(solo,       0xff5cb3ff, 0xff1d62b5)
 GP_TOKEN(active,     0xfff2cd3a, 0xff7d6300)
-GP_TOKEN(onLit,      0xff141414, 0xffffffff)
+juce::Colour onLit() { return juce::Colour(usesDarkAppearance() ? (juce::uint32) 0xff141414 : (juce::uint32) 0xffffffff); }
 GP_TOKEN(focus,      0xffececec, 0xff111111)
 
 #undef GP_TOKEN

@@ -67,12 +67,15 @@ inline juce::Font sectionTitleFont()
 }
 inline juce::Font paneTitleFont() { return uiFontFixed(kPaneTitlePt, true); }
 
-inline void fillTallWell(juce::Graphics& g, juce::Rectangle<float> r, bool hot)
+inline void fillTallWell(juce::Graphics& g, juce::Rectangle<float> r, bool hot,
+                         const juce::Component* tipSource = nullptr)
 {
     // Groove field: surface-300, edge border (accent while hot), radius-sm.
-    g.setColour(ds::surface300());
+    // Tip highlight paints the same amber as the tooltip bubble.
+    const bool tipHot = tipSource != nullptr && hasTooltipHighlight(tipSource);
+    g.setColour(tipHot ? tooltipAccent() : ds::surface300());
     g.fillRoundedRectangle(r, ds::radius::sm);
-    g.setColour(hot ? ds::acc() : ds::edge());
+    g.setColour(tipHot ? juce::Colour(0xff5a3a00) : (hot ? ds::acc() : ds::edge()));
     g.drawRoundedRectangle(r.reduced(0.5f), ds::radius::sm, 1.0f);
 }
 
@@ -191,15 +194,18 @@ public:
     {
         // Groove toggle: "On" lit in accent, "Off" on the unlit face.
         const bool on = getToggleState();
+        const bool tipHot = hasTooltipHighlight(this);
         auto face = getLocalBounds().toFloat().withSizeKeepingCentre(36.0f, 18.0f);
-        g.setColour(on ? ds::acc() : (isMouseOver() ? ds::surface300() : ds::surface200()));
+        g.setColour(tipHot ? tooltipAccent()
+                           : (on ? ds::acc() : (isMouseOver() ? ds::surface300() : ds::surface200())));
         g.fillRoundedRectangle(face, ds::radius::sm);
-        if (!on)
+        if (!on && !tipHot)
         {
             g.setColour(ds::edge());
             g.drawRoundedRectangle(face.reduced(0.5f), ds::radius::sm, 1.0f);
         }
-        g.setColour(on ? ds::onAccent() : (isEnabled() ? ds::ink() : ds::inkFaint()));
+        g.setColour(tipHot ? juce::Colour(0xff1a1200)
+                           : (on ? ds::onAccent() : (isEnabled() ? ds::ink() : ds::inkFaint())));
         g.setFont(uiFontFixed(11.0f, true));
         g.drawText(on ? "On" : "Off", face.toNearestInt(), juce::Justification::centred, false);
         if (hasKeyboardFocus(true))
@@ -279,16 +285,13 @@ public:
     {
         // Groove field with a chevron: surface-300, edge border, accent outline on hover.
         auto r = getLocalBounds().toFloat().withSizeKeepingCentre((float) getWidth(), juce::jmin((float) getHeight(), 20.0f));
-        g.setColour(ds::surface300());
-        g.fillRoundedRectangle(r, ds::radius::sm);
-        g.setColour(isMouseOver() ? ds::acc() : ds::edge());
-        g.drawRoundedRectangle(r.reduced(0.5f), ds::radius::sm, 1.0f);
+        fillTallWell(g, r, isMouseOver(), this);
 
         auto caret = r.removeFromRight(16.0f).withSizeKeepingCentre(10.0f, 10.0f);
         drawStrokedChevron(g, caret, ds::inkMuted(), true);
 
         auto textArea = r.reduced(6.0f, 0.0f);
-        g.setColour(ds::ink());
+        g.setColour(hasTooltipHighlight(this) ? juce::Colour(0xff1a1200) : ds::ink());
         g.setFont(monoFontFixed(11.0f));
         const juce::String val = labels.size() > index ? labels[index] : juce::String();
         g.drawText(val, textArea.toNearestInt(), juce::Justification::centredLeft, false);
@@ -653,7 +656,7 @@ public:
         const auto& t = inspectorTokens();
         auto r = getLocalBounds().toFloat();
         const bool hot = isMouseOverOrDragging();
-        fillTallWell(g, r, false);
+        fillTallWell(g, r, false, this);
 
         const float norm = (float) (value - minV) / (float) juce::jmax(1, maxV - minV);
         juce::Rectangle<float> fill;
@@ -1709,6 +1712,7 @@ class PitchRow : public juce::Component
 public:
     FlatStepper stepper;
     juce::String annotation;
+    juce::String label { "Pitch" };
 
     PitchRow()
     {
@@ -1733,7 +1737,7 @@ public:
     {
         g.setFont(inspectorFont());
         g.setColour(inspectorTokens().rowLabel);
-        g.drawText("Pitch", getLocalBounds().withWidth(kLabelColW),
+        g.drawText(label, getLocalBounds().withWidth(kLabelColW),
                    juce::Justification::centredLeft, true);
 
         g.setFont(uiFontFixed(kAnnotPt, false));
@@ -2157,19 +2161,27 @@ public:
 
     int idealHeight() const
     {
+        return idealHeightForState(open);
+    }
+
+    /** Height if the section were forced open or closed (ignores current fold). */
+    int idealHeightForState(bool forceOpen) const
+    {
         const int rowGap = toolkitRowGap();
         int shown = 0;
         int content = 0;
         for (const auto& r : rows)
         {
-            if (!isRowShowing(r)) continue;
+            if (r.forcedHidden) continue;
+            const bool show = forceOpen || (r.dirty && r.dirty());
+            if (!show) continue;
             if (shown > 0) content += rowGap;
             content += r.height();
             ++shown;
         }
         if (shown == 0)
             return kSectionHeaderH;
-        const int padB = open ? toolkitSectionPadB() : toolkitSectionPadBFolded();
+        const int padB = forceOpen ? toolkitSectionPadB() : toolkitSectionPadBFolded();
         return kSectionHeaderH + toolkitTitleGap() + content + padB;
     }
 
@@ -2279,8 +2291,24 @@ public:
         const int mods = modifiedCount();
         auto b = getLocalBounds().toFloat();
         const float rad = ds::radius::md;
-        g.setColour(ds::surface200());
-        g.fillRoundedRectangle(b, rad);
+        const auto surface = currentSurfaceStyle();
+        if (surface == SurfaceStyle::Depth)
+        {
+            g.setColour(juce::Colours::black.withAlpha(0.18f));
+            g.fillRoundedRectangle(b.translated(0.0f, 2.0f), rad);
+        }
+        if (surface == SurfaceStyle::Liquid)
+        {
+            g.setColour(ds::surface200().withAlpha(0.82f));
+            g.fillRoundedRectangle(b, rad);
+            g.setColour(juce::Colours::white.withAlpha(0.22f));
+            g.drawRoundedRectangle(b.reduced(0.5f), rad, 1.0f);
+        }
+        else
+        {
+            g.setColour(ds::surface200());
+            g.fillRoundedRectangle(b, rad);
+        }
 
         auto header = getLocalBounds().removeFromTop(kSectionHeaderH);
         {

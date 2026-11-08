@@ -335,6 +335,14 @@ void TransportBar::setPassthrough(bool on)
     repaint();
 }
 
+void TransportBar::setPassthroughLocked(bool locked)
+{
+    if (passthroughLocked == locked)
+        return;
+    passthroughLocked = locked;
+    resized();
+}
+
 void TransportBar::setHasClip(bool has)
 {
     hasClip = has;
@@ -579,9 +587,11 @@ void TransportBar::resized()
     btnEffects.setVisible(!passthrough);
     btnDragToDaw.setVisible(false);   // Drag lives in the preview header (Groove)
     btnEditor.setVisible(true);   // in Through it opens the input roll
+    btnPassthrough.setVisible(!passthroughLocked);
 
     const int pillW = statusPill.idealWidth();
-    const int leftW = pillW + groupGap + btn + tight + btn + groupGap + btn + tight + btn;
+    const int throughW = btnPassthrough.isVisible() ? tight + btn : 0;
+    const int leftW = pillW + groupGap + btn + tight + btn + groupGap + btn + throughW;
     const int chipW = btnDragToDaw.isVisible() ? btnDragToDaw.idealWidth() : 0;
 
     auto rightWidth = [&]()
@@ -620,8 +630,11 @@ void TransportBar::resized()
     statusPill.setBounds(x, y, pillW, btn);           x += pillW + groupGap;
     btnPlay.setBounds(x, y, btn, btn);                x += btn + tight;
     btnRecord.setBounds(x, y, btn, btn);              x += btn + groupGap;
-    btnSync.setBounds(x, y, btn, btn);                x += btn + tight;
-    btnPassthrough.setBounds(x, y, btn, btn);
+    btnSync.setBounds(x, y, btn, btn);                x += btn + (btnPassthrough.isVisible() ? tight : 0);
+    if (btnPassthrough.isVisible())
+        btnPassthrough.setBounds(x, y, btn, btn);
+    else
+        btnPassthrough.setBounds({});
     transportGroupBounds = {};
     dividerBounds = {};
 

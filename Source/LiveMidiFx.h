@@ -19,8 +19,10 @@ struct LiveFxState
     double bpmMultiplier = 1.0;
 };
 
-/** Transform a live MIDI pitch with the stream-capable ClipEdit pitch fields. */
-int transformLivePitch(int midi, const ClipEdit& edit, int sourceRoot, int sourceOctave);
+/** Transform a live MIDI pitch with the stream-capable ClipEdit pitch fields.
+    Channel 10 (drums) skips octave-window / scale remap when `drumChannel` is true. */
+int transformLivePitch(int midi, const ClipEdit& edit, int sourceRoot, int sourceOctave,
+                       bool drumChannel = false);
 
 /** True when the note's pitch-class is muted by the note filter. */
 bool liveNoteMuted(int midi, const ClipEdit& edit);
@@ -65,22 +67,55 @@ private:
         double onBeat = 0.0;
     };
 
+    struct InputNote
+    {
+        bool active = false;
+        int velocity = 100;
+        int order = 0;
+    };
+
     void emitOrQueue(juce::MidiBuffer& out, const juce::MidiMessage& msg, int samplePos,
                      int numSamples);
     void scheduleDelayTaps(const GrooveParams& groove, juce::MidiBuffer& out, bool isNoteOn,
                            int channel, int outPitch, int velocity, int samplePos, int numSamples,
                            double sampleRate, double bpm);
     void syncSustain(const GrooveParams& groove, juce::MidiBuffer& out, int numSamples);
+    void emitTransformed(juce::MidiBuffer& out, const LiveFxState& snap, int channel, int inPitch,
+                         int velocity, int samplePos, int numSamples, double sampleRate, double bpm,
+                         double beatPos, bool isNoteOn, bool drumChannel);
+    void runGenerators(juce::MidiBuffer& out, const LiveFxState& snap, double sampleRate,
+                       double bpm, double beatPos, int numSamples);
+    std::vector<int> heldPitchesSorted(bool asPlayed) const;
+    int nextArpPitch(const GrooveParams& g, const std::vector<int>& pitches);
+    int nextMelodyPitch(const LiveFxState& snap, const std::vector<int>& held);
+    void maybeEmitDrum(juce::MidiBuffer& out, const LiveFxState& snap, double sampleRate,
+                       double bpm, double stepPos, int samplePos, int numSamples);
 
     mutable juce::CriticalSection lock_;
     LiveFxState state_;
     std::array<std::array<Held, 128>, 16> held_ {};
+    std::array<InputNote, 128> inputHeld_ {};
+    std::vector<int> latchedPitches_;
+    int inputOrder_ = 0;
     std::vector<Pending> pending_;
     int nextNoteId_ = 1;
     /** Beat clock used while the host transport is stopped. */
     double freeBeat_ = 0.0;
     std::array<bool, 16> sustainDown_ {};
     std::array<bool, 16> sustainLatched_ {};
+
+    double arpNextStep_ = 0.0;
+    int arpIndex_ = 0;
+    int arpDirection_ = 1;
+    int arpSoundingPitch_ = -1;
+    int arpSoundingCh_ = 1;
+
+    double melodyNextStep_ = 0.0;
+    int melodyPhase_ = 0;
+    int melodySounding_ = -1;
+
+    double drumNextStep_ = 0.0;
+    int drumStep_ = 0;
 };
 
 } // namespace pflow

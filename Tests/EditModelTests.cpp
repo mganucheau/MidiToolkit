@@ -195,15 +195,42 @@ TEST_CASE("resolveClip applies absolute octave and per-note moves", "[editmodel]
     CHECK(resolveClip(clip, e).notes[0].pitch == 60);
 }
 
-TEST_CASE("resolveClip octave range folds span into N octaves", "[editmodel]")
+TEST_CASE("resolveClip octave range folds into the target window", "[editmodel]")
 {
-    auto clip = makeClip({ { 0, 48, 0.0, 2.0 }, { 1, 72, 2.0, 2.0 } }, 1); // 2 octaves apart
+    // Lowest note C3 (48) anchors octave 3. One octave folds into C3–B3.
+    auto clip = makeClip({ { 0, 48, 0.0, 2.0 }, { 1, 72, 2.0, 2.0 } }, 1);
     ClipEdit e;
     e.octaveRange = 1;
+    const auto folded = resolveClip(clip, e);
+    REQUIRE(folded.notes.size() == 2);
+    CHECK(folded.notes[0].pitch == 48);
+    CHECK(folded.notes[1].pitch == 48); // 72 wraps by 24, two octaves, into C3
+
+    e.outsideRange = OutsideRangeMode::Clip;
+    const auto clipped = resolveClip(clip, e);
+    CHECK(clipped.notes[0].pitch == 48);
+    CHECK(clipped.notes[1].pitch == 59); // clamped to the top of the one-octave window
+}
+
+TEST_CASE("resolveClip octave fold matches an octave window", "[editmodel]")
+{
+    // Octave 1 starts at MIDI 24. A 1-octave fold matches block transpose, not ±12.
+    auto clip = makeClip({ { 0, 0, 0.0, 1.0 }, { 1, 11, 1.0, 1.0 }, { 2, 36, 2.0, 1.0 }, { 3, 72, 3.0, 1.0 } }, 1);
+    ClipEdit e;
+    e.octave = 1;
+    e.octaveRange = 1;
+    e.outsideRange = OutsideRangeMode::Fold;
     const auto r = resolveClip(clip, e);
-    REQUIRE(r.notes.size() == 2);
-    CHECK(r.notes[0].pitch == 48);
-    CHECK(r.notes[1].pitch == 48 + 11); // span remapped into 1 octave
+    REQUIRE(r.notes.size() == 4);
+    CHECK(r.notes[0].pitch == 24);
+    CHECK(r.notes[1].pitch == 35);
+    CHECK(r.notes[2].pitch == 24);
+    CHECK(r.notes[3].pitch == 24);
+
+    e.octaveRange = 2;
+    const auto wide = resolveClip(clip, e);
+    CHECK(wide.notes[0].pitch == 24); // 0 wraps up into the 24-wide window
+    CHECK(mapPitchToOctaveWindow(12, 1, 2, OutsideRangeMode::Fold) == 36);
 }
 
 TEST_CASE("resolveClip pitch range folds notes into window", "[editmodel]")

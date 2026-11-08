@@ -87,6 +87,24 @@ enum class ArpMode : int
     UpDown,
     Random,
     AsPlayed,
+    Chord,
+    Count
+};
+
+enum class MelodyStyle : int
+{
+    Motif = 0,
+    ScaleRun,
+    CallResponse,
+    Count
+};
+
+enum class DrumStyle : int
+{
+    Backbeat = 0,
+    FourOnFloor,
+    HalfTime,
+    Break,
     Count
 };
 
@@ -172,9 +190,35 @@ inline const char* arpModeLabel(ArpMode m)
         case ArpMode::UpDown:   return "Up/Down";
         case ArpMode::Random:   return "Random";
         case ArpMode::AsPlayed: return "As Played";
+        case ArpMode::Chord:    return "Chord";
         case ArpMode::Count:    break;
     }
     return "Off";
+}
+
+inline const char* melodyStyleLabel(MelodyStyle s)
+{
+    switch (s)
+    {
+        case MelodyStyle::Motif:        return "Motif";
+        case MelodyStyle::ScaleRun:     return "Scale Run";
+        case MelodyStyle::CallResponse: return "Call-Response";
+        case MelodyStyle::Count:        break;
+    }
+    return "Motif";
+}
+
+inline const char* drumStyleLabel(DrumStyle s)
+{
+    switch (s)
+    {
+        case DrumStyle::Backbeat:     return "Backbeat";
+        case DrumStyle::FourOnFloor:  return "Four-on-floor";
+        case DrumStyle::HalfTime:     return "Half-time";
+        case DrumStyle::Break:        return "Break";
+        case DrumStyle::Count:        break;
+    }
+    return "Backbeat";
 }
 
 inline const char* strumDirectionLabel(StrumDirection d)
@@ -218,7 +262,20 @@ struct GrooveParams
     int arpModeIndex = (int) ArpMode::Off;
     int arpRateIndex = (int) DelayTime::Sixteenth;
     int arpGate = 70;               // 10..100 %
-    int arpOctaves = 1;             // 1..4
+    int arpOctaves = 1;             // 1..3
+    bool arpLatch = false;
+
+    bool melodyEnabled = false;
+    int melodyStyleIndex = (int) MelodyStyle::Motif;
+    int melodyRateIndex = (int) DelayTime::Eighth;
+    int melodyDensity = 50;         // 0..100
+    int melodyRange = 12;           // semitones above root (8..24)
+    int melodyVariation = 1;        // 1..16 seed
+
+    bool drumsEnabled = false;
+    int drumStyleIndex = (int) DrumStyle::Backbeat;
+    int drumDensity = 50;           // 0..100
+    int drumVariation = 1;          // 1..16 seed
 
     int strumDirectionIndex = (int) StrumDirection::Up;
     int strumSpeed = 40;            // 0..100 spread
@@ -262,6 +319,18 @@ struct GrooveParams
     DelayTime arpRate() const
     {
         return (DelayTime) juce::jlimit(0, (int) DelayTime::Count - 1, arpRateIndex);
+    }
+    MelodyStyle melodyStyle() const
+    {
+        return (MelodyStyle) juce::jlimit(0, (int) MelodyStyle::Count - 1, melodyStyleIndex);
+    }
+    DelayTime melodyRate() const
+    {
+        return (DelayTime) juce::jlimit(0, (int) DelayTime::Count - 1, melodyRateIndex);
+    }
+    DrumStyle drumStyle() const
+    {
+        return (DrumStyle) juce::jlimit(0, (int) DrumStyle::Count - 1, drumStyleIndex);
     }
     StrumDirection strumDirection() const
     {

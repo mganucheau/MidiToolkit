@@ -28,6 +28,8 @@ public:
     void setEditorOpen(bool);
     void setEffectsOpen(bool);
     void setPassthrough(bool);
+    /** Hide the Through toggle. The MIDI FX build is always in that mode. */
+    void setPassthroughLocked(bool locked);
     void setHasClip(bool has);
     void setClipName(const juce::String& name);
     /** Standalone macOS reserves a traffic-light gutter; plugins must not. */
@@ -159,6 +161,7 @@ private:
     bool editorOpen = false;
     bool effectsOpen = false;
     bool passthrough = false;
+    bool passthroughLocked = false;
     bool hasClip = false;
     bool windowActive = true;
     bool reserveTrafficLights = false;

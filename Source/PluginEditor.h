@@ -196,7 +196,10 @@ private:
     struct AppTooltipWindow : juce::TooltipWindow
     {
         AppTooltipWindow(juce::Component* parent, int delayMs)
-            : juce::TooltipWindow(parent, delayMs) {}
+            : juce::TooltipWindow(parent, delayMs)
+        {
+            setOpaque(false);
+        }
 
         juce::String getTipFor(juce::Component& c) override
         {
@@ -206,6 +209,7 @@ private:
         }
     };
     AppTooltipWindow tooltips { this, 450 };
+    void syncTooltipHighlight();
 
     struct ContentHolder : juce::Component
     {
@@ -343,10 +347,17 @@ private:
     int savedNonPassW = 0;
     int savedNonPassH = 0;
     int passthroughWindowHeight() const;
+    int passthroughDefaultHeight() const;
+    int passthroughMinHeight() const;
+    int passthroughMaxHeight() const;
     /** Through mode is as wide as the Toolkit, plus the input roll when it is open. */
     int passthroughWindowWidth() const;
     bool recordFromThrough = false;
     void syncPassthroughWindowHeight();
+    /** User-dragged passthrough height above the default fold. 0 = use default. */
+    int userPassthroughH = 0;
+    int heightBeforeSettings = 0;
+    bool settingsRaisedHeight = false;
     double layoutAnimStartMs = 0.0;
     static constexpr double kLayoutAnimMs = 220.0;
 

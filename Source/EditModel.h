@@ -149,6 +149,32 @@ juce::String scaleDegreeLabel(int midi, int rootPc, Mode mode);
 /** Note + degree annotation for the inspector, e.g. "B4 (3rd)". */
 juce::String pitchScaleAnnotation(int midi, int rootPc, Mode mode);
 
+/** What happens to notes that fall outside an Octave Range window. */
+enum class OutsideRangeMode { Clip = 0, Fold = 1 };
+
+/** MIDI note of C in scientific octave 0..6 (octave 4 → C4 = 60). */
+inline int octaveWindowBase(int octaveIndex)
+{
+    return juce::jlimit(0, 127, (juce::jlimit(0, 6, octaveIndex) + 1) * 12);
+}
+
+/** Map one pitch into the N-octave window that starts at C of octaveIndex.
+    Fold wraps by the window size (Ableton OctaveFold). Clip clamps to the edges. */
+inline int mapPitchToOctaveWindow(int pitch, int octaveIndex, int octaveRange, OutsideRangeMode mode)
+{
+    const int span = juce::jlimit(1, 3, octaveRange) * 12;
+    const int lo = octaveWindowBase(octaveIndex);
+    const int hi = juce::jmin(127, lo + span - 1);
+    if (mode == OutsideRangeMode::Clip)
+        return juce::jlimit(lo, hi, pitch);
+    const int usable = juce::jmax(1, hi - lo + 1);
+    int rel = pitch - lo;
+    int wrapped = rel % usable;
+    if (wrapped < 0)
+        wrapped += usable;
+    return lo + wrapped;
+}
+
 // ── Edit record (one per clip; the clip itself is never touched) ─────────────
 
 struct NoteMove { int dPitch = 0; int dStep = 0; };
@@ -158,8 +184,10 @@ struct ClipEdit
     /** Absolute target octave 0..6. -1 = keep the clip's native octave. */
     int  octave    = -1;
     int  pitchShift = 0;   // whole-file semitone transpose, -12..12
-    /** 0 = Off. 1..3 = fold/spread the clip into that many octaves. */
+    /** 0 = Off. 1..3 = keep notes inside that many octaves from the target C. */
     int  octaveRange = 0;
+    /** Clip clamps outside notes. Fold wraps them into the window. */
+    OutsideRangeMode outsideRange = OutsideRangeMode::Fold;
     /** Inclusive MIDI clamp/fold window. Defaults = full range (inactive). */
     int  pitchMin = 0;
     int  pitchMax = 127;

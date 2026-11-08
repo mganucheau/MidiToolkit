@@ -215,7 +215,7 @@ private:
     void refreshControls();
     void updateRollSize();
     void scrollToContent();
-    /** Fit horizontal width to the clip and vertical zoom to the note range (centered if sparse). */
+    /** Fit horizontal width to the clip and vertical zoom to one lane above and below the notes. */
     void zoomToClip();
     void layoutScaleControls(juce::Rectangle<int> area);
     void nudgeSelection(int dPitch, int dStep);

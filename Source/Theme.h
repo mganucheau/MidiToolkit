@@ -11,10 +11,59 @@ namespace pflow {
 enum class Density { Compact, Comfortable };
 enum class ContentSize { Small, Medium, Large };
 enum class Appearance { System = 0, Light = 1, Dark = 2 };
+
+/** Named themes. Indexes 0–9 are light, 10–19 are dark.
+    Stored appearance 0/1/2 from older builds is migrated on load. */
+struct ThemeSpec
+{
+    const char* name;
+    bool dark;
+    float hue;
+    float amount;
+    float lift;
+};
+
+inline constexpr ThemeSpec kThemes[] = {
+    { "Paper",    false, 0.00f, 0.00f,  0.00f },
+    { "Fog",      false, 0.58f, 0.22f,  0.00f },
+    { "Bone",     false, 0.09f, 0.18f,  0.02f },
+    { "Sand",     false, 0.10f, 0.28f,  0.00f },
+    { "Mist",     false, 0.56f, 0.16f,  0.03f },
+    { "Pearl",    false, 0.60f, 0.08f,  0.05f },
+    { "Linen",    false, 0.08f, 0.14f,  0.01f },
+    { "Ice",      false, 0.55f, 0.30f,  0.02f },
+    { "Sage",     false, 0.33f, 0.22f,  0.01f },
+    { "Blush",    false, 0.97f, 0.20f,  0.02f },
+    { "Ink",      true,  0.00f, 0.00f,  0.00f },
+    { "Carbon",   true,  0.00f, 0.00f, -0.04f },
+    { "Slate",    true,  0.58f, 0.28f,  0.00f },
+    { "Navy",     true,  0.62f, 0.38f, -0.02f },
+    { "Plum",     true,  0.78f, 0.30f,  0.00f },
+    { "Forest",   true,  0.36f, 0.28f, -0.02f },
+    { "Ember",    true,  0.06f, 0.32f,  0.00f },
+    { "Graphite", true,  0.58f, 0.10f, -0.02f },
+    { "Midnight", true,  0.64f, 0.42f, -0.04f },
+    { "Cocoa",    true,  0.07f, 0.26f, -0.01f },
+};
+
+inline constexpr int kNumThemes = (int) (sizeof(kThemes) / sizeof(kThemes[0]));
+
+inline const ThemeSpec& themeAt(int index)
+{
+    return kThemes[(size_t) juce::jlimit(0, kNumThemes - 1, index)];
+}
+
+/** Old files stored System=0, Light=1, Dark=2. themeCatalog marks the 20-theme ids. */
+inline int migrateThemeIndex(int stored, bool themeCatalog)
+{
+    if (themeCatalog)
+        return juce::jlimit(0, kNumThemes - 1, stored);
+    return stored >= 2 ? 10 : 0;
+}
 enum class ScalePlacement { Top, Bottom };   // legacy; Pitch & Scale lives in inspector
 
 constexpr int kNumContentSizes = 3;
-constexpr int kNumAppearances = 3;
+constexpr int kNumAppearances = kNumThemes;
 constexpr int kNumScalePlacements = 2;
 
 /** Legacy aggregate mapped 1:1 from ds::Palette — prefer ds:: accessors in new code. */
@@ -67,8 +116,11 @@ const ThemeTokens& themeTokens();
 const AccentTokens& accentTokens();
 const InspectorTokens& inspectorTokens();
 
-/** Resolves System → macOS setting; Light/Dark force appearance. */
+/** True for the ten dark themes (indexes 10–19). */
 bool usesDarkAppearance();
+
+/** Shift a base light/dark colour toward the active theme. Paper and Ink pass through. */
+juce::Colour tintForTheme(juce::Colour c);
 
 /** @deprecated Use usesDarkAppearance() */
 inline bool inspectorUsesDarkPalette() { return usesDarkAppearance(); }
@@ -78,6 +130,9 @@ void drawInspectorControlSurface(juce::Graphics& g, juce::Rectangle<float> bound
 void drawInspectorDivider(juce::Graphics& g, juce::Rectangle<int> bounds);
 
 /** App-level runtime Tweaks (density / content size / appearance). */
+enum class FontFamily : int { Archivo = 0, System = 1, Helvetica = 2, Avenir = 3, Count };
+enum class SurfaceStyle : int { Flat = 0, Depth = 1, Liquid = 2, Count };
+
 struct Tweaks
 {
     std::atomic<int> density { (int) Density::Comfortable };
@@ -86,7 +141,22 @@ struct Tweaks
     std::atomic<int> textScalePct { 100 };
     std::atomic<int> appearance { (int) Appearance::System };
     std::atomic<int> showTooltips { 1 }; // 1 = on
+    std::atomic<int> fontFamily { (int) FontFamily::Archivo };
+    std::atomic<int> surfaceStyle { (int) SurfaceStyle::Flat };
 };
+
+/** Standout amber used for tip bubbles and the control highlight under them. */
+inline juce::Colour tooltipAccent() { return juce::Colour(0xffffb020); }
+
+/** Contrast-aware ink against a surface (approx WCAG AA for small text). */
+juce::Colour contrastInkOn(juce::Colour surface);
+/** Contrast-aware line / note edge against a surface. */
+juce::Colour contrastLineOn(juce::Colour surface);
+
+SurfaceStyle currentSurfaceStyle();
+
+void setTooltipHighlightTarget(juce::Component* c);
+bool hasTooltipHighlight(const juce::Component* c);
 
 Tweaks& tweaks();
 
@@ -95,9 +165,14 @@ inline Density currentDensity()
     return (Density) juce::jlimit(0, 1, tweaks().density.load());
 }
 
+inline int themeIndex()
+{
+    return juce::jlimit(0, kNumThemes - 1, tweaks().appearance.load());
+}
+
 inline Appearance currentAppearance()
 {
-    return (Appearance) juce::jlimit(0, kNumAppearances - 1, tweaks().appearance.load());
+    return (Appearance) juce::jlimit(0, 2, tweaks().appearance.load());
 }
 
 /** UI scale for the Small / Medium / Large content-size tweak (layout / chrome). */

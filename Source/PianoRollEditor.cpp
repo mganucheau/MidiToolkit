@@ -20,41 +20,19 @@ void PitchRowMap::fit(const std::vector<RollNote>& notes, float height, int root
     }
     if (notes.empty()) { loN = 60 + rootPc; hiN = loN; }
 
-    // One-octave key window (prefer octave of highest note).
-    if (minRange <= 13)
-    {
-        int lo = hiN - ((hiN - rootPc + 1200) % 12);
-        if (lo > loN)
-            lo -= 12;
-        lo = juce::jlimit(0, 115, lo);
-        int hi = juce::jlimit(lo + 12, 127, lo + 12);
-        if (hiN - loN > 12)
-        {
-            lo = loN - ((loN - rootPc + 1200) % 12);
-            hi = hiN + ((rootPc - (hiN % 12) + 12) % 12);
-            if (hi < lo + 12) hi = lo + 12;
-            lo = juce::jlimit(0, 127, lo);
-            hi = juce::jlimit(lo, 127, hi);
-        }
-        minPitch = lo;
-        maxPitch = hi;
-        rowH = height / (float) juce::jmax(1, numRows());
-        return;
-    }
-
-    // Root in the octave of the lowest note (at or below), and root at or above the highest.
-    int lo = loN - ((loN - rootPc + 1200) % 12);
-    int hi = hiN + ((rootPc - (hiN % 12) + 12) % 12);
-    if (hi < lo) hi = lo + 12;
-
+    // One note lane above the highest note and one below the lowest.
+    int lo = juce::jlimit(0, 126, loN - 1);
+    int hi = juce::jlimit(lo + 1, 127, hiN + 1);
     while (hi - lo + 1 < minRange)
     {
-        if (lo >= 12) lo -= 12;
-        else if (hi <= 115) hi += 12;
+        if (lo > 0) --lo;
+        if (hi - lo + 1 >= minRange) break;
+        if (hi < 127) ++hi;
+        else if (lo > 0) --lo;
         else break;
     }
-    minPitch = juce::jlimit(0, 127, lo);
-    maxPitch = juce::jlimit(minPitch, 127, hi);
+    minPitch = lo;
+    maxPitch = hi;
     rowH = height / (float) juce::jmax(1, numRows());
 }
 
@@ -124,7 +102,7 @@ void PianoRollMini::paint(juce::Graphics& g)
     g.fillRect(gutter.getRight() - 1.0f, 0.0f, 1.0f, (float) getHeight());
 
     PitchRowMap map;
-    map.fit(frameNotes.empty() ? notes : frameNotes, b.getHeight(), rootPc, 13);
+    map.fit(frameNotes.empty() ? notes : frameNotes, b.getHeight(), rootPc, 0);
     const double totalSteps = (double) bars * kStepsPerBar * timeStretch;
     const float pps = b.getWidth() / (float) juce::jmax(1.0, totalSteps);
 
@@ -160,13 +138,13 @@ void PianoRollMini::paint(juce::Graphics& g)
         }
         if (displayBars <= 8)
         {
-            g.setColour(juce::Colours::black.withAlpha(0.28f));
+            g.setColour(contrastLineOn(ds::surface100()));
             for (int q = 1; q < 4; ++q)
                 g.fillRect(x + (float) (q * kStepsPerBar / 4) * pps, b.getY(), 1.0f, b.getHeight());
         }
         if (bar % every == 0)
         {
-            g.setColour(ds::inkMuted());
+            g.setColour(contrastInkOn(ds::surface100()));
             g.drawText(juce::String(bar + 1), juce::Rectangle<float>(x + 3.0f, 0.0f, 40.0f, (float) kRulerH - 1.0f),
                        juce::Justification::centredLeft, false);
         }
@@ -191,8 +169,11 @@ void PianoRollMini::paint(juce::Graphics& g)
                 b.getY() + map.yForPitchTop(n.pitch, b.getHeight()),
                 juce::jmax(2.0f, (float) (n.len * timeStretch) * pps - 0.5f),
                 juce::jmax(2.0f, map.rowH - 1.0f));
-            g.setColour(noteColour.withAlpha((float) (0.45 + 0.55 * v)));
+            const float a = juce::jmax(0.72f, (float) (0.55 + 0.45 * v));
+            g.setColour(noteColour.withAlpha(a));
             g.fillRect(r);
+            g.setColour(contrastLineOn(noteColour));
+            g.drawRect(r, 1.0f);
         }
     }
 
@@ -1080,10 +1061,9 @@ void PianoRollEditor::zoomToClip()
 
     if (folded)
     {
-        // Cap folded zoom so at most one octave of note-rows fills the view.
-        const int span = juce::jmax(1, juce::jmin(12, (int) foldPitches.size()));
-        rowH = juce::jlimit(kMinRowH, kMaxRowH, (float) visH / (float) span);
-        rowH = juce::jlimit(kMinRowH, kMaxRowH, rowH * 0.5f);
+        // Note rows, plus one empty lane above the highest and one below the lowest.
+        const int span = juce::jmax(1, (int) foldPitches.size()) + 2;
+        rowH = juce::jlimit(kMinRowH, kMaxRowH, (float) visH / (float) span * 0.5f);
         updateRollSize();
         rollViewport.setViewPosition(0, 0);
         pendingScrollToContent = false;
@@ -1100,25 +1080,18 @@ void PianoRollEditor::zoomToClip()
         loN = juce::jmin(loN, n.pitch);
         hiN = juce::jmax(hiN, n.pitch);
     }
-    const int rootPc = edit.root >= 0 ? edit.root : (clip.root >= 0 ? clip.root : 0);
     if (resolved.notes.empty())
-        loN = hiN = 60 + rootPc;
+        loN = hiN = 60;
 
-    // Default view: the single octave that contains the notes (C-aligned to root).
-    // If notes already span >1 octave, still open on the octave of the highest note;
-    // vertical zoom-in is capped to one octave elsewhere.
-    int viewLo = hiN - ((hiN - rootPc + 1200) % 12);
-    while (viewLo > loN)
-        viewLo -= 12;
-    viewLo = juce::jlimit(0, 115, viewLo);
-    const int viewHi = juce::jlimit(viewLo + 12, 127, viewLo + 12);
-
-    const float maxRowH = (float) visH / 12.0f; // most-zoomed = one octave
-    rowH = juce::jlimit(kMinRowH, juce::jmin(kMaxRowH, maxRowH), maxRowH);
+    // Frame the notes with one semitone lane above the highest and one below the lowest.
+    const int viewLo = juce::jlimit(0, 126, loN - 1);
+    const int viewHi = juce::jlimit(viewLo + 1, 127, hiN + 1);
+    const int lanes = juce::jmax(1, viewHi - viewLo + 1);
+    rowH = juce::jlimit(kMinRowH, kMaxRowH, (float) visH / (float) lanes);
     updateRollSize();
 
     const float clusterTop = (float) rowForPitch(viewHi) * effRowH();
-    const float clusterH = 12.0f * effRowH();
+    const float clusterH = (float) lanes * effRowH();
     const float yCentre = clusterTop - ((float) visH - clusterH) * 0.5f;
     const int maxY = juce::jmax(0, rollContent.getHeight() - visH);
     rollViewport.setViewPosition(0, juce::jlimit(0, maxY, (int) std::lround(yCentre)));
@@ -1452,8 +1425,8 @@ void PianoRollEditor::RollContent::paint(juce::Graphics& g)
         const float x = (float) s * pps;
         if (x < clipB.getX() - 2.0f || x > clipB.getRight() + 2.0f) continue;
         const bool isBar = (s % kStepsPerBar) == 0;
-        g.setColour(isBar ? colours::lineStrong().withAlpha(usesDarkAppearance() ? 0.08f : 0.07f)
-                          : colours::rollRowline().withAlpha(usesDarkAppearance() ? 0.04f : 0.05f));
+        g.setColour(isBar ? contrastLineOn(ds::surface100()).withAlpha(0.55f)
+                          : contrastLineOn(ds::surface100()).withAlpha(0.28f));
         g.fillRect(x, clipB.getY(), isBar ? 0.7f : 0.35f, clipB.getHeight());
     }
 
@@ -1471,9 +1444,9 @@ void PianoRollEditor::RollContent::paint(juce::Graphics& g)
         // Groove: square notes in the clip colour; brightness follows velocity.
         const auto base = ed.noteColour;
         juce::Colour fill = (n.moved || inDrag) ? base.brighter(0.12f) : base;
-        g.setColour(fill.withAlpha((float) (0.55 + 0.45 * v)));
+        g.setColour(fill.withAlpha(juce::jmax(0.75f, (float) (0.55 + 0.45 * v))));
         g.fillRect(r);
-        g.setColour(juce::Colours::black.withAlpha(0.35f));
+        g.setColour(contrastLineOn(fill));
         g.drawRect(r, 1.0f);
 
         if (isSelected)
@@ -1754,7 +1727,6 @@ void PianoRollEditor::KeyGutter::paint(juce::Graphics& g)
             g.setColour(ds::trk().withAlpha(0.55f));
             g.fillRect(key);
         }
-
         if (selectedPitches.count(pitch) > 0)
         {
             g.setColour(colours::accentSoft());
@@ -1763,7 +1735,7 @@ void PianoRollEditor::KeyGutter::paint(juce::Graphics& g)
             g.fillRect(W - 2.0f, y, 2.0f, rowH);
         }
 
-        g.setColour(colours::rollRowline());
+        g.setColour(contrastLineOn(colours::kbWhite()));
         g.fillRect(0.0f, y + rowH - 0.5f, W, 0.5f);
     }
 
@@ -1812,8 +1784,8 @@ void PianoRollEditor::KeyGutter::paint(juce::Graphics& g)
         g.addTransform(juce::AffineTransform::rotation(-juce::MathConstants<float>::halfPi, cx, cy));
         g.setFont(monoFont(fontPt, true));
         g.setColour(selected ? colours::accent()
-                   : black ? juce::Colours::white.withAlpha(0.75f)
-                           : colours::text3());
+                   : black ? contrastInkOn(colours::kbBlack())
+                           : contrastInkOn(colours::kbWhite()));
         g.drawText(name,
                    juce::Rectangle<float>(cx - rowH * 0.5f, cy - fontPt * 0.55f,
                                           rowH, fontPt * 1.2f).toNearestInt(),
@@ -1848,13 +1820,15 @@ void PianoRollEditor::VelocityLane::paint(juce::Graphics& g)
     auto caret = header.removeFromLeft(12).toFloat().withSizeKeepingCentre(9.0f, 9.0f);
     fx::drawStrokedChevron(g, caret, ds::inkMuted(), ed.velocityOpen);
     header.removeFromLeft(4);
-    g.setColour(ds::inkMuted());
+    g.setColour(contrastInkOn(ds::surface100()));
     g.setFont(uiFontFixed(11.0f, false));
     g.drawText("Velocity", header, juce::Justification::centredLeft);
 
     if (!ed.hasClip || !ed.velocityOpen) return;
 
     auto lane = getLocalBounds().withTrimmedTop(headerH);
+    juce::Graphics::ScopedSaveState clipLane(g);
+    g.reduceClipRegion(lane);
     const float pps = ed.pxPerStep();
     const float viewX = (float) ed.rollViewport.getViewPositionX();
     const float laneTop = (float) lane.getY();
@@ -1870,10 +1844,12 @@ void PianoRollEditor::VelocityLane::paint(juce::Graphics& g)
     for (int vel : ticks)
     {
         const float y = yForVel(vel);
-        g.setColour(colours::line().withAlpha(vel == 0 ? 0.0f : 0.85f));
+        g.setColour(contrastLineOn(ds::surface100()).withAlpha(vel == 0 ? 0.0f : 1.0f));
         g.drawLine((float) gutterW, y, (float) getWidth(), y, 1.0f);
-        auto label = juce::Rectangle<int>(0, (int) std::lround(y) - 6, gutterW - 6, 12);
-        g.setColour(colours::text2());
+        auto label = juce::Rectangle<int>(0, (int) std::lround(y) - 6, gutterW - 6, 12)
+                         .getIntersection(lane);
+        if (label.getHeight() < 8) continue;
+        g.setColour(contrastInkOn(ds::surface100()));
         g.drawText(juce::String(vel), label, juce::Justification::centredRight, false);
     }
 

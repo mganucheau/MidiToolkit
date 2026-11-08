@@ -360,6 +360,7 @@ void applyPitchLock(const ClipEdit& locked, ClipEdit& target)
     target.octave = locked.octave;
     target.pitchShift = locked.pitchShift;
     target.octaveRange = locked.octaveRange;
+    target.outsideRange = locked.outsideRange;
     target.pitchMin = locked.pitchMin;
     target.pitchMax = locked.pitchMax;
     target.fitScale = locked.fitScale;
@@ -435,7 +436,11 @@ ResolvedClip resolveClip(const StepClip& clip, const ClipEdit& e)
         if (auto it = e.moves.find(n.id); it != e.moves.end())
             mv = it->second;
 
-        int pitch = n.pitch + mv.dPitch + octDelta + e.pitchShift;
+        // Octave Range owns the register: the window is absolute, so a second
+        // transpose would move notes and then wrap them a second time.
+        int pitch = n.pitch + mv.dPitch + e.pitchShift;
+        if (e.octaveRange <= 0)
+            pitch += octDelta;
 
         if (e.mapToRoot && e.root >= 0 && clip.root >= 0)
         {
@@ -461,27 +466,11 @@ ResolvedClip resolveClip(const StepClip& clip, const ClipEdit& e)
         out.notes.push_back(r);
     }
 
-    // Octave Range: fold/spread the clip's pitch span into N octaves.
+    // Octave Range: wrap or clamp every note into N octaves starting at the target C.
     if (e.octaveRange > 0 && !out.notes.empty())
     {
-        const int numOct = juce::jlimit(1, 3, e.octaveRange);
-        int srcMin = 127, srcMax = 0;
-        for (const auto& n : out.notes)
-        {
-            srcMin = std::min(srcMin, n.pitch);
-            srcMax = std::max(srcMax, n.pitch);
-        }
-        const int srcSpan = srcMax - srcMin;
-        const int targetSpan = numOct * 12;
-        if (srcSpan > 0)
-        {
-            for (auto& n : out.notes)
-            {
-                const double t = (double) (n.pitch - srcMin) / (double) srcSpan;
-                n.pitch = juce::jlimit(0, 127,
-                    srcMin + (int) std::lround(t * (double) (targetSpan - 1)));
-            }
-        }
+        for (auto& n : out.notes)
+            n.pitch = mapPitchToOctaveWindow(n.pitch, tgtOct, e.octaveRange, e.outsideRange);
     }
 
     // Pitch Range: wrap notes into [pitchMin, pitchMax] by octave folds.
@@ -651,7 +640,8 @@ std::vector<EditBadge> editBadges(const StepClip& clip, const ClipEdit& e)
         out.push_back({ "oct", "Oct " + juce::String(e.octave) });
 
     if (e.octaveRange > 0)
-        out.push_back({ "octRange", juce::String(e.octaveRange) + " oct" });
+        out.push_back({ "octRange", juce::String(e.octaveRange) + " oct "
+                                    + (e.outsideRange == OutsideRangeMode::Clip ? "clip" : "fold") });
 
     if (e.extendMult > 1)
         out.push_back({ "extend", "x" + juce::String(e.extendMult) });
