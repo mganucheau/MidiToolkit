@@ -3,6 +3,7 @@
 #include <array>
 #include <cstdint>
 #include <map>
+#include <optional>
 #include <set>
 #include <vector>
 
@@ -28,12 +29,16 @@ struct RollNote
     bool   moved = false;   // set by resolveClip when a manual move applies
 };
 
-enum class ClipKind { Bass, Piano, Lead, Drums };
-constexpr int kNumClipKinds = 4;
+enum class ClipKind { Bass, Keys, Lead, Arp, Drums };
+constexpr int kNumClipKinds = 5;
 
 const char* clipKindName(ClipKind k);
 
-/** Best-effort kind guess from a file name / path (keywords like bass, kit, keys). */
+/** Keyword lexicon from a file name / path. nullopt = no useful tag. */
+std::optional<ClipKind> kindKeywordFromFileName(const juce::String& nameOrPath);
+
+/** Best-effort kind guess from a file name / path (keywords like bass, kit, keys).
+    Falls back to Lead when no keyword matches. */
 ClipKind hintKindFromFileName(const juce::String& nameOrPath);
 
 /** Content tags derived from note analysis. Bitmask on StepClip / BrowserSearch. */
@@ -83,6 +88,9 @@ struct StepClip
     bool   notesResident = false;
     std::vector<RollNote> notes;
 };
+
+/** If the name/path matches the lexicon, set kind (and drum flag) and return true. */
+bool applyFilenameKindTag(StepClip& clip);
 
 /** True when pitch is in the General MIDI percussion key map (35–81). */
 bool isGmDrumPitch(int midi);
@@ -195,6 +203,10 @@ struct ClipEdit
     int  pitchMax = 127;
     /** Playback length multiplier: 1 (Off), 2, 4, or 8. Tiles the clip. */
     int  extendMult = 1;
+    /** Mirror note start times within the (post-trim) clip length. */
+    bool reverse = false;
+    /** Mirror pitches around the midpoint of the current note range. */
+    bool invert = false;
     bool fitScale  = false;
     bool mapToRoot = false;
     int  root      = -1;            // target root pitch-class, -1 = unset

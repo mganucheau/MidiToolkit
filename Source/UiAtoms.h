@@ -53,6 +53,10 @@ namespace icons {
     /** Circular arrow — rescan the open folder. */
     inline constexpr const char* refresh       = "refresh";
     inline constexpr const char* gear          = "gear";
+    /** 2×2 cells — toggle list/grid browser view. */
+    inline constexpr const char* grid          = "grid";
+    /** Nested folders — include files from subdirectories. */
+    inline constexpr const char* subfolders    = "subfolders";
     inline constexpr const char* more          = "more";
     inline constexpr const char* lockOpen      = "lock-open";
     inline constexpr const char* lockClosed    = "lock-closed";

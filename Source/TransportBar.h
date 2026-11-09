@@ -30,6 +30,8 @@ public:
     void setPassthrough(bool);
     /** Hide the Through toggle. The MIDI FX build is always in that mode. */
     void setPassthroughLocked(bool locked);
+    /** Hide play/record (Generator view). */
+    void setTransportControlsVisible(bool visible);
     void setHasClip(bool has);
     void setClipName(const juce::String& name);
     /** Standalone macOS reserves a traffic-light gutter; plugins must not. */
@@ -149,10 +151,11 @@ private:
     StatusPill statusPill;
     IconBtn btnSync { icons::sync, "Sync to host tempo" };
     DragChip btnDragToDaw { "Drag to DAW" };
-    IconBtn btnPassthrough { icons::midi, "Through" };
+    ChipBtn btnPassthrough { "Passthrough" };
     IconBtn btnEditor { icons::noteKeys, "Piano Roll" };
     IconBtn btnEffects { icons::sliders, "Effects" };
     IconBtn btnSettings { icons::gear, "Settings" };
+    bool transportControlsVisible = true;
 
     juce::Rectangle<int> titleBounds, transportGroupBounds, dividerBounds;
 

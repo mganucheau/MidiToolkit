@@ -817,7 +817,7 @@ StepClip renderPartClip(Part part, const GrooveParams& src, int keyRoot, Mode mo
         case Part::Chords:
             gen::renderChords(g, 0.0, endPpq, chordNotes, chordCount, keyRoot, mode, events);
             name = "Chords";
-            kind = ClipKind::Piano;
+            kind = ClipKind::Keys;
             break;
         case Part::Bass:
             gen::renderBass(g, 0.0, endPpq, chordNotes, chordCount, keyRoot, mode, events);

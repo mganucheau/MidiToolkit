@@ -158,9 +158,9 @@ juce::Colour colour (Type t);
 /** §5 region metrics (logical px at Medium). */
 namespace region {
     constexpr int toolbarH     = 40;   // header
-    constexpr int sidebarW     = 156;  // library
+    constexpr int sidebarW     = 176;  // library
     constexpr int fileListW    = 368;  // file list column
-    constexpr int gridBrowserW = 584;  // six 96 px kind columns + hairlines
+    constexpr int gridBrowserW = 484;  // five 96 px kind columns + hairlines
     constexpr int toolkitW     = 275;
     constexpr int rollMinW     = 320;
     constexpr int velocityH    = 100;

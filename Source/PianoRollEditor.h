@@ -222,12 +222,13 @@ private:
 
     // ── row geometry ──
     float pxPerStep() const { return pxPerStepBase * zoomX; }
-    float effRowH() const { return folded ? rowH * 2.0f : rowH; }   // folded rows are 2x tall
+    bool rowsCollapsed() const { return folded || scaleFiltered; }
+    float effRowH() const { return rowsCollapsed() ? rowH * 2.0f : rowH; }   // folded rows are 2x tall
     int totalSteps() const
     {
         return juce::jmax(1, (int) std::lround((double) resolved.bars * kStepsPerBar * timeStretch));
     }
-    int numRows() const { return folded ? juce::jmax(1, (int) foldPitches.size()) : 128; }
+    int numRows() const { return rowsCollapsed() ? juce::jmax(1, (int) foldPitches.size()) : 128; }
     int rowForPitch(int pitch) const;
     int pitchForRow(int row) const;
     juce::Rectangle<float> noteRect(const RollNote&, int rowOffset = 0, double stepOffset = 0.0) const;
@@ -270,6 +271,8 @@ private:
     std::set<int> selection;
     std::vector<int> foldPitches;           // ascending note-bearing pitches
     bool folded = false;
+    /** When true, hide pitches/rows that are outside the selected scale. */
+    bool scaleFiltered = false;
     float pxPerStepBase = 6.0f;             // fit-to-width at zoomX 1
     float zoomX = 1.0f;                     // horizontal zoom, 1..6
     int visibleBarsZoom = -1;               // -1 = Clip (fit width + notes); else 2/4/8/16
@@ -297,8 +300,8 @@ private:
     MiniSwitch mapSwitch { "Map to root" };
     IconBtn btnLock { icons::lockOpen, "Lock pitch edits while browsing" };
     IconBtn btnRevert { icons::undo, "Revert all edits" };
-    ChipBtn btnTrim { "Trim", icons::scissors };
     ChipBtn btnFold { "Fold", icons::foldRows };
+    ChipBtn btnScale { "Scale" };
     IconBtn btnZoomOut { icons::zoomOut, "Zoom out" };
     IconBtn btnZoomIn { icons::zoomIn, "Zoom in" };
     ChipBtn selBadge { "0 sel" };
@@ -315,7 +318,7 @@ private:
     NotifyingViewport rollViewport;
     RollContent rollContent { *this };
     VelocityLane velocityLane { *this };
-    bool velocityOpen = true;
+    bool velocityOpen = false;
     ScalePanel scalePanel { *this };
 
     static constexpr int stripH = 0;

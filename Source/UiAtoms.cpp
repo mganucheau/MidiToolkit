@@ -344,24 +344,48 @@ void drawIcon(juce::Graphics& g, const juce::String& name,
     }
     else if (name == icons::gear)
     {
-        // Ring + hub + six teeth (reads as a gear, not a sun).
-        g.drawEllipse(cx - s * 0.42f, cy - s * 0.42f, s * 0.84f, s * 0.84f, px);
-        g.drawEllipse(cx - s * 0.18f, cy - s * 0.18f, s * 0.36f, s * 0.36f, px);
-        for (int i = 0; i < 6; ++i)
+        // Bold 4-tooth cog with a punched hub — stays legible at chrome size.
+        juce::Path cog;
+        constexpr int kSteps = 8;
+        for (int i = 0; i < kSteps; ++i)
         {
-            const float a = juce::MathConstants<float>::twoPi * (float) i / 6.0f;
-            const float c = std::cos(a), sn = std::sin(a);
-            const float x0 = cx + s * 0.55f * c, y0 = cy + s * 0.55f * sn;
-            const float x1 = cx + s * 0.95f * c, y1 = cy + s * 0.95f * sn;
-            const float nx = -sn * px * 1.1f, ny = c * px * 1.1f;
-            juce::Path tooth;
-            tooth.startNewSubPath(x0 - nx, y0 - ny);
-            tooth.lineTo(x1 - nx, y1 - ny);
-            tooth.lineTo(x1 + nx, y1 + ny);
-            tooth.lineTo(x0 + nx, y0 + ny);
-            tooth.closeSubPath();
-            g.fillPath(tooth);
+            const float a0 = juce::MathConstants<float>::twoPi * ((float) i - 0.5f) / (float) kSteps
+                             - juce::MathConstants<float>::halfPi;
+            const float a1 = juce::MathConstants<float>::twoPi * ((float) i + 0.5f) / (float) kSteps
+                             - juce::MathConstants<float>::halfPi;
+            const float r = (i % 2 == 0) ? s * 0.98f : s * 0.62f;
+            const float x0 = cx + r * std::cos(a0), y0 = cy + r * std::sin(a0);
+            const float x1 = cx + r * std::cos(a1), y1 = cy + r * std::sin(a1);
+            if (i == 0) cog.startNewSubPath(x0, y0);
+            else        cog.lineTo(x0, y0);
+            cog.lineTo(x1, y1);
         }
+        cog.closeSubPath();
+        cog.setUsingNonZeroWinding(false);
+        cog.addEllipse(cx - s * 0.28f, cy - s * 0.28f, s * 0.56f, s * 0.56f);
+        g.fillPath(cog);
+    }
+    else if (name == icons::grid)
+    {
+        const float cell = s * 0.72f;
+        const float gap = s * 0.28f;
+        const float x0 = cx - cell - gap * 0.5f;
+        const float y0 = cy - cell - gap * 0.5f;
+        for (int row = 0; row < 2; ++row)
+            for (int col = 0; col < 2; ++col)
+                g.drawRoundedRectangle(x0 + (float) col * (cell + gap),
+                                       y0 + (float) row * (cell + gap),
+                                       cell, cell, px * 0.6f, px);
+    }
+    else if (name == icons::subfolders)
+    {
+        // Back folder + front folder, reads as “include nested folders”.
+        auto back = juce::Rectangle<float>(cx - s * 1.05f, cy - s * 0.55f, s * 1.55f, s * 1.15f);
+        g.drawRoundedRectangle(back, px * 0.7f, px);
+        g.drawLine(back.getX(), back.getY() + s * 0.28f, back.getRight(), back.getY() + s * 0.28f, px);
+        auto front = juce::Rectangle<float>(cx - s * 0.35f, cy - s * 0.15f, s * 1.4f, s * 1.15f);
+        g.drawRoundedRectangle(front, px * 0.7f, px);
+        g.drawLine(front.getX(), front.getY() + s * 0.28f, front.getRight(), front.getY() + s * 0.28f, px);
     }
     else if (name == icons::more)
     {

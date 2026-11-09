@@ -285,15 +285,6 @@ PianoRollEditor::PianoRollEditor()
     btnRevertNotes.onClick = [this] { revertNoteEdits(); };
     addAndMakeVisible(btnRevertNotes);
 
-    btnTrim.onClick = [this]
-    {
-        if (onTrimRequested)
-            onTrimRequested();
-        else
-            toggleTrim();
-    };
-    addAndMakeVisible(btnTrim);
-
     btnFold.setComponentID("btnFold");
     btnFold.accentText = true;
     btnFold.setTooltip("Show only notes that appear in the clip (fold empty pitches)");
@@ -302,12 +293,29 @@ PianoRollEditor::PianoRollEditor()
         folded = !folded;
         btnFold.active = folded;
         btnFold.repaint();
+        rebuildResolved();
         updateRollSize();
         scrollToContent();
         rollContent.repaint();
         gutter.repaint();
     };
     addAndMakeVisible(btnFold);
+
+    btnScale.setComponentID("btnScale");
+    btnScale.accentText = true;
+    btnScale.setTooltip("Hide pitches outside the selected scale");
+    btnScale.onClick = [this]
+    {
+        scaleFiltered = !scaleFiltered;
+        btnScale.active = scaleFiltered;
+        btnScale.repaint();
+        rebuildResolved();
+        updateRollSize();
+        scrollToContent();
+        rollContent.repaint();
+        gutter.repaint();
+    };
+    addAndMakeVisible(btnScale);
 
     barsZoomPopup.setItems({ "Clip", "2 bars", "4 bars", "8 bars", "16 bars" }, 0);
     barsZoomPopup.setWantsKeyboardFocus(false);
@@ -360,8 +368,9 @@ void PianoRollEditor::setClip(const StepClip& c, const ClipEdit& e, const Groove
     {
         case ClipKind::Drums: noteColour = ds::clip(1); break;
         case ClipKind::Bass:  noteColour = ds::clip(6); break;
-        case ClipKind::Piano: noteColour = ds::clip(7); break;
+        case ClipKind::Keys:  noteColour = ds::clip(7); break;
         case ClipKind::Lead:  noteColour = ds::clip(5); break;
+        case ClipKind::Arp:   noteColour = ds::clip(3); break;
     }
     edit = e;
     groove = k;
@@ -495,10 +504,42 @@ void PianoRollEditor::rebuildResolved()
     const auto preTrim = resolveClip(clip, noTrim);
     emptyBarIndices = emptyBars(preTrim.notes, clip.bars);
 
-    // Fold rows from the notes we actually paint/hear (post-groove, re-fitted).
+    // Fold / scale-filter rows from the notes we actually paint/hear.
+    const int scaleRoot = edit.root >= 0 ? edit.root : clip.root;
+    const bool filterScale = scaleFiltered && scaleRoot >= 0;
     std::set<int> pitches;
     for (const auto& n : grooved)
-        pitches.insert(juce::jlimit(0, 127, n.pitch));
+    {
+        const int p = juce::jlimit(0, 127, n.pitch);
+        if (filterScale && !pitchInScale(p, scaleRoot, edit.mode))
+            continue;
+        pitches.insert(p);
+    }
+    if (filterScale && !folded)
+    {
+        // Show every scale degree spanning the note range (not only note-bearing).
+        int lo = 0, hi = 127;
+        if (!pitches.empty())
+        {
+            lo = *pitches.begin();
+            hi = *pitches.rbegin();
+        }
+        else if (!grooved.empty())
+        {
+            lo = hi = juce::jlimit(0, 127, grooved.front().pitch);
+            for (const auto& n : grooved)
+            {
+                lo = std::min(lo, n.pitch);
+                hi = std::max(hi, n.pitch);
+            }
+        }
+        lo = juce::jmax(0, lo - 12);
+        hi = juce::jmin(127, hi + 12);
+        pitches.clear();
+        for (int p = lo; p <= hi; ++p)
+            if (pitchInScale(p, scaleRoot, edit.mode))
+                pitches.insert(p);
+    }
     foldPitches.assign(pitches.begin(), pitches.end());
 }
 
@@ -523,13 +564,6 @@ void PianoRollEditor::refreshTrimButtonState()
     const bool showRestore = isTrimmed && !hasNewEmpties;
     const bool enabled = hasNewEmpties || isTrimmed;
     const juce::String label = showRestore ? "Restore" : "Trim empty measures";
-    btnTrim.setEnabled(enabled);
-    btnTrim.active = isTrimmed;
-    btnTrim.label = label;
-    btnTrim.setTooltip(showRestore ? "Restore trimmed bars"
-                      : hasNewEmpties ? "Trim all empty measures"
-                                      : "No empty measures to trim");
-    btnTrim.repaint();
     if (onTrimStateChanged)
         onTrimStateChanged(isTrimmed, enabled, label);
 }
@@ -553,6 +587,10 @@ void PianoRollEditor::refreshControls()
     btnFold.setEnabled(hasClip && !foldPitches.empty());
     btnFold.active = folded;
     btnFold.repaint();
+    const int scaleRoot = edit.root >= 0 ? edit.root : (hasClip ? clip.root : -1);
+    btnScale.setEnabled(hasClip && scaleRoot >= 0);
+    btnScale.active = scaleFiltered;
+    btnScale.repaint();
     btnRevertNotes.setEnabled(hasClip && hasNoteEdits());
 
     // Edit badges / selection chip removed from the toolbar chrome.
@@ -876,11 +914,11 @@ void PianoRollEditor::selectPitch(int pitch, bool additive)
 
 int PianoRollEditor::rowForPitch(int pitch) const
 {
-    if (!folded)
+    if (!rowsCollapsed())
         return 127 - juce::jlimit(0, 127, pitch);
     if (foldPitches.empty())
         return 0;
-    // Nearest note-bearing row (exact for resolved pitches).
+    // Nearest note-bearing / scale row (exact for resolved pitches).
     auto it = std::lower_bound(foldPitches.begin(), foldPitches.end(), pitch);
     if (it == foldPitches.end()) --it;
     const int idx = (int) std::distance(foldPitches.begin(), it);
@@ -889,7 +927,7 @@ int PianoRollEditor::rowForPitch(int pitch) const
 
 int PianoRollEditor::pitchForRow(int row) const
 {
-    if (!folded)
+    if (!rowsCollapsed())
         return 127 - juce::jlimit(0, 127, row);
     if (foldPitches.empty())
         return 60;
@@ -1062,7 +1100,7 @@ void PianoRollEditor::zoomToClip()
         return;
     }
 
-    if (folded)
+    if (rowsCollapsed())
     {
         // Note rows, plus one empty lane above the highest and one below the lowest.
         const int span = juce::jmax(1, (int) foldPitches.size()) + 2;
@@ -1127,7 +1165,7 @@ void PianoRollEditor::zoomRowsAround(float factor, float contentY)
 
     const int visH = juce::jmax(32, rollViewport.getMaximumVisibleHeight());
     // Most zoomed-in: exactly one octave fills the viewport.
-    const float maxRowH = folded ? ((float) visH / 12.0f) * 0.5f : ((float) visH / 12.0f);
+    const float maxRowH = rowsCollapsed() ? ((float) visH / 12.0f) * 0.5f : ((float) visH / 12.0f);
     rowH = juce::jlimit(kMinRowH, juce::jmin(kMaxRowH, maxRowH), rowH * factor);
     updateRollSize();
 
@@ -1243,15 +1281,6 @@ void PianoRollEditor::paint(juce::Graphics& g)
     g.setColour(ds::line());
     g.fillRect(0, toolbarHeight() - 1, getWidth(), 1);
 
-    auto t = titleBounds;
-    const juce::String title = "Piano Roll";
-    const auto titleFont = uiFontFixed(12.0f, true);
-    g.setFont(titleFont);
-    g.setColour(ds::ink());
-    const int tw = juce::jmin(t.getWidth(),
-                              (int) std::ceil(juce::GlyphArrangement::getStringWidth(titleFont, title)) + 1);
-    g.drawText(title, t.removeFromLeft(tw), juce::Justification::centredLeft, false);
-
     if (recordingVisual)
     {
         const juce::String status = "Recording " + juce::String::fromUTF8("\u00b7")
@@ -1265,37 +1294,42 @@ void PianoRollEditor::paint(juce::Graphics& g)
         g.drawText(status, sb, juce::Justification::centredLeft, true);
     }
 
-    g.setFont(uiFontFixed(11.0f, false));
-    g.setColour(ds::inkMuted());
+    // Left label for the View length popup.
     if (!zoomLabelBounds.isEmpty())
-        g.drawText("Scale", zoomLabelBounds, juce::Justification::centredRight, false);
+    {
+        g.setFont(uiFontFixed(11.0f, false));
+        g.setColour(ds::inkMuted());
+        g.drawText("View", zoomLabelBounds, juce::Justification::centredLeft, false);
+    }
 }
 
 void PianoRollEditor::layoutHeaderTools()
 {
-    // Header (right to left): Trim · Scale [bars zoom] · Fold
+    // Header: View [length] on the left · Fold · Scale on the right.
     auto bar = titleBounds;
     const int ctrlH = metrics::chromeIconButton();
     btnFold.setVisible(true);
+    btnScale.setVisible(true);
     barsZoomPopup.setVisible(true);
-    btnTrim.setVisible(true);
     divisionPopup.setVisible(false);
     btnRevertNotes.setVisible(false);
     zoomLabelBounds = gridLabelBounds = {};
 
-    auto place = [&bar, ctrlH](juce::Component& c, int w)
+    auto placeRight = [&bar, ctrlH](juce::Component& c, int w)
     {
         c.setBounds(bar.removeFromRight(w).withSizeKeepingCentre(w, ctrlH));
         bar.removeFromRight(4);
     };
-    const int trimW = btnTrim.idealWidth();
-    const int zoomW = juce::jmax(56, barsZoomPopup.idealWidth() - 8);
+    const int scaleW = btnScale.idealWidth();
     const int foldW = btnFold.idealWidth();
-    place(btnTrim, trimW);
-    place(barsZoomPopup, zoomW);
-    zoomLabelBounds = bar.removeFromRight(36);
-    bar.removeFromRight(4);
-    place(btnFold, foldW);
+    placeRight(btnScale, scaleW);
+    placeRight(btnFold, foldW);
+
+    const int zoomW = juce::jmax(56, barsZoomPopup.idealWidth() - 8);
+    const int labelW = 32;
+    zoomLabelBounds = bar.removeFromLeft(labelW);
+    bar.removeFromLeft(4);
+    barsZoomPopup.setBounds(bar.removeFromLeft(zoomW).withSizeKeepingCentre(zoomW, ctrlH));
     titleBounds = bar;
 }
 
@@ -1390,8 +1424,12 @@ void PianoRollEditor::RollContent::paint(juce::Graphics& g)
 
     // MIDI notes use --note; playhead uses --acc (§1 / §6).
     const bool draggingNotes = drag == Drag::Note;
+    const int scaleRoot = ed.edit.root >= 0 ? ed.edit.root : ed.clip.root;
     for (const auto& n : ed.grooved)
     {
+        if (ed.scaleFiltered && scaleRoot >= 0
+            && !pitchInScale(n.pitch, scaleRoot, ed.edit.mode))
+            continue;
         const bool isSelected = ed.selection.count(n.id) > 0;
         const bool inDrag = draggingNotes
             && (n.id == dragNoteId || (ed.selection.count(dragNoteId) > 0 && isSelected));
@@ -1727,7 +1765,7 @@ void PianoRollEditor::KeyGutter::paint(juce::Graphics& g)
     {
         const int pitch = ed.pitchForRow(row);
         const bool isC = (pitch % 12 == 0);
-        if (!(ed.folded || isC) || rowH < 7.0f) continue;
+        if (!(ed.rowsCollapsed() || isC) || rowH < 7.0f) continue;
 
         const float y = (float) row * rowH - (float) viewY;
         const float fontPt = juce::jlimit(7.0f, 11.0f, rowH * 0.72f);

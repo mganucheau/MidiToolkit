@@ -7,6 +7,8 @@ using namespace fx;
 EffectsInspector::EffectsInspector()
     : tempoRow("Tempo", tempoToggle)
     , extendRow("Extend", extendPopup)
+    , reverseRow("Reverse", reverseSwitch)
+    , invertRow("Invert", invertSwitch)
     , quantizeStrengthSl("Strength", 0, 100, 0, false)
     , swing("Amount", 0, 100, 0, false)
     , pocket("Pocket", -100, 100, 0, true)
@@ -52,7 +54,7 @@ EffectsInspector::EffectsInspector()
     , modeRow("Mode", modePopup)
     , pitchRangeSl("Range", 0, 127, 0, 127)
     , filterTypeRow("Filter Type", filterTypePopup)
-    , trimRow("Trim empty measures", trimSwitch)
+    , trimRow("Trim", trimSwitch)
     , fitRow("Fit to Scale", fitSwitch)
     , mapRow("Map to Root", mapSwitch)
 {
@@ -87,8 +89,26 @@ EffectsInspector::EffectsInspector()
     addAndMakeVisible(btnEffectsLock);
 
     trimSwitch.setComponentID("btnTrim");
-    trimSwitch.setTooltip("Remove empty bars from the start and end of the clip");
+    trimSwitch.setTooltip("Remove empty bars from the clip");
     trimSwitch.onClick = [this] { if (onTrimClicked) onTrimClicked(); };
+
+    reverseSwitch.setComponentID("btnReverse");
+    reverseSwitch.setTooltip("Play the clip backwards in time");
+    reverseSwitch.onClick = [this]
+    {
+        edit.reverse = reverseSwitch.getToggleState();
+        notifyEdit();
+        refreshDirtySections();
+    };
+
+    invertSwitch.setComponentID("btnInvert");
+    invertSwitch.setTooltip("Mirror pitches around the midpoint of the clip");
+    invertSwitch.onClick = [this]
+    {
+        edit.invert = invertSwitch.getToggleState();
+        notifyEdit();
+        refreshDirtySections();
+    };
 
     // Hover tips for inspector controls (shown when Settings → Show Tooltips is on).
     swing.setTooltip("Delay offbeat notes for a swung feel");
@@ -367,8 +387,10 @@ EffectsInspector::EffectsInspector()
     };
 
     // Dirty predicates — when a section is folded, only dirty rows stay visible.
-    playback.addRow(&tempoRow, kRowMinH, [this] { return std::abs(bpmMultiplier - 1.0) > 1.0e-6; });
     playback.addRow(&trimRow, kRowMinH, [this] { return trimSwitch.getToggleState(); });
+    playback.addRow(&reverseRow, kRowMinH, [this] { return edit.reverse; });
+    playback.addRow(&invertRow, kRowMinH, [this] { return edit.invert; });
+    playback.addRow(&tempoRow, kRowMinH, [this] { return std::abs(bpmMultiplier - 1.0) > 1.0e-6; });
     playback.addRow(&extendRow, kRowMinH, [this] { return edit.extendMult > 1; });
 
     timing.addRow(&quantizeBlock, [this] { return quantizeBlock.idealHeight(); }, [this] {
@@ -411,9 +433,9 @@ EffectsInspector::EffectsInspector()
     pitchSec.addRow(&outsideRangeRow, kRowMinH, [this] { return edit.octaveRange != 0; });
     pitchSec.addRow(&pitchDividerA, [this] { return pitchDividerA.idealHeight(); });
     pitchSec.addRow(&keyGrid, [this] { return keyGrid.idealHeight(); },
-                    [this] { return edit.root >= 0 && (edit.fitScale || edit.mapToRoot); });
+                    [this] { return edit.root >= 0; });
     pitchSec.addRow(&modeRow, kRowMinH,
-                    [this] { return edit.root >= 0 && (edit.fitScale || edit.mapToRoot); });
+                    [this] { return edit.root >= 0; });
     pitchSec.addRow(&fitRow, kRowMinH, [this] { return edit.fitScale; });
     pitchSec.addRow(&mapRow, kRowMinH, [this] { return edit.mapToRoot; });
     pitchSec.addRow(&pitchDividerB, [this] { return pitchDividerB.idealHeight(); });
@@ -700,6 +722,8 @@ EffectsInspector::EffectsInspector()
     wireGeneratorFold(chordsSec);
     wireGeneratorFold(bassSec);
     wireGeneratorFold(drumSec);
+    for (auto* gen : { &arpSec, &melodySec, &chordsSec, &bassSec, &drumSec })
+        gen->showHeaderChrome = false;
 
     playback.onReset = [this] { resetPlaybackSection(); };
     playback.onLockToggle = [this] { toggleSectionLock(toolkitLock::Playback); };
@@ -740,16 +764,23 @@ EffectsInspector::EffectsInspector()
         sec->onDragMove = [this](int screenY) { moveSectionDrag(screenY); };
         sec->onDragEnd = [this] { endSectionDrag(); };
     }
-    // Screenshot default fold: Timing + Performance open.
+    // Default fold: Playback + Timing + Performance open so Trim/Reverse/Invert are findable.
+    playback.setOpen(true);
     timing.setOpen(true);
     performance.setOpen(true);
     arpSec.setOpen(true);
 
-    // "Changed": fold every section down to its changed rows (the default way of working).
+    // "Hide Unused": fold every section down to its changed rows (the default way of working).
     btnChanged.setComponentID("btnToolkitChanged");
     btnChanged.setWantsKeyboardFocus(false);
-    btnChanged.setTooltip("Fold sections to the controls you have changed");
-    btnChanged.onClick = [this] { foldAllSections(); if (onActivated) onActivated(); };
+    btnChanged.setTooltip("Hide unused controls — show only what you have changed");
+    btnChanged.onClick = [this]
+    {
+        if (externalGeneratorHost == nullptr && paneTab != 1)
+            setPaneTab(1);
+        foldAllSections();
+        if (onActivated) onActivated();
+    };
     addAndMakeVisible(btnChanged);
 
     setGroove(GrooveParams{}, juce::dontSendNotification);
@@ -779,6 +810,8 @@ void EffectsInspector::resetPlaybackSection()
 {
     setBpmMultiplier(1.0, juce::dontSendNotification);
     edit.extendMult = 1;
+    edit.reverse = false;
+    edit.invert = false;
     setEdit(edit, juce::dontSendNotification);
     if (onBpmMultiplierChanged) onBpmMultiplierChanged(bpmMultiplier);
     notifyEdit();
@@ -1136,6 +1169,8 @@ void EffectsInspector::setEdit(const ClipEdit& e, juce::NotificationType)
         else if (e.extendMult == 8) extIdx = 3;
         extendPopup.setIndex(extIdx, juce::dontSendNotification);
     }
+    reverseSwitch.setToggleState(e.reverse, juce::dontSendNotification);
+    invertSwitch.setToggleState(e.invert, juce::dontSendNotification);
     keyGrid.setCandidateMask(candidateKeyMask);
     keyGrid.setSelectedIndex(e.root >= 0 ? e.root : 0, juce::dontSendNotification);
     modePopup.setIndex((int) e.mode, juce::dontSendNotification);
@@ -1219,14 +1254,7 @@ void EffectsInspector::layoutSections()
             place(drumSec, false);
         }
         for (auto* sec : sectionOrder)
-        {
-            if (liveStream && sec == &playback)
-            {
-                place(*sec, false);
-                continue;
-            }
             place(*sec, true);
-        }
     }
     y += pad - gap;
     body.setSize(body.getWidth(), juce::jmax(y, viewport.getMaximumVisibleHeight()));
@@ -1349,10 +1377,7 @@ int EffectsInspector::contentHeight() const
     else
     {
         for (auto* sec : sectionOrder)
-        {
-            if (liveStream && sec == &playback) continue;
             y += sec->idealHeight() + gap;
-        }
     }
     return y + pad - gap;
 }
@@ -1429,7 +1454,7 @@ bool EffectsInspector::anySectionOpen() const
 {
     if (paneTab == 0)
         return arpSec.open || melodySec.open || chordsSec.open || bassSec.open || drumSec.open;
-    if (!liveStream && playback.open) return true;
+    if (playback.open) return true;
     return timing.open || performance.open || pitchSec.open || effectsSec.open;
 }
 
@@ -1462,35 +1487,44 @@ void EffectsInspector::resized()
     const int headerH = metrics::paneHeaderH();
     auto header = r.removeFromTop(headerH).reduced(metrics::scaled(8), 0).withTrimmedBottom(1);
     const int ctl = metrics::chromeIconButton();
-    btnReset.setBounds(header.removeFromRight(ctl).withSizeKeepingCentre(ctl, ctl));
-    header.removeFromRight(metrics::scaled(4));
+    // Right → left: Reset · Lock. Hide Unused sits on the left (replaces Effects title).
     btnEffectsLock.setBounds(header.removeFromRight(ctl).withSizeKeepingCentre(ctl, ctl));
     header.removeFromRight(metrics::scaled(4));
-    const int cw = btnChanged.idealWidth();
-    btnChanged.setBounds(header.removeFromRight(cw).withSizeKeepingCentre(cw, ctl));
+    btnReset.setBounds(header.removeFromRight(ctl).withSizeKeepingCentre(ctl, ctl));
     header.removeFromRight(metrics::scaled(8));
+    const int cw = btnChanged.idealWidth();
     if (externalGeneratorHost != nullptr)
     {
         generatorsTabBounds = {};
         effectsTabBounds = {};
+        btnChanged.setBounds(header.removeFromLeft(cw).withSizeKeepingCentre(cw, ctl));
     }
     else
     {
         const int genW = juce::roundToInt(juce::GlyphArrangement::getStringWidth(uiFontFixed(12.0f, true), "Generators")) + 4;
-        const int fxW = juce::roundToInt(juce::GlyphArrangement::getStringWidth(uiFontFixed(12.0f, true), "Effects")) + 4;
         generatorsTabBounds = header.removeFromLeft(genW).withSizeKeepingCentre(genW, ctl);
         header.removeFromLeft(metrics::scaled(10));
-        effectsTabBounds = header.removeFromLeft(fxW).withSizeKeepingCentre(fxW, ctl);
+        effectsTabBounds = {};
+        btnChanged.setBounds(header.removeFromLeft(cw).withSizeKeepingCentre(cw, ctl));
     }
     updateToolkitFoldBounds();
 
     viewport.setBounds(r);
     body.setSize(juce::jmax(1, viewport.getMaximumVisibleWidth()), body.getHeight());
 
-    auto fitSelect = [](fx::FlatPopup& p, fx::InlineRow& row)
+    // Match octave-range / outside-range width (octave stepper ideal).
+    const int stepW = octaveRow.stepper.idealWidth();
+    // Mode / Sustain / Articulation need room for longer labels — half the section.
+    const int halfW = juce::jmax(stepW, (body.getWidth() - kContentPadX - kContentPadR) / 2);
+    auto fitSelect = [stepW](fx::FlatPopup& p, fx::InlineRow& row)
     {
-        p.setSize(kSelectW, kControlH);
-        row.setControlWidth(kSelectW);
+        p.setSize(stepW, kControlH);
+        row.setControlWidth(stepW);
+    };
+    auto fitWide = [halfW](fx::FlatPopup& p, fx::InlineRow& row)
+    {
+        p.setSize(halfW, kControlH);
+        row.setControlWidth(halfW);
     };
     {
         const int tempoW = kSelectHalfW;
@@ -1498,20 +1532,14 @@ void EffectsInspector::resized()
         tempoRow.setControlWidth(tempoW);
     }
     trimRow.setControlWidth(trimSwitch.idealWidth());
+    reverseRow.setControlWidth(reverseSwitch.idealWidth());
+    invertRow.setControlWidth(invertSwitch.idealWidth());
     fitSelect(extendPopup, extendRow);
-    fitSelect(sustainPopup, sustainRow);
+    fitWide(sustainPopup, sustainRow);
     fitSelect(octaveRangePopup, octaveRangeRow);
     fitSelect(outsideRangePopup, outsideRangeRow);
-    {
-        // Match the octave stepper so Off / Fold line up with - 0 +.
-        const int stepW = octaveRow.stepper.idealWidth();
-        octaveRangePopup.setSize(stepW, kControlH);
-        octaveRangeRow.setControlWidth(stepW);
-        outsideRangePopup.setSize(stepW, kControlH);
-        outsideRangeRow.setControlWidth(stepW);
-    }
-    fitSelect(articulationPopup, articulationRow);
-    fitSelect(modePopup, modeRow);
+    fitWide(articulationPopup, articulationRow);
+    fitWide(modePopup, modeRow);
     fitSelect(filterTypePopup, filterTypeRow);
     fitSelect(arpDirectionPopup, arpDirectionRow);
     fitSelect(arpShapePopup, arpShapeRow);
@@ -1526,6 +1554,9 @@ void EffectsInspector::resized()
     fitSelect(chordRhythmPopup, chordRhythmRow);
     fitSelect(bassMotionPopup, bassMotionRow);
     fitSelect(drumStylePopup, drumStyleRow);
+    quantizeBlock.setControlWidth(stepW);
+    swingBlock.setControlWidth(stepW);
+    delayBlock.setControlWidth(stepW);
     arpGenerateRow.setControlWidth(arpGenerateBtn.idealWidth());
     arpInputRow.setControlWidth(arpInputSwitch.idealWidth());
     melodyGenerateRow.setControlWidth(melodyGenerateBtn.idealWidth());
@@ -1558,16 +1589,12 @@ void EffectsInspector::paint(juce::Graphics& g)
     g.fillRect(header);
     g.setColour(ds::line());
     g.fillRect(header.getX(), header.getBottom() - 1, header.getWidth(), 1);
+    // Column rule on the left edge of the Effects header.
+    g.fillRect(0, header.getY(), 1, header.getHeight());
 
-    auto titleArea = header.reduced(metrics::scaled(8), 0);
-    titleArea.setRight(btnChanged.getX() - 4);
     g.setFont(uiFontFixed(12.0f, true));
     if (externalGeneratorHost != nullptr)
-    {
-        g.setColour(ds::ink());
-        g.drawText("Effects", titleArea, juce::Justification::centredLeft, true);
         return;
-    }
 
     auto drawTab = [&](juce::Rectangle<int> r, const juce::String& label, bool active, bool enabled)
     {
@@ -1580,7 +1607,7 @@ void EffectsInspector::paint(juce::Graphics& g)
         }
     };
     drawTab(generatorsTabBounds, "Generators", paneTab == 0, generatorsEnabled);
-    drawTab(effectsTabBounds, "Effects", paneTab == 1, true);
+    // Effects title is replaced by the Hide Unused control.
 }
 
 void EffectsInspector::mouseDown(const juce::MouseEvent& e)
@@ -1595,12 +1622,6 @@ void EffectsInspector::mouseDown(const juce::MouseEvent& e)
         {
             if (generatorsEnabled)
                 setPaneTab(0);
-            if (onActivated) onActivated();
-            return;
-        }
-        if (effectsTabBounds.expanded(4, 4).contains(local))
-        {
-            setPaneTab(1);
             if (onActivated) onActivated();
             return;
         }

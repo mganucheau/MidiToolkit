@@ -341,7 +341,7 @@ TEST_CASE("Locked trim stays on for a clip with no empty bars", "[editorui]")
     dir.deleteRecursively();
 }
 
-TEST_CASE("Passthrough hides playback, complexity, and variations", "[editorui]")
+TEST_CASE("Passthrough keeps Playback and hides clip-only rows", "[editorui]")
 {
     juce::ScopedJuceInitialiser_GUI gui;
     EffectsInspector fx;
@@ -352,7 +352,8 @@ TEST_CASE("Passthrough hides playback, complexity, and variations", "[editorui]"
     REQUIRE(fx.playbackSection().isVisible());
 
     fx.setLiveStreamMode(true);
-    CHECK_FALSE(fx.playbackSection().isVisible());
+    // Trim / Reverse / Invert stay available; complexity & variations need a clip.
+    CHECK(fx.playbackSection().isVisible());
     CHECK(fx.effectsSection().idealHeight() < effectsH);
     CHECK(fx.contentHeight() > 0);
 

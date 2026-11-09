@@ -344,7 +344,7 @@ std::vector<double> anchorOnsets(const std::vector<RollNote>& notes, ClipKind ki
             if (isDrumAnchor(n))
                 out.push_back(n.start);
         }
-        else if (kind == ClipKind::Piano)
+        else if (kind == ClipKind::Keys)
         {
             // Chord attack times (cluster starts).
             bool isFirst = true;
@@ -375,7 +375,7 @@ bool anchorsPreserved(const std::vector<double>& before, const std::vector<RollN
         return true;
     const auto afterAnchors = anchorOnsets(after, kind);
     // Piano syncopation may push attacks by a 16th; drums keep tighter anchors.
-    const double tol = kind == ClipKind::Piano ? 1.5 : 0.35;
+    const double tol = kind == ClipKind::Keys ? 1.5 : 0.35;
     int matched = 0;
     for (double t : before)
     {
@@ -504,7 +504,7 @@ double directionScore(const std::vector<RollNote>& notes, ClipKind kind, bool wa
     double s = 0.0;
     if (kind == ClipKind::Drums)
         s = drumLayerScore(notes);
-    else if (kind == ClipKind::Piano)
+    else if (kind == ClipKind::Keys)
         s = pianoComplexityScore(notes);
     else
         s = lineComplexityScore(notes);
@@ -858,7 +858,7 @@ std::vector<RollNote> applyComplexityMorph(std::vector<RollNote> notes,
         std::vector<RollNote> cand;
         if (kind == ClipKind::Drums)
             cand = morphDrumsOnce(notes, amt, simplify, 100 + c * 17);
-        else if (kind == ClipKind::Piano)
+        else if (kind == ClipKind::Keys)
             cand = morphPianoOnce(notes, amt, simplify, 200 + c * 19, rootPc, mode);
         else
             cand = morphLineOnce(notes, amt, simplify, 300 + c * 23, rootPc, mode);
@@ -867,7 +867,7 @@ std::vector<RollNote> applyComplexityMorph(std::vector<RollNote> notes,
             continue;
         if (kind == ClipKind::Drums && !noNewNonDrumPitches(notes, cand))
             continue;
-        if (kind == ClipKind::Piano && !noNewOutOfScalePitches(notes, cand, rootPc, mode))
+        if (kind == ClipKind::Keys && !noNewOutOfScalePitches(notes, cand, rootPc, mode))
             continue;
         if (!anchorsPreserved(anchors, cand, kind))
             continue;
@@ -931,7 +931,7 @@ std::vector<RollNote> applyMusicalVariation(std::vector<RollNote> notes, int var
                 cand = morphDrumsOnce(cand, 0.25 + 0.04 * (double) var, false, seed);
             }
         }
-        else if (kind == ClipKind::Piano)
+        else if (kind == ClipKind::Keys)
         {
             auto groups = groupChords(cand);
             for (size_t gi = 0; gi < groups.size(); ++gi)
@@ -985,7 +985,7 @@ std::vector<RollNote> applyMusicalVariation(std::vector<RollNote> notes, int var
             continue;
         if (kind == ClipKind::Drums && !noNewNonDrumPitches(notes, cand))
             continue;
-        if (kind == ClipKind::Piano && !noNewOutOfScalePitches(notes, cand, rootPc, mode))
+        if (kind == ClipKind::Keys && !noNewOutOfScalePitches(notes, cand, rootPc, mode))
             continue;
         if (!anchorsPreserved(anchors, cand, kind))
             continue;

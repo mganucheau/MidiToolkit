@@ -225,8 +225,9 @@ TransportBar::TransportBar()
     };
     addAndMakeVisible(btnSync);
 
-    prep(btnPassthrough);
-    btnPassthrough.setTooltip("Through: live MIDI input runs through the Toolkit (P)");
+    btnPassthrough.setComponentID("btnPassthrough");
+    btnPassthrough.setWantsKeyboardFocus(false);
+    btnPassthrough.setTooltip("Passthrough: show only the Effects column (P)");
     btnPassthrough.onClick = [this] { if (onTogglePassthrough) onTogglePassthrough(); };
     addAndMakeVisible(btnPassthrough);
 
@@ -243,7 +244,7 @@ TransportBar::TransportBar()
     addAndMakeVisible(btnEditor);
 
     prep(btnEffects);
-    btnEffects.setTooltip("Toolkit (F)");
+    btnEffects.setTooltip("Effects (F)");
     btnEffects.onClick = [this] { if (onToggleEffects) onToggleEffects(); };
     addAndMakeVisible(btnEffects);
 
@@ -331,6 +332,7 @@ void TransportBar::setPassthrough(bool on)
 {
     passthrough = on;
     btnPassthrough.active = on;
+    btnPassthrough.repaint();
     resized();
     repaint();
 }
@@ -340,6 +342,14 @@ void TransportBar::setPassthroughLocked(bool locked)
     if (passthroughLocked == locked)
         return;
     passthroughLocked = locked;
+    resized();
+}
+
+void TransportBar::setTransportControlsVisible(bool visible)
+{
+    if (transportControlsVisible == visible)
+        return;
+    transportControlsVisible = visible;
     resized();
 }
 
@@ -561,16 +571,15 @@ void TransportBar::mouseDoubleClick(const juce::MouseEvent& e)
 
 void TransportBar::applyHeaderCaptions(bool withText)
 {
-    // Sync and Through are icon toggles; the panel toggles carry words when there is room.
     btnSync.caption = {};
-    btnPassthrough.caption = {};
     btnEditor.caption = withText ? "Piano Roll" : juce::String();
-    btnEffects.caption = withText ? "Toolkit" : juce::String();
+    btnEffects.caption = withText ? "Effects" : juce::String();
+    btnPassthrough.label = withText ? "Passthrough" : "P";
 }
 
 void TransportBar::resized()
 {
-    // [lights] Wordmark · BPM · Play/Stop · Rec · Sync · Through ······ Drag · Piano Roll · Toolkit
+    // [lights] Wordmark · BPM · Play/Stop · Rec · Sync ······ Passthrough · Piano Roll · Effects · Settings
     const int h = getHeight();
     const float sc = juce::jmax(0.5f, contentScale());
     const int btn = juce::jmin(h - 8, juce::roundToInt((float) kBtnH * sc));
@@ -584,21 +593,25 @@ void TransportBar::resized()
                                                                    : leftPad;
 
     btnStop.setVisible(false);
-    btnEffects.setVisible(!passthrough);
+    btnEffects.setVisible(true);
     btnDragToDaw.setVisible(false);   // Drag lives in the preview header (Groove)
-    btnEditor.setVisible(true);   // in Through it opens the input roll
-    btnPassthrough.setVisible(!passthroughLocked);
+    btnEditor.setVisible(true);
+    // Passthrough appears left of Piano Roll only while Effects is open.
+    btnPassthrough.setVisible(effectsOpen);
+    btnPlay.setVisible(transportControlsVisible);
+    btnRecord.setVisible(transportControlsVisible);
 
     const int pillW = statusPill.idealWidth();
-    const int throughW = btnPassthrough.isVisible() ? tight + btn : 0;
-    const int leftW = pillW + groupGap + btn + tight + btn + groupGap + btn + throughW;
+    const int playRecW = transportControlsVisible ? (btn + tight + btn + groupGap) : 0;
+    const int leftW = pillW + groupGap + playRecW + btn;
     const int chipW = btnDragToDaw.isVisible() ? btnDragToDaw.idealWidth() : 0;
 
     auto rightWidth = [&]()
     {
         int w = btn + groupGap;   // settings
-        if (btnEditor.isVisible())  w += btnEditor.captionWidth();
-        if (btnEffects.isVisible()) w += tight + btnEffects.captionWidth();
+        if (btnEffects.isVisible()) w += btnEffects.captionWidth();
+        if (btnEditor.isVisible())  w += tight + btnEditor.captionWidth();
+        if (btnPassthrough.isVisible()) w += tight + btnPassthrough.idealWidth();
         if (chipW > 0)              w += groupGap + chipW;
         return w;
     };
@@ -628,13 +641,17 @@ void TransportBar::resized()
     int x = lightsZoneW + (titleW > 0 ? titleW + groupGap : 0);
     statusPill.setVisible(true);
     statusPill.setBounds(x, y, pillW, btn);           x += pillW + groupGap;
-    btnPlay.setBounds(x, y, btn, btn);                x += btn + tight;
-    btnRecord.setBounds(x, y, btn, btn);              x += btn + groupGap;
-    btnSync.setBounds(x, y, btn, btn);                x += btn + (btnPassthrough.isVisible() ? tight : 0);
-    if (btnPassthrough.isVisible())
-        btnPassthrough.setBounds(x, y, btn, btn);
+    if (transportControlsVisible)
+    {
+        btnPlay.setBounds(x, y, btn, btn);            x += btn + tight;
+        btnRecord.setBounds(x, y, btn, btn);          x += btn + groupGap;
+    }
     else
-        btnPassthrough.setBounds({});
+    {
+        btnPlay.setBounds({});
+        btnRecord.setBounds({});
+    }
+    btnSync.setBounds(x, y, btn, btn);
     transportGroupBounds = {};
     dividerBounds = {};
 
@@ -651,7 +668,17 @@ void TransportBar::resized()
     {
         const int w = btnEditor.captionWidth();
         btnEditor.setBounds(xr - w, y, w, btn);
+        xr -= w + (btnPassthrough.isVisible() ? tight : groupGap);
+    }
+    if (btnPassthrough.isVisible())
+    {
+        const int w = btnPassthrough.idealWidth();
+        btnPassthrough.setBounds(xr - w, y, w, btn);
         xr -= w + groupGap;
+    }
+    else
+    {
+        btnPassthrough.setBounds({});
     }
     if (chipW > 0)
         btnDragToDaw.setBounds(xr - chipW, y, chipW, btn);

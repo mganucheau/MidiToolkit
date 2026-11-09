@@ -247,6 +247,41 @@ TEST_CASE("resolveClip pitch range folds notes into window", "[editmodel]")
     CHECK(r.notes[1].pitch <= 72);
 }
 
+TEST_CASE("resolveClip reverse flips note starts within the clip", "[editmodel]")
+{
+    // 1 bar = 16 steps; note at 0 len 4 → start 12; note at 8 len 4 → start 4.
+    auto clip = makeClip({ { 0, 60, 0.0, 4.0 }, { 1, 64, 8.0, 4.0 } }, 1);
+    ClipEdit e;
+    e.reverse = true;
+    const auto r = resolveClip(clip, e);
+    REQUIRE(r.notes.size() == 2);
+    CHECK(r.notes[0].start == Catch::Approx(12.0));
+    CHECK(r.notes[1].start == Catch::Approx(4.0));
+}
+
+TEST_CASE("resolveClip invert mirrors pitches around the midpoint", "[editmodel]")
+{
+    auto clip = makeClip({ { 0, 60, 0.0, 2.0 }, { 1, 64, 2.0, 2.0 } }, 1);
+    ClipEdit e;
+    e.invert = true;
+    const auto r = resolveClip(clip, e);
+    REQUIRE(r.notes.size() == 2);
+    // Midpoint of 60..64 is 62; 60→64, 64→60.
+    CHECK(r.notes[0].pitch == 64);
+    CHECK(r.notes[1].pitch == 60);
+}
+
+TEST_CASE("editIsClean detects reverse and invert", "[editmodel]")
+{
+    ClipEdit e;
+    CHECK(editIsClean(e));
+    e.reverse = true;
+    CHECK_FALSE(editIsClean(e));
+    e.reverse = false;
+    e.invert = true;
+    CHECK_FALSE(editIsClean(e));
+}
+
 TEST_CASE("resolveClip map-to-root transposes by nearest direction", "[editmodel]")
 {
     // Clip root G (7), target C (0): d = (0-7) = -7 -> wraps to +5.
@@ -600,7 +635,7 @@ TEST_CASE("piano with one channel-10 click is not Drums", "[editmodel]")
         { 37, 40, 0.0, 0.1, 10 }, // stray drum click on ch 10
     }, 4.0);
     const auto s = makeStepClip(clip);
-    CHECK(s.kind == ClipKind::Piano);
+    CHECK(s.kind == ClipKind::Keys);
     CHECK(s.hasDrumContent);
 }
 
@@ -615,7 +650,7 @@ TEST_CASE("low chordal clip is Piano not Bass", "[editmodel]")
         { 43, 85, 2.0, 2.0, 1 },
     }, 4.0);
     const auto s = makeStepClip(clip);
-    CHECK(s.kind == ClipKind::Piano);
+    CHECK(s.kind == ClipKind::Keys);
 }
 
 TEST_CASE("drum complexity rises with hat layer not pitch-class count", "[editmodel]")
@@ -642,22 +677,41 @@ TEST_CASE("drum complexity rises with hat layer not pitch-class count", "[editmo
     CHECK(b.complexity > a.complexity);
 }
 
-TEST_CASE("filename keywords hint Bass Drums and Piano", "[editmodel]")
+TEST_CASE("filename keywords hint Bass Drums Keys Lead and Arp", "[editmodel]")
 {
     CHECK(hintKindFromFileName("BA_Funky_01.mid") == ClipKind::Bass);
     CHECK(hintKindFromFileName("Bassline_120_Cmin.mid") == ClipKind::Bass);
     CHECK(hintKindFromFileName("Deep_Bass_Groove.mid") == ClipKind::Bass);
+    CHECK(hintKindFromFileName("DSS_Bass_Cmin_01.mid") == ClipKind::Bass);
+    CHECK(hintKindFromFileName("DSS_Bass_05_F#.mid") == ClipKind::Bass);
+    CHECK(hintKindFromFileName("Synth Bass.mid") == ClipKind::Bass);
+    CHECK(hintKindFromFileName("Synth_Bass_Cmin.mid") == ClipKind::Bass);
+    CHECK(hintKindFromFileName("808_Sub_C.mid") == ClipKind::Bass);
+    CHECK(hintKindFromFileName("DSS_808_01.mid") == ClipKind::Bass);
+    {
+        StepClip stub;
+        stub.name = "DSS_Bass_05_F#";
+        stub.filePath = "/packs/DSS_Bass_05_F#.mid";
+        stub.kind = ClipKind::Lead;
+        CHECK(applyFilenameKindTag(stub));
+        CHECK(stub.kind == ClipKind::Bass);
+    }
     CHECK(hintKindFromFileName("Kit_01_BoomBap.mid") == ClipKind::Drums);
     CHECK(hintKindFromFileName("Drums_Loop_A.mid") == ClipKind::Drums);
-    CHECK(hintKindFromFileName("Keys_Rhodes_Pad.mid") == ClipKind::Piano);
-    CHECK(hintKindFromFileName("Piano_Chords_Em.mid") == ClipKind::Piano);
+    CHECK(hintKindFromFileName("Keys_Rhodes_Pad.mid") == ClipKind::Keys);
+    CHECK(hintKindFromFileName("Piano_Chords_Em.mid") == ClipKind::Keys);
+    CHECK(hintKindFromFileName("KY_Chords_01.mid") == ClipKind::Keys);
     CHECK(hintKindFromFileName("Lead_Synth_Hook.mid") == ClipKind::Lead);
-    CHECK(hintKindFromFileName("Arp_Cmaj_120.mid") == ClipKind::Lead);
     CHECK(hintKindFromFileName("LD_Pluck_01.mid") == ClipKind::Lead);
+    CHECK(hintKindFromFileName("SY_Pluck_A.mid") == ClipKind::Lead);
+    CHECK(hintKindFromFileName("Arp_Cmaj_120.mid") == ClipKind::Arp);
+    CHECK(hintKindFromFileName("SEQ_Up_01.mid") == ClipKind::Arp);
     CHECK(hintKindFromFileName("Hats_16th_Loop.mid") == ClipKind::Drums);
     CHECK(hintKindFromFileName("HH_Closed_01.mid") == ClipKind::Drums);
+    CHECK(hintKindFromFileName("SN_Rim_01.mid") == ClipKind::Drums);
     CHECK(hintKindFromFileName("Groove_A_120.mid") == ClipKind::Drums);
     CHECK(hintKindFromFileName("Top_Loop_01.mid") == ClipKind::Drums);
+    CHECK(kindKeywordFromFileName("Untitled_01.mid") == std::nullopt);
 }
 
 TEST_CASE("bass filename wins over ambiguous mid register mono line", "[editmodel]")

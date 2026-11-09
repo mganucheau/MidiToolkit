@@ -363,7 +363,7 @@ TEST_CASE("piano complexity adds in-scale tones, not chromatic neighbors", "[gro
 
     GrooveParams k;
     k.complexityTarget = 80;
-    const auto denser = applyGroove(piano, k, 35, ClipKind::Piano, 0, Mode::Ionian);
+    const auto denser = applyGroove(piano, k, 35, ClipKind::Keys, 0, Mode::Ionian);
 
     for (const auto& n : denser)
     {

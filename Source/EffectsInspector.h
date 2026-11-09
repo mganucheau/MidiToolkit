@@ -144,7 +144,7 @@ private:
     IconBtn btnEffectsLock { icons::lockOpen, "Lock effects while browsing" };
     juce::Rectangle<int> toolkitFoldBounds;
     juce::Rectangle<int> generatorsTabBounds, effectsTabBounds;
-    ChipBtn btnChanged { "Changed" };
+    ChipBtn btnChanged { "Hide Unused" };
     std::vector<fx::Section*> sectionOrder;
     fx::Section* draggedSection = nullptr;
     double jiggleStartMs = 0.0;
@@ -163,8 +163,12 @@ private:
     fx::TempoToggle tempoToggle;
     fx::InlineRow tempoRow;
     fx::FlatSwitch trimSwitch;
+    fx::FlatSwitch reverseSwitch;
+    fx::FlatSwitch invertSwitch;
     fx::FlatPopup extendPopup;
     fx::InlineRow extendRow;
+    fx::InlineRow reverseRow;
+    fx::InlineRow invertRow;
 
     fx::FlatPopup swingTimePopup;
     fx::FlatPopup quantizeTimePopup;

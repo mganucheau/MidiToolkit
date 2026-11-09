@@ -80,8 +80,9 @@ void MidiToolkitProcessor::applySharedUiSessionFromLibrary()
     effectsOpen = s.effectsOpen;
     previewOpen = s.previewOpen;
     sidebarCollapsed = s.sidebarCollapsed;
-    passthrough = s.passthrough || kMidiFxBuild;
-    passthroughActive.store(passthrough);
+    // UI "Passthrough" is effects-only layout. MIDI FX keeps audio through separately.
+    passthrough = s.passthrough;
+    passthroughActive.store(kMidiFxBuild || passthrough);
 
     tweaks().density.store(juce::jlimit(0, 1, s.tweakDensity));
     tweaks().size.store(juce::jlimit(0, kNumContentSizes - 1, s.tweakSize));
@@ -111,7 +112,7 @@ void MidiToolkitProcessor::applySharedUiSessionFromLibrary()
 void MidiToolkitProcessor::lockMidiFxPassthrough()
 {
 #if MIDITOOLKIT_MIDI_FX
-    passthrough = true;
+    // Audio through stays on; do not force the effects-only UI layout.
     passthroughActive.store(true);
 #endif
 }
@@ -625,8 +626,18 @@ void MidiToolkitProcessor::setRecordingEnabled(bool enabled)
 void MidiToolkitProcessor::setPassthroughEnabled(bool enabled)
 {
 #if MIDITOOLKIT_MIDI_FX
-    enabled = true;
-#endif
+    // MIDI FX is always audio-through. `passthrough` on the processor is the
+    // effects-only UI layout flag and is owned by the editor.
+    juce::ignoreUnused(enabled);
+    if (!passthroughActive.load())
+    {
+        passthroughActive.store(true);
+        requestNoteFlush();
+        juce::ScopedLock sl(previewLock_);
+        previewFlushPending_ = true;
+    }
+    return;
+#else
     const bool was = passthroughActive.load();
     passthrough = enabled;
     passthroughActive.store(enabled);
@@ -642,6 +653,7 @@ void MidiToolkitProcessor::setPassthroughEnabled(bool enabled)
             previewFlushPending_ = true;
         }
     }
+#endif
 }
 
 void MidiToolkitProcessor::generatePreviewMidi(const MidiClip& clip, double startBeat, double endBeat,
@@ -870,6 +882,8 @@ void MidiToolkitProcessor::getStateInformation(juce::MemoryBlock& dest)
     xml.setAttribute("lockPitchMin", lockedEdit.pitchMin);
     xml.setAttribute("lockPitchMax", lockedEdit.pitchMax);
     xml.setAttribute("lockExtendMult", lockedEdit.extendMult);
+    xml.setAttribute("lockReverse", lockedEdit.reverse ? 1 : 0);
+    xml.setAttribute("lockInvert", lockedEdit.invert ? 1 : 0);
     xml.setAttribute("lockFitScale", lockedEdit.fitScale ? 1 : 0);
     xml.setAttribute("lockMapToRoot", lockedEdit.mapToRoot ? 1 : 0);
     xml.setAttribute("lockRoot", lockedEdit.root);
@@ -992,6 +1006,8 @@ void MidiToolkitProcessor::getStateInformation(juce::MemoryBlock& dest)
         e->setAttribute("pitchMin", edit.pitchMin);
         e->setAttribute("pitchMax", edit.pitchMax);
         e->setAttribute("extendMult", edit.extendMult);
+        e->setAttribute("reverse", edit.reverse ? 1 : 0);
+        e->setAttribute("invert", edit.invert ? 1 : 0);
         e->setAttribute("fitScale", edit.fitScale ? 1 : 0);
         e->setAttribute("mapToRoot", edit.mapToRoot ? 1 : 0);
         e->setAttribute("root", edit.root);
@@ -1162,8 +1178,8 @@ void MidiToolkitProcessor::setStateInformation(const void* data, int sizeInBytes
             effectsOpen = xml->getIntAttribute("effectsOpen", 0) != 0;
             previewOpen = xml->getIntAttribute("previewOpen", 1) != 0;
             sidebarCollapsed = xml->getIntAttribute("sidebarCollapsed", 0) != 0;
-            passthrough = kMidiFxBuild || xml->getIntAttribute("passthrough", 0) != 0;
-            passthroughActive.store(passthrough);
+            passthrough = xml->getIntAttribute("passthrough", 0) != 0;
+            passthroughActive.store(kMidiFxBuild || passthrough);
             browseMode = juce::jlimit(0, 2, xml->getIntAttribute("browseMode", 0));
             starredFilter = xml->getIntAttribute("starredFilter", 0) != 0;
             includeSubdirs = xml->getIntAttribute("includeSubdirs", 0) != 0;
@@ -1227,6 +1243,8 @@ void MidiToolkitProcessor::setStateInformation(const void* data, int sizeInBytes
             {
                 const int em = xml->getIntAttribute("lockExtendMult", 1);
                 lockedEdit.extendMult = (em == 2 || em == 4 || em == 8) ? em : 1;
+                lockedEdit.reverse = xml->getIntAttribute("lockReverse", 0) != 0;
+                lockedEdit.invert = xml->getIntAttribute("lockInvert", 0) != 0;
             }
             lockedEdit.fitScale = xml->getIntAttribute("lockFitScale", 0) != 0;
             lockedEdit.mapToRoot = xml->getIntAttribute("lockMapToRoot", 0) != 0;
@@ -1390,6 +1408,8 @@ void MidiToolkitProcessor::setStateInformation(const void* data, int sizeInBytes
                         const int em = child->getIntAttribute("extendMult", 1);
                         e.extendMult = (em == 2 || em == 4 || em == 8) ? em : 1;
                     }
+                    e.reverse = child->getIntAttribute("reverse", 0) != 0;
+                    e.invert = child->getIntAttribute("invert", 0) != 0;
                     e.fitScale = child->getIntAttribute("fitScale", 0) != 0;
                     e.mapToRoot = child->getIntAttribute("mapToRoot", 0) != 0;
                     e.root = juce::jlimit(-1, 11, child->getIntAttribute("root", -1));

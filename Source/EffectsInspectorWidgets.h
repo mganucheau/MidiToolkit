@@ -2055,11 +2055,13 @@ public:
 
     int idealHeight() const { return kRowMinH + 7 + kSliderRowH; }
 
+    void setControlWidth(int w) { controlW = w > 0 ? w : kSelectW; resized(); }
+
     void resized() override
     {
         auto r = getLocalBounds();
         auto head = r.removeFromTop(kRowMinH);
-        const int popW = juce::jmax(kSelectW, popup.idealWidth());
+        const int popW = controlW > 0 ? controlW : juce::jmax(kSelectW, popup.idealWidth());
         popup.setBounds(head.removeFromRight(popW).withSizeKeepingCentre(popW, kControlH));
         labelBounds = head.withTrimmedRight(8);
         r.removeFromTop(7);
@@ -2078,6 +2080,7 @@ private:
     FlatPopup& popup;
     FlatSliderRow& amount;
     juce::Rectangle<int> labelBounds;
+    int controlW = 0;
 };
 
 // ── Section (fold chevron + large title + refresh + lock) ────────────────────
@@ -2216,12 +2219,12 @@ public:
         pressInHeader = false;
         if (e.y > kSectionHeaderH) return;
 
-        if (lockBounds().contains(e.getPosition()) && onLockToggle)
+        if (showHeaderChrome && lockBounds().contains(e.getPosition()) && onLockToggle)
         {
             onLockToggle();
             return;
         }
-        if (resetBounds().contains(e.getPosition()))
+        if (showHeaderChrome && resetBounds().contains(e.getPosition()))
         {
             if (onReset && modifiedCount() > 0 && !locked) onReset();
             return;
@@ -2329,14 +2332,17 @@ public:
         drawStrokedChevron(g, chev, ds::inkMuted(), open);
 
         auto titleR = header.withTrimmedLeft(chevronBounds().getRight() + 2);
-        titleR.setRight(resetBounds().getX() - 4);
+        if (showHeaderChrome)
+            titleR.setRight(resetBounds().getX() - 4);
+        else
+            titleR.removeFromRight(4);
         g.setFont(sectionTitleFont());
         g.setColour(ds::ink());
         const int titleW = (int) std::ceil(juce::GlyphArrangement::getStringWidth(g.getCurrentFont(), title)) + 2;
         g.drawText(title, titleR.removeFromLeft(juce::jmin(titleW, titleR.getWidth())),
                    juce::Justification::centredLeft, true);
 
-        if (mods > 0)
+        if (showHeaderChrome && mods > 0)
         {
             titleR.removeFromLeft(6);
             g.setFont(monoFontFixed(11.0f));
@@ -2344,25 +2350,28 @@ public:
             g.drawText(juce::String(mods) + " changed", titleR, juce::Justification::centredLeft, true);
         }
 
-        // Reset: live when this section has changes and is not locked.
-        const bool canReset = mods > 0 && !locked;
-        drawIcon(g, icons::undo, resetBounds().toFloat().withSizeKeepingCentre(10.0f, 10.0f),
-                 canReset ? ds::ink() : ds::inkFaint(), 1.3f);
+        if (showHeaderChrome)
+        {
+            // Reset: live when this section has changes and is not locked.
+            const bool canReset = mods > 0 && !locked;
+            drawIcon(g, icons::undo, resetBounds().toFloat().withSizeKeepingCentre(10.0f, 10.0f),
+                     canReset ? ds::ink() : ds::inkFaint(), 1.3f);
 
-        // Lock: a control-sm toggle; lit (accent) while locked.
-        auto lock = lockBounds().toFloat().withSizeKeepingCentre(16.0f, 14.0f);
-        if (locked)
-        {
-            g.setColour(ds::acc());
-            g.fillRoundedRectangle(lock, ds::radius::sm);
+            // Lock: a control-sm toggle; lit (accent) while locked.
+            auto lock = lockBounds().toFloat().withSizeKeepingCentre(16.0f, 14.0f);
+            if (locked)
+            {
+                g.setColour(ds::acc());
+                g.fillRoundedRectangle(lock, ds::radius::sm);
+            }
+            else
+            {
+                g.setColour(ds::edge());
+                g.drawRoundedRectangle(lock.reduced(0.5f), ds::radius::sm, 1.0f);
+            }
+            drawIcon(g, locked ? icons::lockClosed : icons::lockOpen, lock.withSizeKeepingCentre(9.0f, 9.0f),
+                     locked ? ds::onAccent() : ds::inkMuted(), 1.2f);
         }
-        else
-        {
-            g.setColour(ds::edge());
-            g.drawRoundedRectangle(lock.reduced(0.5f), ds::radius::sm, 1.0f);
-        }
-        drawIcon(g, locked ? icons::lockClosed : icons::lockOpen, lock.withSizeKeepingCentre(9.0f, 9.0f),
-                 locked ? ds::onAccent() : ds::inkMuted(), 1.2f);
 
         g.setColour(dragging ? ds::acc() : ds::line());
         g.drawRoundedRectangle(b.reduced(0.5f), rad, 1.0f);
@@ -2373,6 +2382,8 @@ public:
     /** Folded by default; when folded, dirty (changed) rows stay visible. */
     bool open = false;
     bool locked = false;
+    /** When false, header omits lock / reset / "X changed" (generator sections). */
+    bool showHeaderChrome = true;
     bool showBottomDivider = false;   // legacy; frames replace dividers
     std::function<void()> onToggle;
     std::function<void()> onReset;
@@ -2424,11 +2435,12 @@ private:
         return { 4, 0, 16, kSectionHeaderH };
     }
 
-    /** Whole header except the reset and lock cells. */
+    /** Whole header except the reset and lock cells (when chrome is shown). */
     juce::Rectangle<int> headerHitBounds() const
     {
         auto h = getLocalBounds().removeFromTop(kSectionHeaderH);
-        h.removeFromRight(4 + 20 + 20);
+        if (showHeaderChrome)
+            h.removeFromRight(4 + 20 + 20);
         return h;
     }
 

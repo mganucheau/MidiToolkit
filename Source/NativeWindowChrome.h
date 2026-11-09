@@ -1,5 +1,6 @@
 #pragma once
 #include <juce_gui_basics/juce_gui_basics.h>
+#include <atomic>
 #include <functional>
 
 namespace pflow {
@@ -37,6 +38,11 @@ bool titlebarFolded(juce::Component& anyComponentInWindow);
     Replaces any previous observer on this component. Removed when the component is destroyed. */
 void observeWindowChrome(juce::Component& anyComponentInWindow, std::function<void()> onChange);
 
+/** While sync is true, space in this plugin window toggles the host transport.
+    Returns an opaque token; pass it to removeSpaceToHostMonitor. */
+void* installSpaceToHostMonitor(juce::Component& editor, std::atomic<bool>& syncToHost);
+void removeSpaceToHostMonitor(void* token);
+
 #else
 
 inline void applyCupertinoTitlebar(juce::Component&, int = 52) {}
@@ -48,6 +54,8 @@ inline int trafficLightsTrailingEdge(juce::Component&, int = 14) { return 0; }
 inline void layoutTrafficLights(juce::Component&, int) {}
 inline bool titlebarFolded(juce::Component&) { return true; }
 inline void observeWindowChrome(juce::Component&, std::function<void()>) {}
+inline void* installSpaceToHostMonitor(juce::Component&, std::atomic<bool>&) { return nullptr; }
+inline void removeSpaceToHostMonitor(void*) {}
 
 #endif
 

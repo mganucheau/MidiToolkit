@@ -222,25 +222,31 @@ private:
 
     TransportBar transport;
 
-    /** Files | Generator switch for the left column (+ Grid / Subfolders on Files). */
+    /** Sidebar fold + Files | Generator toggles for the left column. */
     class LeftPaneTabs : public juce::Component
     {
     public:
         LeftPaneTabs();
         std::function<void(int)> onTab;
+        std::function<void()> onToggleSidebar;
+        std::function<void()> onTogglePreview;
         std::function<void()> onToggleGrid;
         std::function<void()> onToggleSubfolders;
         void setTab(int t);
+        void setSidebarCollapsed(bool on);
+        void setPreviewOpen(bool on);
         void setGrid(bool on);
         void setSubfolders(bool on);
         void resized() override;
         void paint(juce::Graphics&) override;
-        void mouseDown(const juce::MouseEvent&) override;
     private:
         int tab = 0;
-        juce::Rectangle<int> filesBounds, generatorBounds;
+        IconBtn btnSidebar { icons::sidebar, "Collapse sidebar" };
+        ChipBtn btnFiles { "Files" };
+        ChipBtn btnGenerator { "Generator" };
+        ChipBtn btnSubfolders { "Subdirectories" };
         ChipBtn btnGrid { "Grid" };
-        ChipBtn btnSubfolders { "Subfolders" };
+        ChipBtn btnPreview { "Preview" };
     };
 
     FavoritesSidebar sidebar;
@@ -294,7 +300,7 @@ private:
     PreviewHeader previewHeader { *this };
     KindGridView kindGrid;
     bool gridView = false;
-    bool showPreviewVelocity = true;
+    bool showPreviewVelocity = false;
     bool previewMuted = false;
     int browserContentWidth() const;
 

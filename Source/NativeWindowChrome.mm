@@ -312,6 +312,129 @@ bool isWindowKey(juce::Component& anyComponentInWindow)
     return true;
 }
 
+namespace {
+
+struct SpaceBridge
+{
+    std::atomic<bool>* sync = nullptr;
+    std::atomic<bool> alive { true };
+    NSView* view = nil;
+    id monitor = nil;
+    int depth = 0;
+};
+
+NSWindow* hostWindowFor(NSWindow* pluginWindow)
+{
+    if (pluginWindow == nil)
+        return nil;
+    NSWindow* main = [NSApp mainWindow];
+    if (main != nil && main != pluginWindow && [main isVisible])
+        return main;
+    for (NSWindow* w in [NSApp orderedWindows])
+    {
+        if (w != pluginWindow && [w isVisible] && ![w isMiniaturized])
+            return w;
+    }
+    return nil;
+}
+
+void deliverSpace(NSWindow* host, NSEvent* source)
+{
+    if (host == nil || source == nil)
+        return;
+    const NSTimeInterval stamp = source.timestamp;
+    NSEvent* down = [NSEvent keyEventWithType:NSEventTypeKeyDown
+                                      location:NSZeroPoint
+                                 modifierFlags:0
+                                     timestamp:stamp
+                                  windowNumber:host.windowNumber
+                                       context:nil
+                                    characters:@" "
+                   charactersIgnoringModifiers:@" "
+                                     isARepeat:NO
+                                       keyCode:49];
+    NSEvent* up = [NSEvent keyEventWithType:NSEventTypeKeyUp
+                                    location:NSZeroPoint
+                               modifierFlags:0
+                                   timestamp:stamp
+                                windowNumber:host.windowNumber
+                                     context:nil
+                                  characters:@" "
+                 charactersIgnoringModifiers:@" "
+                                   isARepeat:NO
+                                     keyCode:49];
+    if (down != nil)
+        [host keyDown:down];
+    if (up != nil)
+        [host keyUp:up];
+}
+
+} // namespace
+
+void* installSpaceToHostMonitor(juce::Component& editor, std::atomic<bool>& syncToHost)
+{
+    auto* view = editorViewFor(editor);
+    if (view == nil)
+        return nullptr;
+
+    auto* bridge = new SpaceBridge;
+    bridge->sync = &syncToHost;
+    bridge->view = view;
+    SpaceBridge* raw = bridge;
+    bridge->monitor = [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskKeyDown
+                                                             handler:^NSEvent* (NSEvent* event)
+    {
+        if (raw == nullptr || !raw->alive.load() || raw->depth > 0)
+            return event;
+        if (event.keyCode != 49)
+            return event;
+        if ((event.modifierFlags & (NSEventModifierFlagCommand
+                                  | NSEventModifierFlagControl
+                                  | NSEventModifierFlagOption
+                                  | NSEventModifierFlagShift)) != 0)
+            return event;
+        if (raw->sync == nullptr || !raw->sync->load())
+            return event;
+        NSView* pluginView = raw->view;
+        if (pluginView == nil || event.window != pluginView.window)
+            return event;
+        NSResponder* first = event.window.firstResponder;
+        if (first != pluginView && ![first isKindOfClass:[pluginView class]])
+            return event;
+        if (auto* focused = juce::Component::getCurrentlyFocusedComponent())
+            if (dynamic_cast<juce::TextEditor*>(focused) != nullptr)
+                return event;
+
+        // Floating plugin windows never see Live's transport key. Hand space to
+        // the host window. Embedded views share that window, so leave the event
+        // alone and let an unhandled key walk up the view.
+        if (!editorFillsWindow(pluginView, pluginView.window))
+            return event;
+
+        NSWindow* host = hostWindowFor(pluginView.window);
+        if (host == nil)
+            return event;
+
+        ++raw->depth;
+        deliverSpace(host, event);
+        --raw->depth;
+        return nil;
+    }];
+    return bridge;
+}
+
+void removeSpaceToHostMonitor(void* token)
+{
+    auto* bridge = static_cast<SpaceBridge*>(token);
+    if (bridge == nullptr)
+        return;
+    bridge->alive.store(false);
+    if (bridge->monitor != nil)
+        [NSEvent removeMonitor:bridge->monitor];
+    bridge->monitor = nil;
+    delete bridge;
+}
+
 #endif // JUCE_MAC
 
 } // namespace nativeChrome

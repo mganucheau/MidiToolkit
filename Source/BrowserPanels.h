@@ -157,6 +157,8 @@ public:
     void setFilterOpen(bool open);
     int activeFilterCount() const;
     void resetFilters();
+    bool getHideDuplicates() const;
+    void toggleHideDuplicates();
     bool isCurrentFolderSaved() const { return isCurrentFolderFavorited(); }
     std::function<void(bool)> onFilterOpenChanged;
     std::function<void()> onFilterLayoutChanged;
@@ -289,6 +291,9 @@ private:
         int activeGroupCount() const;
         void setIncludeSubdirs(bool on);
         void setScanning(bool on);
+        bool getHideDuplicates() const { return hideDuplicates; }
+        void setHideDuplicates(bool on);
+        void toggleHideDuplicates();
         std::function<void()> onCriteriaChanged;
         std::function<void(bool)> onSubdirsChanged;
         std::function<void()> onLayoutChanged;
@@ -593,8 +598,9 @@ inline juce::Colour kindClipColour(ClipKind k)
     {
         case ClipKind::Drums: return ds::clip(1);
         case ClipKind::Bass:  return ds::clip(6);
-        case ClipKind::Piano: return ds::clip(7);
+        case ClipKind::Keys:  return ds::clip(7);
         case ClipKind::Lead:  return ds::clip(5);
+        case ClipKind::Arp:   return ds::clip(3);
     }
     return ds::clip(6);
 }
@@ -606,8 +612,12 @@ public:
     KindGridView();
     static int idealWidth();
     void setSource(const FileListPanel* list);
+    /** Bit i = ClipKind i. 0 = show every kind column. */
+    void setKindMask(uint8_t mask);
     void refresh();
     void setPlayhead(bool isPlaying, float loopPhase);
+    /** Scroll so the current selection stays in view (keyboard / selection changes). */
+    void ensureSelectedVisible();
 
     void paint(juce::Graphics&) override;
     void resized() override;
@@ -615,6 +625,8 @@ public:
     void mouseDrag(const juce::MouseEvent&) override;
     void mouseUp(const juce::MouseEvent&) override;
     void mouseDoubleClick(const juce::MouseEvent&) override;
+    void mouseMove(const juce::MouseEvent&) override;
+    void mouseExit(const juce::MouseEvent&) override;
     void mouseWheelMove(const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
     bool keyPressed(const juce::KeyPress&) override;
 
@@ -627,20 +639,34 @@ private:
     struct Column { ClipKind kind; std::vector<int> entries; };
     int entryAt(juce::Point<int> p) const;
     int maxScroll() const;
+    int cellH() const;
+    int numVisibleCols() const { return (int) cols.size(); }
     juce::Rectangle<int> columnBounds(int c) const;
+    int columnDividerAt(juce::Point<int> p) const; // column whose right edge is hit, or -1
+    int columnIndexForEntry(int entryIdx) const;
+    int rowOfEntry(int col, int entryIdx) const;
+    ClipKind selectedColumnKind() const;
+    int defaultColWidth() const;
 
     const FileListPanel* source = nullptr;
     std::vector<Column> cols;
+    uint8_t kindMask = 0;
     int scrollY = 0;
+    /** Per-kind width override (0 = share remaining space evenly). */
+    int colWidthOverride[kNumClipKinds] = {};
     bool playing = false;
     float phase = 0.0f;
     int pressedEntry = -1;
     bool dragStarted = false;
+    bool resizingCol = false;
+    int resizeColIndex = -1;
+    int resizeStartX = 0;
+    int resizeStartW = 0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(KindGridView)
 };
 
-// Browser column search row (Filters). Grid / Subfolders live on the Files tab bar.
+// Browser column search row: Subfolders · Grid · Search · Filter.
 
 class BrowserToolbar : public juce::Component
 {
@@ -668,6 +694,8 @@ public:
 
 private:
     juce::Component* search = nullptr;
+    IconBtn btnSubfolders { icons::subfolders, "Include files in subfolders" };
+    IconBtn btnGrid { icons::grid, "Grid view: files as clips in columns by kind" };
     IconBtn btnFilters { icons::sliders, "Filters" };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(BrowserToolbar)
@@ -680,6 +708,7 @@ public:
     FilterPopover();
     void setContent(juce::Component* panel, std::function<int()> idealPanelHeight);
     void setCountText(const juce::String& t);
+    void setHideDuplicates(bool on);
     int idealHeight() const;
     void resized() override;
     void paint(juce::Graphics&) override;
@@ -688,11 +717,13 @@ public:
     std::function<void()> onDone;
     std::function<void()> onSaveSearch;
     std::function<void()> onReset;
+    std::function<void()> onToggleHideDuplicates;
 
 private:
     juce::Component* panel = nullptr;
     std::function<int()> panelHeight;
     juce::String countText;
+    ChipBtn btnHideDupes { "Hide duplicates" };
     ChipBtn btnReset { "Reset" };
     ChipBtn btnSave { "Save Search", icons::plus };
     ChipBtn btnDone { "Done" };
