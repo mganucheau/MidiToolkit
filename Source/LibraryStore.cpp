@@ -145,6 +145,7 @@ SharedUiSession LibraryStore::uiSessionFromXml(const juce::XmlElement& el)
     s.tweakShowTooltips = el.getIntAttribute("tweakShowTooltips", 1) != 0 ? 1 : 0;
     s.tweakFontFamily = juce::jlimit(0, 3, el.getIntAttribute("tweakFontFamily", 0));
     s.tweakSurfaceStyle = juce::jlimit(0, 2, el.getIntAttribute("tweakSurfaceStyle", 0));
+    s.tweakAlternateRows = el.getIntAttribute("tweakAlternateRows", 0) != 0 ? 1 : 0;
     s.hasDefaultView = el.getIntAttribute("hasDefaultView", 0) != 0;
     s.defEditorOpen = el.getIntAttribute("defEditorOpen", 0) != 0;
     s.defEffectsOpen = el.getIntAttribute("defEffectsOpen", 0) != 0;
@@ -220,6 +221,7 @@ void LibraryStore::uiSessionToXml(juce::XmlElement& el, const SharedUiSession& s
     el.setAttribute("tweakShowTooltips", s.tweakShowTooltips);
     el.setAttribute("tweakFontFamily", s.tweakFontFamily);
     el.setAttribute("tweakSurfaceStyle", s.tweakSurfaceStyle);
+    el.setAttribute("tweakAlternateRows", s.tweakAlternateRows);
     el.setAttribute("hasDefaultView", s.hasDefaultView ? 1 : 0);
     el.setAttribute("defEditorOpen", s.defEditorOpen ? 1 : 0);
     el.setAttribute("defEffectsOpen", s.defEffectsOpen ? 1 : 0);
@@ -274,6 +276,7 @@ void LibraryStore::uiSessionToXml(juce::XmlElement& el, const SharedUiSession& s
 void LibraryStore::load()
 {
     starredFiles.clear();
+    starredFolders.clear();
     savedSearches.clear();
     searchCache.clear();
     uiSession = {};
@@ -295,6 +298,12 @@ void LibraryStore::load()
                 const auto path = child->getStringAttribute("path");
                 if (path.isNotEmpty() && !starredFiles.contains(path))
                     starredFiles.add(path);
+            }
+            else if (child->hasTagName("StarredFolder"))
+            {
+                const auto path = child->getStringAttribute("path");
+                if (path.isNotEmpty() && !starredFolders.contains(path))
+                    starredFolders.add(path);
             }
             else if (child->hasTagName("SavedSearch"))
             {
@@ -363,6 +372,7 @@ juce::StringArray LibraryStore::readStarsFromDisk()
 }
 
 void LibraryStore::writeLibraryFile(juce::StringArray stars,
+                                    juce::StringArray folders,
                                     std::vector<SavedSearchEntry> searches,
                                     std::vector<CachedSearch> cache,
                                     SharedUiSession session,
@@ -376,6 +386,12 @@ void LibraryStore::writeLibraryFile(juce::StringArray stars,
         if (star.isEmpty()) continue;
         auto* child = xml.createNewChildElement("StarredFile");
         child->setAttribute("path", star);
+    }
+    for (const auto& folder : folders)
+    {
+        if (folder.isEmpty()) continue;
+        auto* child = xml.createNewChildElement("StarredFolder");
+        child->setAttribute("path", folder);
     }
 
     for (const auto& ss : searches)
@@ -427,7 +443,7 @@ void LibraryStore::writeLibraryFile(juce::StringArray stars,
 void LibraryStore::save() const
 {
     const auto gen = ++saveGeneration_;
-    writeLibraryFile(starredFiles, savedSearches, searchCache, uiSession, hasUiSession);
+    writeLibraryFile(starredFiles, starredFolders, savedSearches, searchCache, uiSession, hasUiSession);
     saveCompleted_.store(gen);
 }
 
@@ -438,6 +454,7 @@ void LibraryStore::saveAsync() const
     auto* doneAtom = &saveCompleted_;
     juce::Thread::launch([gen, genAtom, doneAtom,
                           stars = starredFiles,
+                          folders = starredFolders,
                           searches = savedSearches,
                           cache = searchCache,
                           session = uiSession,
@@ -445,7 +462,7 @@ void LibraryStore::saveAsync() const
     {
         if (gen != genAtom->load())
             return;
-        writeLibraryFile(std::move(stars), std::move(searches), std::move(cache),
+        writeLibraryFile(std::move(stars), std::move(folders), std::move(searches), std::move(cache),
                         std::move(session), writeSession);
         if (gen == genAtom->load())
             doneAtom->store(gen);
@@ -491,6 +508,25 @@ void LibraryStore::setStarredFiles(const juce::StringArray& paths)
     for (const auto& p : paths)
         if (p.isNotEmpty() && !starredFiles.contains(p))
             starredFiles.add(p);
+    save();
+}
+
+void LibraryStore::toggleStarredFolder(const juce::String& path)
+{
+    if (path.isEmpty()) return;
+    if (!starredFolders.contains(path))
+        starredFolders.add(path);
+    else
+        starredFolders.removeString(path);
+    save();
+}
+
+void LibraryStore::setStarredFolders(const juce::StringArray& paths)
+{
+    starredFolders.clear();
+    for (const auto& p : paths)
+        if (p.isNotEmpty() && !starredFolders.contains(p))
+            starredFolders.add(p);
     save();
 }
 

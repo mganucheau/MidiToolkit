@@ -44,6 +44,8 @@ public:
 
     std::function<void(const GrooveParams&)> onGrooveChanged;
     std::function<void(const ClipEdit&)> onEditChanged;
+    /** Fired after Generate rolls a new seed for one part (see gen::Part). */
+    std::function<void(int /*gen::Part*/)> onGeneratorGenerated;
     std::function<void(double)> onBpmMultiplierChanged;
     /** Fired when header or section lock bits change. */
     std::function<void(uint32_t)> onSectionLocksChanged;
@@ -58,11 +60,15 @@ public:
     int defaultFoldHeight() const;
     /** Fired when a section fold changes the preferred pane height. */
     std::function<void()> onContentHeightChanged;
-    /** 0 = Generators, 1 = Effects. Generators is only interactive in passthrough. */
+    /** 0 = Generators, 1 = Effects. Generators live in the left column when hosted externally. */
     void setPaneTab(int tab);
     int getPaneTab() const { return paneTab; }
     void setGeneratorsEnabled(bool on);
     bool getGeneratorsEnabled() const { return generatorsEnabled; }
+    /** Move the generator accordion into another column. Null returns it here. */
+    void setExternalGeneratorHost(juce::Component* host);
+    void layoutExternalGenerators();
+    bool generatorsAreExternal() const { return externalGeneratorHost != nullptr; }
     std::function<void(int)> onPaneTabChanged;
 
     /** Section order as comma-separated ids (playback,timing,performance,pitch,effects). */
@@ -77,6 +83,8 @@ public:
     fx::Section& effectsSection() { return effectsSec; }
     fx::Section& arpSection() { return arpSec; }
     fx::Section& melodySection() { return melodySec; }
+    fx::Section& chordsSection() { return chordsSec; }
+    fx::Section& bassSection() { return bassSec; }
     fx::Section& drumSection() { return drumSec; }
     bool delayPairVisible() const
     {
@@ -125,6 +133,7 @@ private:
     bool liveStream = false;
     bool generatorsEnabled = false;
     int paneTab = 1; // Effects by default; Generators is 0
+    juce::Component* externalGeneratorHost = nullptr;
     int clipRootPc = -1;
     int clipSourceOctave = 4;
     int clipComplexity = 50;
@@ -142,12 +151,14 @@ private:
 
     fx::Section arpSec { "Arpeggiator" };
     fx::Section melodySec { "Melody" };
-    fx::Section drumSec { "Drum Groove" };
+    fx::Section chordsSec { "Chords" };
+    fx::Section bassSec { "Bass" };
+    fx::Section drumSec { "Drums" };
     fx::Section playback { "Playback" };
     fx::Section timing { "Timing" };
     fx::Section performance { "Performance" };
     fx::Section pitchSec { "Pitch & Scale" };
-    fx::Section effectsSec { "Effects" };
+    fx::Section effectsSec { "Delay" };
 
     fx::TempoToggle tempoToggle;
     fx::InlineRow tempoRow;
@@ -181,32 +192,56 @@ private:
     fx::GridAmountBlock delayBlock { "Delay", delayTimePopup, delayAmountSl };
     fx::FlatSliderRow delayFeedbackSl;
 
-    fx::FlatPopup arpModePopup;
-    fx::InlineRow arpModeRow;
+    fx::FlatTextButton arpGenerateBtn { "New" };
+    fx::InlineRow arpGenerateRow;
+    fx::FlatSwitch arpInputSwitch;
+    fx::InlineRow arpInputRow;
+    fx::FlatPopup arpDirectionPopup;
+    fx::InlineRow arpDirectionRow;
+    fx::FlatPopup arpShapePopup;
+    fx::InlineRow arpShapeRow;
     fx::FlatPopup arpRatePopup;
     fx::InlineRow arpRateRow;
     fx::FlatSliderRow arpGateSl;
     fx::FlatPopup arpOctavesPopup;
     fx::InlineRow arpOctavesRow;
-    fx::FlatSwitch arpLatchSwitch;
-    fx::InlineRow arpLatchRow;
 
-    fx::FlatSwitch melodyEnableSwitch;
-    fx::InlineRow melodyEnableRow;
+    fx::FlatTextButton melodyGenerateBtn { "New" };
+    fx::InlineRow melodyGenerateRow;
+    fx::FlatSwitch melodyInputSwitch;
+    fx::InlineRow melodyInputRow;
     fx::FlatPopup melodyStylePopup;
     fx::InlineRow melodyStyleRow;
-    fx::FlatPopup melodyRatePopup;
-    fx::InlineRow melodyRateRow;
-    fx::FlatSliderRow melodyDensitySl;
-    fx::FlatSliderRow melodyRangeSl;
-    fx::FlatSliderRow melodyVariationSl;
+    fx::FlatPopup melodyPhrasePopup;
+    fx::InlineRow melodyPhraseRow;
+    fx::FlatPopup melodyContourPopup;
+    fx::InlineRow melodyContourRow;
+    fx::FlatPopup melodySpeedPopup;
+    fx::InlineRow melodySpeedRow;
 
-    fx::FlatSwitch drumsEnableSwitch;
-    fx::InlineRow drumsEnableRow;
+    fx::FlatTextButton chordsGenerateBtn { "New" };
+    fx::InlineRow chordsGenerateRow;
+    fx::FlatSwitch chordsInputSwitch;
+    fx::InlineRow chordsInputRow;
+    fx::FlatPopup chordVoicingPopup;
+    fx::InlineRow chordVoicingRow;
+    fx::FlatPopup chordColorPopup;
+    fx::InlineRow chordColorRow;
+    fx::FlatPopup chordRhythmPopup;
+    fx::InlineRow chordRhythmRow;
+
+    fx::FlatTextButton bassGenerateBtn { "New" };
+    fx::InlineRow bassGenerateRow;
+    fx::FlatSwitch bassInputSwitch;
+    fx::InlineRow bassInputRow;
+    fx::FlatPopup bassMotionPopup;
+    fx::InlineRow bassMotionRow;
+
+    fx::FlatTextButton drumGenerateBtn { "New" };
+    fx::InlineRow drumGenerateRow;
     fx::FlatPopup drumStylePopup;
     fx::InlineRow drumStyleRow;
     fx::FlatSliderRow drumDensitySl;
-    fx::FlatSliderRow drumVariationSl;
 
     fx::PitchRow octaveRow;
     fx::FlatPopup octaveRangePopup;
@@ -214,6 +249,8 @@ private:
     fx::FlatPopup outsideRangePopup;
     fx::InlineRow outsideRangeRow;
     fx::PitchRow pitchRow;
+    fx::FlatSwitch pitchInputSwitch;
+    fx::InlineRow pitchInputRow;
     fx::ChipGrid keyGrid;
     fx::FlatPopup modePopup;
     fx::InlineRow modeRow;

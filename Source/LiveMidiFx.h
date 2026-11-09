@@ -3,6 +3,7 @@
 #include "EditModel.h"
 #include "GrooveEngine.h"
 #include <array>
+#include <atomic>
 #include <vector>
 
 namespace pflow {
@@ -17,6 +18,8 @@ struct LiveFxState
     /** Reference octave of the selected clip (0..6); used by absolute octave. */
     int sourceOctave = 4;
     double bpmMultiplier = 1.0;
+    /** True while the host is recording into Midi Toolkit — pitch input is off. */
+    bool recording = false;
 };
 
 /** Transform a live MIDI pitch with the stream-capable ClipEdit pitch fields.
@@ -50,6 +53,9 @@ public:
     void flush(juce::MidiBuffer& out, int samplePosition = 0);
 
     bool hasHeldNotes() const;
+
+    /** Latched keyboard pitch for Pitch Input (-1 = none). */
+    int pitchLatchMidi() const { return pitchLatchMidi_.load(); }
 
 private:
     struct Pending
@@ -86,16 +92,12 @@ private:
     void runGenerators(juce::MidiBuffer& out, const LiveFxState& snap, double sampleRate,
                        double bpm, double beatPos, int numSamples);
     std::vector<int> heldPitchesSorted(bool asPlayed) const;
-    int nextArpPitch(const GrooveParams& g, const std::vector<int>& pitches);
-    int nextMelodyPitch(const LiveFxState& snap, const std::vector<int>& held);
-    void maybeEmitDrum(juce::MidiBuffer& out, const LiveFxState& snap, double sampleRate,
-                       double bpm, double stepPos, int samplePos, int numSamples);
+    int effectiveKeyRoot(const LiveFxState& snap) const;
 
     mutable juce::CriticalSection lock_;
     LiveFxState state_;
     std::array<std::array<Held, 128>, 16> held_ {};
     std::array<InputNote, 128> inputHeld_ {};
-    std::vector<int> latchedPitches_;
     int inputOrder_ = 0;
     std::vector<Pending> pending_;
     int nextNoteId_ = 1;
@@ -104,18 +106,13 @@ private:
     std::array<bool, 16> sustainDown_ {};
     std::array<bool, 16> sustainLatched_ {};
 
-    double arpNextStep_ = 0.0;
-    int arpIndex_ = 0;
-    int arpDirection_ = 1;
-    int arpSoundingPitch_ = -1;
-    int arpSoundingCh_ = 1;
+    std::atomic<int> pitchLatchMidi_ { -1 };
 
-    double melodyNextStep_ = 0.0;
-    int melodyPhase_ = 0;
-    int melodySounding_ = -1;
-
-    double drumNextStep_ = 0.0;
-    int drumStep_ = 0;
+    int arpNonce_ = 0;
+    int melodyNonce_ = 0;
+    int chordNonce_ = 0;
+    int bassNonce_ = 0;
+    int drumNonce_ = 0;
 };
 
 } // namespace pflow

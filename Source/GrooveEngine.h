@@ -79,32 +79,100 @@ enum class DelayTime : int
     Count
 };
 
-enum class ArpMode : int
+enum class ArpDirection : int
 {
-    Off = 0,
-    Up,
+    Up = 0,
     Down,
     UpDown,
     Random,
-    AsPlayed,
-    Chord,
+    Count
+};
+
+enum class ArpShape : int
+{
+    Walk = 0,
+    Skip,
+    Pedal,
+    Arch,
+    Climb,
     Count
 };
 
 enum class MelodyStyle : int
 {
-    Motif = 0,
-    ScaleRun,
-    CallResponse,
+    March = 0,
+    Arch,
+    Call,
+    Turn,
+    Hold,
+    Drift,
+    Count
+};
+
+enum class MelodyContour : int
+{
+    Even = 0,
+    Rise,
+    Fall,
+    Leap,
+    Count
+};
+
+enum class MelodySpeed : int
+{
+    Slow = 0,
+    Medium,
+    Fast,
+    Count
+};
+
+enum class MelodyPhrase : int
+{
+    OneBar = 0,
+    TwoBars,
+    FourBars,
+    EightBars,
+    Count
+};
+
+enum class ChordVoicing : int
+{
+    Close = 0,
+    Open,
+    Drop,
+    Count
+};
+
+enum class ChordColor : int
+{
+    Triad = 0,
+    Seventh,
+    Count
+};
+
+enum class ChordRhythm : int
+{
+    Block = 0,
+    Pulse,
+    Strum,
+    Count
+};
+
+enum class BassMotion : int
+{
+    Pulse = 0,
+    Half,
+    Shuffle,
+    Sparse,
     Count
 };
 
 enum class DrumStyle : int
 {
-    Backbeat = 0,
-    FourOnFloor,
+    Straight = 0,
     HalfTime,
-    Break,
+    Shuffle,
+    Sparse,
     Count
 };
 
@@ -180,45 +248,145 @@ inline const char* delayTimeLabel(DelayTime t)
     return "1/8";
 }
 
-inline const char* arpModeLabel(ArpMode m)
+inline const char* arpDirectionLabel(ArpDirection d)
 {
-    switch (m)
+    switch (d)
     {
-        case ArpMode::Off:      return "Off";
-        case ArpMode::Up:       return "Up";
-        case ArpMode::Down:     return "Down";
-        case ArpMode::UpDown:   return "Up/Down";
-        case ArpMode::Random:   return "Random";
-        case ArpMode::AsPlayed: return "As Played";
-        case ArpMode::Chord:    return "Chord";
-        case ArpMode::Count:    break;
+        case ArpDirection::Up:     return "Up";
+        case ArpDirection::Down:   return "Down";
+        case ArpDirection::UpDown: return "Up/Down";
+        case ArpDirection::Random: return "Random";
+        case ArpDirection::Count:  break;
     }
-    return "Off";
+    return "Up";
+}
+
+inline const char* arpShapeLabel(ArpShape s)
+{
+    switch (s)
+    {
+        case ArpShape::Walk:  return "Walk";
+        case ArpShape::Skip:  return "Skip";
+        case ArpShape::Pedal: return "Pedal";
+        case ArpShape::Arch:  return "Arch";
+        case ArpShape::Climb: return "Climb";
+        case ArpShape::Count: break;
+    }
+    return "Walk";
 }
 
 inline const char* melodyStyleLabel(MelodyStyle s)
 {
     switch (s)
     {
-        case MelodyStyle::Motif:        return "Motif";
-        case MelodyStyle::ScaleRun:     return "Scale Run";
-        case MelodyStyle::CallResponse: return "Call-Response";
-        case MelodyStyle::Count:        break;
+        case MelodyStyle::March: return "March";
+        case MelodyStyle::Arch:  return "Arch";
+        case MelodyStyle::Call:  return "Call";
+        case MelodyStyle::Turn:  return "Turn";
+        case MelodyStyle::Hold:  return "Hold";
+        case MelodyStyle::Drift: return "Drift";
+        case MelodyStyle::Count: break;
     }
-    return "Motif";
+    return "March";
+}
+
+inline const char* melodyContourLabel(MelodyContour c)
+{
+    switch (c)
+    {
+        case MelodyContour::Even: return "Even";
+        case MelodyContour::Rise: return "Rise";
+        case MelodyContour::Fall: return "Fall";
+        case MelodyContour::Leap: return "Leap";
+        case MelodyContour::Count: break;
+    }
+    return "Even";
+}
+
+inline const char* melodySpeedLabel(MelodySpeed s)
+{
+    switch (s)
+    {
+        case MelodySpeed::Slow:   return "Slow";
+        case MelodySpeed::Medium: return "Medium";
+        case MelodySpeed::Fast:   return "Fast";
+        case MelodySpeed::Count:  break;
+    }
+    return "Medium";
+}
+
+inline const char* melodyPhraseLabel(MelodyPhrase p)
+{
+    switch (p)
+    {
+        case MelodyPhrase::OneBar:    return "1 Bar";
+        case MelodyPhrase::TwoBars:   return "2 Bars";
+        case MelodyPhrase::FourBars:  return "4 Bars";
+        case MelodyPhrase::EightBars: return "8 Bars";
+        case MelodyPhrase::Count:     break;
+    }
+    return "4 Bars";
+}
+
+inline const char* chordVoicingLabel(ChordVoicing v)
+{
+    switch (v)
+    {
+        case ChordVoicing::Close: return "Close";
+        case ChordVoicing::Open:  return "Open";
+        case ChordVoicing::Drop:  return "Drop";
+        case ChordVoicing::Count: break;
+    }
+    return "Close";
+}
+
+inline const char* chordColorLabel(ChordColor c)
+{
+    switch (c)
+    {
+        case ChordColor::Triad:   return "Triad";
+        case ChordColor::Seventh: return "7th";
+        case ChordColor::Count:   break;
+    }
+    return "Triad";
+}
+
+inline const char* chordRhythmLabel(ChordRhythm r)
+{
+    switch (r)
+    {
+        case ChordRhythm::Block: return "Block";
+        case ChordRhythm::Pulse: return "Pulse";
+        case ChordRhythm::Strum: return "Strum";
+        case ChordRhythm::Count: break;
+    }
+    return "Block";
+}
+
+inline const char* bassMotionLabel(BassMotion m)
+{
+    switch (m)
+    {
+        case BassMotion::Pulse:   return "Pulse";
+        case BassMotion::Half:    return "Half";
+        case BassMotion::Shuffle: return "Shuffle";
+        case BassMotion::Sparse:  return "Sparse";
+        case BassMotion::Count:   break;
+    }
+    return "Pulse";
 }
 
 inline const char* drumStyleLabel(DrumStyle s)
 {
     switch (s)
     {
-        case DrumStyle::Backbeat:     return "Backbeat";
-        case DrumStyle::FourOnFloor:  return "Four-on-floor";
-        case DrumStyle::HalfTime:     return "Half-time";
-        case DrumStyle::Break:        return "Break";
-        case DrumStyle::Count:        break;
+        case DrumStyle::Straight: return "Straight";
+        case DrumStyle::HalfTime: return "Half Time";
+        case DrumStyle::Shuffle:  return "Shuffle";
+        case DrumStyle::Sparse:   return "Sparse";
+        case DrumStyle::Count:    break;
     }
-    return "Backbeat";
+    return "Straight";
 }
 
 inline const char* strumDirectionLabel(StrumDirection d)
@@ -259,23 +427,45 @@ struct GrooveParams
     int delayAmount = 0;            // 0..100
     int delayFeedback = 40;         // 0..100
 
-    int arpModeIndex = (int) ArpMode::Off;
+    bool arpEnabled = false;
+    bool arpInput = false;
+    int arpDirectionIndex = (int) ArpDirection::Up;
+    int arpShapeIndex = (int) ArpShape::Walk;
     int arpRateIndex = (int) DelayTime::Sixteenth;
     int arpGate = 70;               // 10..100 %
     int arpOctaves = 1;             // 1..3
-    bool arpLatch = false;
+    int arpVariation = 1;           // 1..16 seed
+    int arpNonce = 0;
 
     bool melodyEnabled = false;
-    int melodyStyleIndex = (int) MelodyStyle::Motif;
-    int melodyRateIndex = (int) DelayTime::Eighth;
-    int melodyDensity = 50;         // 0..100
-    int melodyRange = 12;           // semitones above root (8..24)
+    bool melodyInput = false;
+    int melodyStyleIndex = (int) MelodyStyle::March;
+    int melodyContourIndex = (int) MelodyContour::Even;
+    int melodySpeedIndex = (int) MelodySpeed::Medium;
+    int melodyPhraseIndex = (int) MelodyPhrase::FourBars;
     int melodyVariation = 1;        // 1..16 seed
+    /** Bumped by Generate so the live engine restarts the phrase. */
+    int melodyNonce = 0;
+
+    bool chordsEnabled = false;
+    bool chordsInput = false;
+    int chordVoicingIndex = (int) ChordVoicing::Close;
+    int chordColorIndex = (int) ChordColor::Triad;
+    int chordRhythmIndex = (int) ChordRhythm::Block;
+    int chordVariation = 1;
+    int chordNonce = 0;
+
+    bool bassEnabled = false;
+    bool bassInput = false;
+    int bassMotionIndex = (int) BassMotion::Pulse;
+    int bassVariation = 1;
+    int bassNonce = 0;
 
     bool drumsEnabled = false;
-    int drumStyleIndex = (int) DrumStyle::Backbeat;
+    int drumStyleIndex = (int) DrumStyle::Straight;
     int drumDensity = 50;           // 0..100
     int drumVariation = 1;          // 1..16 seed
+    int drumNonce = 0;
 
     int strumDirectionIndex = (int) StrumDirection::Up;
     int strumSpeed = 40;            // 0..100 spread
@@ -312,9 +502,13 @@ struct GrooveParams
     {
         return (DelayTime) juce::jlimit(0, (int) DelayTime::Count - 1, delayTimeIndex);
     }
-    ArpMode arpMode() const
+    ArpDirection arpDirection() const
     {
-        return (ArpMode) juce::jlimit(0, (int) ArpMode::Count - 1, arpModeIndex);
+        return (ArpDirection) juce::jlimit(0, (int) ArpDirection::Count - 1, arpDirectionIndex);
+    }
+    ArpShape arpShape() const
+    {
+        return (ArpShape) juce::jlimit(0, (int) ArpShape::Count - 1, arpShapeIndex);
     }
     DelayTime arpRate() const
     {
@@ -324,9 +518,33 @@ struct GrooveParams
     {
         return (MelodyStyle) juce::jlimit(0, (int) MelodyStyle::Count - 1, melodyStyleIndex);
     }
-    DelayTime melodyRate() const
+    MelodyContour melodyContour() const
     {
-        return (DelayTime) juce::jlimit(0, (int) DelayTime::Count - 1, melodyRateIndex);
+        return (MelodyContour) juce::jlimit(0, (int) MelodyContour::Count - 1, melodyContourIndex);
+    }
+    MelodySpeed melodySpeed() const
+    {
+        return (MelodySpeed) juce::jlimit(0, (int) MelodySpeed::Count - 1, melodySpeedIndex);
+    }
+    MelodyPhrase melodyPhrase() const
+    {
+        return (MelodyPhrase) juce::jlimit(0, (int) MelodyPhrase::Count - 1, melodyPhraseIndex);
+    }
+    ChordVoicing chordVoicing() const
+    {
+        return (ChordVoicing) juce::jlimit(0, (int) ChordVoicing::Count - 1, chordVoicingIndex);
+    }
+    ChordColor chordColor() const
+    {
+        return (ChordColor) juce::jlimit(0, (int) ChordColor::Count - 1, chordColorIndex);
+    }
+    ChordRhythm chordRhythm() const
+    {
+        return (ChordRhythm) juce::jlimit(0, (int) ChordRhythm::Count - 1, chordRhythmIndex);
+    }
+    BassMotion bassMotion() const
+    {
+        return (BassMotion) juce::jlimit(0, (int) BassMotion::Count - 1, bassMotionIndex);
     }
     DrumStyle drumStyle() const
     {

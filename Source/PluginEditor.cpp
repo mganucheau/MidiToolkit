@@ -1,5 +1,6 @@
 #include "PluginEditor.h"
 #include "FolderIndex.h"
+#include "GeneratorEngines.h"
 #include <map>
 #include <thread>
 #include <atomic>
@@ -381,9 +382,29 @@ MidiToolkitEditor::MidiToolkitEditor(MidiToolkitProcessor& p)
         }
 
         starredFilter = false;
-        sidebar.setStarredFilter(true); // highlights the Starred row
+        sidebar.setStarredFilter(true); // highlights the Files row
         setBrowseMode(1);
         loadStarredClips();
+        refreshSidebar();
+    };
+    sidebar.onShowStarredFolders = [this]
+    {
+        if (browseMode == 3)
+        {
+            setBrowseMode(0);
+            if (rootDir.isDirectory())
+                rescanFolder(true);
+            else
+            {
+                clips.clear();
+                rebuildEntries();
+            }
+            return;
+        }
+        starredFilter = false;
+        sidebar.setStarredFilter(false);
+        setBrowseMode(3);
+        loadStarredFolders();
         refreshSidebar();
     };
     sidebar.onShowSearch = [this]
@@ -513,27 +534,6 @@ MidiToolkitEditor::MidiToolkitEditor(MidiToolkitProcessor& p)
     // ── Browser toolbar + filter popover (Groove) ──
     browserBar.setSearchComponent(&sidebar.searchComponent());
     browserBar.onToggleFilters = [this] { sidebar.setFilterOpen(!sidebar.isFilterOpen()); };
-    browserBar.onToggleSubfolders = [this]
-    {
-        sidebar.setIncludeSubdirs(!sidebar.getIncludeSubdirs());
-        if (sidebar.onScanSubdirs) sidebar.onScanSubdirs();
-        refreshBrowserBar();
-    };
-    browserBar.onToggleSaved = [this]
-    {
-        if (sidebar.onAddCurrent) sidebar.onAddCurrent();
-        refreshBrowserBar();
-    };
-    browserBar.onRescan = [this] { if (sidebar.onRefreshFolder) sidebar.onRefreshFolder(); };
-    browserBar.onToggleGrid = [this]
-    {
-        gridView = !gridView;
-        browserBar.setGrid(gridView);
-        kindGrid.refresh();
-        applyLayoutState();
-        layoutContent();
-        if (gridView) kindGrid.grabKeyboardFocus();
-    };
     kindGrid.setSource(&fileList);
     kindGrid.onSelect = [this](int idx) { fileList.setSelectedIndex(idx, juce::sendNotification); kindGrid.repaint(); };
     kindGrid.onOpen = [this](int idx) { if (fileList.onOpenInPianoRoll) fileList.onOpenInPianoRoll(idx); };
@@ -549,7 +549,7 @@ MidiToolkitEditor::MidiToolkitEditor(MidiToolkitProcessor& p)
     content.addChildComponent(filterPopover);
     sidebar.onFilterOpenChanged = [this](bool open)
     {
-        filterPopover.setVisible(open && !processorRef.passthrough);
+        filterPopover.setVisible(open && leftPaneTab == 0);
         layoutContent();
         if (open)
         {
@@ -600,11 +600,22 @@ MidiToolkitEditor::MidiToolkitEditor(MidiToolkitProcessor& p)
                               ? clips[(size_t) row.clipIndex].filePath
                               : row.file.getFullPathName();
         if (path.isEmpty()) return;
-        processorRef.toggleStarred(path);
-        if (browseMode == 1)
-            loadStarredClips(); // drop unstarred from the global list
+        if (row.isDirectory || juce::File(path).isDirectory())
+        {
+            processorRef.toggleStarredFolder(path);
+            if (browseMode == 3)
+                loadStarredFolders();
+            else
+                rebuildEntries();
+        }
         else
-            rebuildEntries();
+        {
+            processorRef.toggleStarred(path);
+            if (browseMode == 1)
+                loadStarredClips();
+            else
+                rebuildEntries();
+        }
         refreshSidebar();
         if (const int d = displayForClip(selectedIdx); d >= 0)
             fileList.setSelectedIndex(d, juce::dontSendNotification);
@@ -725,6 +736,7 @@ MidiToolkitEditor::MidiToolkitEditor(MidiToolkitProcessor& p)
         {
             rollEditor.setClip(recordedClip, effectsInspector.getEdit(), k);
             pushPreviewToProcessor();
+            updateMiniPreview();
             return;
         }
         if (const auto* clip = selectedClip())
@@ -744,6 +756,60 @@ MidiToolkitEditor::MidiToolkitEditor(MidiToolkitProcessor& p)
         }
         else
             pushLiveFxToProcessor();
+    };
+    effectsInspector.onGeneratorGenerated = [this](int partIdx)
+    {
+        if (recording)
+            return;
+        const auto part = (gen::Part) juce::jlimit(0, (int) gen::Part::Count - 1, partIdx);
+        const auto edit = effectsInspector.getEdit();
+        const auto groove = effectsInspector.getGroove();
+        int keyRoot = edit.root >= 0 ? edit.root : 0;
+        if (const auto* clip = selectedClip(); clip != nullptr && clip->root >= 0 && edit.root < 0)
+            keyRoot = clip->root;
+        // Optional single-note latch from Pitch Input / live keyboard.
+        int chordBuf[1] {};
+        int chordCount = 0;
+        const int latch = processorRef.liveFxPitchLatch();
+        if (latch >= 0)
+        {
+            chordBuf[0] = latch;
+            chordCount = 1;
+            if (edit.root < 0)
+                keyRoot = latch % 12;
+        }
+        recordedClip = gen::renderPartClip(part, groove, keyRoot, edit.mode,
+                                           chordCount > 0 ? chordBuf : nullptr, chordCount);
+        const double bpm = processorRef.hostBpm.load();
+        recordedClip.bpm = bpm > 0.0 ? bpm : processorRef.freeBpm.load();
+        hasRecording = true;
+        selectedIdx = -1;
+        fileList.setSelectedIndex(-1, juce::dontSendNotification);
+        // Make sure the piano roll is visible for the new pattern.
+        if (!processorRef.editorOpen)
+        {
+            processorRef.editorOpen = true;
+            transport.setEditorOpen(true);
+        }
+        transport.setClipBpm(recordedClip.bpm);
+        transport.setClipName(recordedClip.name);
+        transport.setHasClip(!recordedClip.notes.empty());
+        rollEditor.setEmptyHint(recordedClip.notes.empty()
+                                    ? "Generator produced no notes — try Generate again."
+                                    : juce::String());
+        rollEditor.setClip(recordedClip, edit, groove);
+        // Keep inspector edits/groove; only refresh clip-derived annotations.
+        effectsInspector.setHasClip(true);
+        effectsInspector.setClipRoot(recordedClip.root);
+        effectsInspector.setClipSourceOctave(clipReferenceOctave(recordedClip));
+        effectsInspector.setClipComplexity(recordedClip.complexity);
+        effectsInspector.setClipScaleAnalysis(analyseClipScale(recordedClip));
+        pushPreviewToProcessor();
+        updateMiniPreview();
+        applyLayoutState();
+        // Layout can resize the roll — re-apply so notes stay painted.
+        if (!recordedClip.notes.empty())
+            rollEditor.setClip(recordedClip, effectsInspector.getEdit(), effectsInspector.getGroove());
     };
     effectsInspector.onEditChanged = [this](const ClipEdit& e)
     {
@@ -888,6 +954,29 @@ MidiToolkitEditor::MidiToolkitEditor(MidiToolkitProcessor& p)
     };
     content.addAndMakeVisible(effectsInspector);
 
+    leftPaneTabs.onTab = [this](int tab) { setLeftPaneTab(tab); };
+    leftPaneTabs.onToggleSubfolders = [this]
+    {
+        sidebar.setIncludeSubdirs(!sidebar.getIncludeSubdirs());
+        if (sidebar.onScanSubdirs) sidebar.onScanSubdirs();
+        refreshBrowserBar();
+    };
+    leftPaneTabs.onToggleGrid = [this]
+    {
+        gridView = !gridView;
+        leftPaneTabs.setGrid(gridView);
+        kindGrid.refresh();
+        applyLayoutState();
+        layoutContent();
+        if (gridView) kindGrid.grabKeyboardFocus();
+    };
+    content.addAndMakeVisible(leftPaneTabs);
+    generatorViewport.setViewedComponent(&generatorBody, false);
+    generatorViewport.setScrollBarsShown(true, false);
+    generatorViewport.setScrollBarThickness(10);
+    content.addChildComponent(generatorViewport);
+    effectsInspector.setExternalGeneratorHost(&generatorBody);
+
     passthroughVeil.setVisible(false);
     content.addChildComponent(passthroughVeil);
 
@@ -898,7 +987,8 @@ MidiToolkitEditor::MidiToolkitEditor(MidiToolkitProcessor& p)
     processorRef.editorOpen = false;
     transport.setPassthroughLocked(true);
     effectsInspector.setGeneratorsEnabled(true);
-    effectsInspector.setPaneTab(0);
+    effectsInspector.setPaneTab(1);
+    setLeftPaneTab(0);
 #endif
     refreshSidebar();
 
@@ -942,6 +1032,8 @@ MidiToolkitEditor::~MidiToolkitEditor()
     persistBrowserSession();
     flushBrowserSession();
     juce::Desktop::getInstance().removeDarkModeSettingListener(this);
+    nativeChrome::removeSpaceToHostMonitor(spaceToHostMonitor);
+    spaceToHostMonitor = nullptr;
     stopTimer();
     setLookAndFeel(nullptr);
 }
@@ -1039,6 +1131,9 @@ void MidiToolkitEditor::applyNativeWindowChrome()
 {
     if (getPeer() == nullptr)
         return;
+
+    if (spaceToHostMonitor == nullptr)
+        spaceToHostMonitor = nativeChrome::installSpaceToHostMonitor(*this, processorRef.syncToHost);
 
     // Already folded: don't resize the host window again when focus leaves.
     // applyCupertinoTitlebar still no-ops its frame change when the rect matches,
@@ -1638,12 +1733,24 @@ void MidiToolkitEditor::loadStarredClips(const juce::String& preferredPath)
         [this, previousPath](std::vector<StepClip>&& found)
         {
             clips = std::move(found);
-            fileList.setFolderName("Favorites");
+            fileList.setFolderName("Favorite Files");
             rebuildEntries();
             selectPathOrFirst(previousPath);
             fileList.grabBrowseFocus();
             persistBrowserSession();
         });
+}
+
+void MidiToolkitEditor::loadStarredFolders()
+{
+    clips.clear();
+    selectedIdx = -1;
+    rollEditor.clearClip();
+    syncEffectsInspector();
+    processorRef.setPreviewState({}, false, false, false);
+    rebuildEntries();
+    fileList.grabBrowseFocus();
+    persistBrowserSession();
 }
 
 bool MidiToolkitEditor::clipMatchesSearch(const StepClip& clip, const juce::File& file,
@@ -2172,9 +2279,28 @@ void MidiToolkitEditor::rebuildEntries()
             e.file = d;
             e.name = d.getFileName();
             e.isDirectory = true;
+            e.starred = processorRef.isStarredFolder(d.getFullPathName());
             entries.push_back(e);
             displayRows.push_back({ true, -1, d });
         }
+    }
+    if (browseMode == 3)
+    {
+        for (const auto& path : processorRef.starredFolders)
+        {
+            const juce::File d(path);
+            if (!d.isDirectory()) continue;
+            FileListEntry e;
+            e.file = d;
+            e.name = d.getFileName().isNotEmpty() ? d.getFileName() : path;
+            e.isDirectory = true;
+            e.starred = true;
+            entries.push_back(e);
+            displayRows.push_back({ true, -1, d });
+        }
+        fileList.setEntries(std::move(entries));
+        fileList.setFolderName("Favorite Folders");
+        return;
     }
 
     // Show filenames until a scan has produced clips. An empty scan must not
@@ -2605,6 +2731,7 @@ void MidiToolkitEditor::pushLiveFxToProcessor()
     state.edit = effectsInspector.getEdit();
     state.groove = effectsInspector.getGroove();
     state.bpmMultiplier = effectsInspector.getBpmMultiplier();
+    state.recording = processorRef.isRecording();
     if (const auto* clip = selectedClip())
     {
         state.sourceRoot = clip->root;
@@ -2632,7 +2759,7 @@ void MidiToolkitEditor::applyPassthroughUi()
     miniRoll.setAlpha(1.0f);
     previewHeader.setAlpha(1.0f);
     rollEditor.setAlpha(1.0f);
-    fileList.setEnabled(!pass);
+    fileList.setEnabled(true);
     rollEditor.setEnabled(true);
     rollEditor.setInputMode(pass || recording, recording && !pass ? "Live MIDI" : "Live MIDI through the Toolkit");
     if (pass)
@@ -2650,7 +2777,7 @@ void MidiToolkitEditor::applyPassthroughUi()
         if (const auto* clip = selectedClip())
             rollEditor.setClip(*clip, selectedEdit(), selectedGroove());
     }
-    previewHeader.setEnabled(!pass);
+    previewHeader.setEnabled(true);
     passthroughVeil.setVisible(false);
     applyLayoutState();
     repaint();
@@ -2994,6 +3121,7 @@ void MidiToolkitEditor::PreviewHeader::paint(juce::Graphics& g)
 void MidiToolkitEditor::toggleEditorFold()
 {
     processorRef.editorOpen = !processorRef.editorOpen;
+    // Preview strip and piano roll never share the window.
     processorRef.previewOpen = !processorRef.editorOpen;
     persistBrowserSession();
     applyLayoutState();
@@ -3084,7 +3212,128 @@ int MidiToolkitEditor::passthroughMaxHeight() const
 
 int MidiToolkitEditor::passthroughWindowWidth() const
 {
-    return metrics::effectsPaneWidth() + (processorRef.editorOpen ? metrics::editorPaneWidth() : 0);
+    const bool showFx = processorRef.effectsOpen || processorRef.passthrough;
+    int w = 0;
+    if (leftPaneTab == 0)
+    {
+        const int side = sidebar.isCollapsed() ? metrics::sidebarRailWidth()
+                                               : metrics::sidebarExpandedWidth();
+        const int browser = juce::jmax(metrics::fileTableWidth(), metrics::scaled(260));
+        w += side + browser;
+    }
+    else
+    {
+        // Generator column matches the Effects column width.
+        w += metrics::effectsPaneWidth();
+    }
+    if (processorRef.editorOpen)
+        w += metrics::editorPaneWidth();
+    if (showFx)
+        w += metrics::effectsPaneWidth();
+    return juce::jmax(w, metrics::effectsPaneWidth());
+}
+
+MidiToolkitEditor::LeftPaneTabs::LeftPaneTabs()
+{
+    btnGrid.setComponentID("btnGrid");
+    btnGrid.setTooltip("Grid view: files as clips in columns by kind");
+    btnGrid.onClick = [this] { if (onToggleGrid) onToggleGrid(); };
+    btnSubfolders.setTooltip("Include files in subfolders");
+    btnSubfolders.onClick = [this] { if (onToggleSubfolders) onToggleSubfolders(); };
+    addAndMakeVisible(btnGrid);
+    addAndMakeVisible(btnSubfolders);
+}
+
+void MidiToolkitEditor::LeftPaneTabs::setTab(int t)
+{
+    tab = juce::jlimit(0, 1, t);
+    const bool files = tab == 0;
+    btnGrid.setVisible(files);
+    btnSubfolders.setVisible(files);
+    resized();
+    repaint();
+}
+
+void MidiToolkitEditor::LeftPaneTabs::setGrid(bool on)
+{
+    btnGrid.active = on;
+    btnGrid.repaint();
+}
+
+void MidiToolkitEditor::LeftPaneTabs::setSubfolders(bool on)
+{
+    btnSubfolders.active = on;
+    btnSubfolders.repaint();
+}
+
+void MidiToolkitEditor::LeftPaneTabs::resized()
+{
+    auto row = getLocalBounds().reduced(metrics::scaled(8), 0);
+    const int ctl = metrics::scaled(18);
+    if (tab == 0)
+    {
+        const int subW = btnSubfolders.idealWidth();
+        const int gridW = btnGrid.idealWidth();
+        btnSubfolders.setBounds(row.removeFromRight(subW).withSizeKeepingCentre(subW, ctl));
+        row.removeFromRight(metrics::scaled(4));
+        btnGrid.setBounds(row.removeFromRight(gridW).withSizeKeepingCentre(gridW, ctl));
+    }
+    else
+    {
+        btnGrid.setBounds({});
+        btnSubfolders.setBounds({});
+    }
+}
+
+void MidiToolkitEditor::LeftPaneTabs::paint(juce::Graphics& g)
+{
+    g.fillAll(ds::surface300());
+    g.setColour(ds::line());
+    g.fillRect(0, getHeight() - 1, getWidth(), 1);
+
+    const auto font = uiFontFixed(12.0f, true);
+    g.setFont(font);
+    const int filesW = (int) std::ceil(juce::GlyphArrangement::getStringWidth(font, "Files")) + 8;
+    const int genW = (int) std::ceil(juce::GlyphArrangement::getStringWidth(font, "Generator")) + 8;
+    auto row = getLocalBounds().reduced(metrics::scaled(8), 0);
+    if (tab == 0)
+        row.setRight(btnGrid.getX() - metrics::scaled(8));
+    filesBounds = row.removeFromLeft(filesW);
+    row.removeFromLeft(metrics::scaled(12));
+    generatorBounds = row.removeFromLeft(genW);
+
+    auto draw = [&](juce::Rectangle<int> r, const juce::String& label, bool active)
+    {
+        g.setColour(active ? ds::ink() : ds::inkMuted());
+        g.drawText(label, r, juce::Justification::centredLeft, false);
+        if (active)
+        {
+            g.setColour(ds::acc());
+            g.fillRect(r.getX(), getHeight() - 2, r.getWidth(), 2);
+        }
+    };
+    draw(filesBounds, "Files", tab == 0);
+    draw(generatorBounds, "Generator", tab == 1);
+}
+
+void MidiToolkitEditor::LeftPaneTabs::mouseDown(const juce::MouseEvent& e)
+{
+    if (filesBounds.expanded(4, 6).contains(e.getPosition()))
+    {
+        if (onTab) onTab(0);
+        return;
+    }
+    if (generatorBounds.expanded(4, 6).contains(e.getPosition()))
+    {
+        if (onTab) onTab(1);
+    }
+}
+
+void MidiToolkitEditor::setLeftPaneTab(int tab)
+{
+    leftPaneTab = juce::jlimit(0, 1, tab);
+    leftPaneTabs.setTab(leftPaneTab);
+    applyLayoutState();
 }
 
 void MidiToolkitEditor::syncPassthroughWindowHeight()
@@ -3188,6 +3437,9 @@ void MidiToolkitEditor::applyLayoutState()
     {
         targetW = passthroughWindowWidth();
         // Keep the user's height while sections fold; only snap on enter.
+        // Tab changes (Files ↔ Generator) resize width to the open columns.
+        if (leftPaneTab != trackedLeftPaneTab)
+            targetW = passthroughWindowWidth();
         targetH = getHeight() > 0 ? getHeight() : passthroughWindowHeight();
     }
     else if (rec && !trackedRecording)
@@ -3217,18 +3469,21 @@ void MidiToolkitEditor::applyLayoutState()
 
     const bool passChanged = pass != trackedPassthrough;
     const bool recordChanged = rec != trackedRecording;
+    const bool leftTabChanged = leftPaneTab != trackedLeftPaneTab;
     const bool structureChanged = !layoutTracked
         || edOpen != trackedEditor
         || fxOpen != trackedEffects
         || side != trackedSidebar
         || passChanged
         || recordChanged
+        || leftTabChanged
         || contentChanged;
     trackedEditor = edOpen;
     trackedEffects = fxOpen;
     trackedSidebar = side;
     trackedPassthrough = pass;
     trackedRecording = rec;
+    trackedLeftPaneTab = leftPaneTab;
     layoutTracked = true;
     if (structureChanged)
         targetW = juce::jmax(minW, targetW);
@@ -3267,15 +3522,13 @@ int MidiToolkitEditor::browserContentWidth() const
 
 void MidiToolkitEditor::refreshBrowserBar()
 {
-    browserBar.setGrid(gridView);
+    leftPaneTabs.setGrid(gridView);
+    leftPaneTabs.setSubfolders(sidebar.getIncludeSubdirs());
     previewHeader.refresh();
     int files = 0;
     for (int i = 0; i < fileList.getNumEntries(); ++i)
         if (const auto* e = fileList.entryAt(i); e != nullptr && !e->isDirectory)
             ++files;
-    browserBar.setCount(files, files);
-    browserBar.setSubfolders(sidebar.getIncludeSubdirs());
-    browserBar.setSaved(sidebar.isCurrentFolderSaved(), rootDir.isDirectory());
     browserBar.setFiltersActive(sidebar.isFilterOpen(), sidebar.activeFilterCount());
     filterPopover.setCountText(juce::String(files) + (files == 1 ? " file" : " files"));
 }
@@ -3285,38 +3538,11 @@ void MidiToolkitEditor::layoutContent()
     auto r = content.getLocalBounds();
     const bool edOpen = processorRef.editorOpen;
     const bool fxOpen = processorRef.effectsOpen;
-    const bool previewOpen = true;   // Groove: the preview strip is always shown under the browser
+    // Preview and piano roll are mutually exclusive.
+    const bool previewOpen = !edOpen && processorRef.previewOpen;
     const bool pass = processorRef.passthrough;
 
     transport.setBounds(r.removeFromTop(metrics::transportH()));
-
-    if (pass)
-    {
-        browserBar.setVisible(false);
-        filterPopover.setVisible(false);
-        kindGrid.setVisible(false);
-        sidebar.setVisible(false);
-        fileList.setVisible(false);
-        previewHeader.setVisible(false);
-        miniRoll.setVisible(false);
-        passthroughVeil.setVisible(false);
-        browserRollSplitter.setVisible(false);
-        effectsInspector.setVisible(true);
-        if (edOpen)
-        {
-            // Through + Piano Roll: the input roll on the left, the Toolkit on the right.
-            auto row = r;
-            effectsInspector.setBounds(row.removeFromRight(juce::jmin(metrics::effectsPaneWidth(), row.getWidth())));
-            rollEditor.setVisible(true);
-            rollEditor.setBounds(row);
-        }
-        else
-        {
-            rollEditor.setVisible(false);
-            effectsInspector.setBounds(r);
-        }
-        return;
-    }
 
     if (recording)
     {
@@ -3329,6 +3555,8 @@ void MidiToolkitEditor::layoutContent()
         miniRoll.setVisible(false);
         browserRollSplitter.setVisible(false);
         passthroughVeil.setVisible(false);
+        leftPaneTabs.setVisible(false);
+        generatorViewport.setVisible(false);
         rollEditor.setVisible(true);
         effectsInspector.setVisible(fxOpen);
         auto row = r;
@@ -3338,27 +3566,53 @@ void MidiToolkitEditor::layoutContent()
         return;
     }
 
-    sidebar.setVisible(true);
-    browserBar.setVisible(true);
-    fileList.setVisible(true);
-    previewHeader.setVisible(true);
+    const bool showFiles = leftPaneTab == 0;
+    const bool showFx = fxOpen || pass;
+    sidebar.setVisible(showFiles);
+    browserBar.setVisible(showFiles);
+    fileList.setVisible(showFiles);
+    previewHeader.setVisible(false); // preview title row removed
     rollEditor.setVisible(edOpen);
-    effectsInspector.setVisible(fxOpen);
+    effectsInspector.setVisible(showFx);
+    leftPaneTabs.setVisible(true);
+    generatorViewport.setVisible(!showFiles);
 
     auto row = r;
-    int sideW = sidebar.idealWidth();
-    if (sideW > row.getWidth() - metrics::scaled(120))
-        sideW = juce::jmax(metrics::sidebarRailWidth(), row.getWidth() / 4);
-    sidebar.setBounds(row.removeFromLeft(juce::jmin(sideW, row.getWidth())));
+    int sideW = 0;
+    int leftColW = 0;
+    if (showFiles)
+    {
+        sideW = sidebar.idealWidth();
+        if (sideW > row.getWidth() - metrics::scaled(120))
+            sideW = juce::jmax(metrics::sidebarRailWidth(), row.getWidth() / 4);
+    }
+    else
+    {
+        leftColW = metrics::effectsPaneWidth();
+    }
 
-    int remain = row.getWidth();
-    int fxW = fxOpen ? metrics::effectsPaneWidth() : 0;
+    int remain = row.getWidth() - (showFiles ? sideW : leftColW);
+    int fxW = showFx ? metrics::effectsPaneWidth() : 0;
     const int browserMin = metrics::scaled(180);
     const int browserMax = juce::jmax(browserMin, browserContentWidth());
     const int rollMin = metrics::openRollMinWidth();
     int editorW = 0;
     int browserW = 0;
-    if (edOpen)
+    if (!showFiles)
+    {
+        // Generator column is fixed to the effects width; remainder goes to roll/fx.
+        if (edOpen)
+        {
+            if (fxW + rollMin > remain)
+                fxW = juce::jmax(0, remain - rollMin);
+            editorW = juce::jmax(0, remain - fxW);
+        }
+        else
+        {
+            fxW = juce::jmin(fxW, remain);
+        }
+    }
+    else if (edOpen)
     {
         if (fxW + rollMin + browserMin > remain)
             fxW = juce::jmax(metrics::scaled(160), remain - rollMin - browserMin);
@@ -3381,61 +3635,77 @@ void MidiToolkitEditor::layoutContent()
             fxW = juce::jmax(0, remain - browserMin);
         browserW = juce::jmin(browserMax, juce::jmax(0, remain - fxW));
     }
-    auto browserCol = row.removeFromLeft(browserW);
-    browserBar.setBounds(browserCol.removeFromTop(juce::jmin(browserBar.idealHeight(), browserCol.getHeight())));
 
-    int paneX = sidebar.getWidth() + browserW;
     const int paneY = row.getY();
     const int paneH = row.getHeight();
+    const int leftTotal = showFiles ? (sideW + browserW) : leftColW;
+    auto left = row.removeFromLeft(leftTotal);
+    leftPaneTabs.setBounds(left.removeFromTop(metrics::paneHeaderH()));
+    int paneX = row.getX();
+    juce::Rectangle<int> browserCol;
+    if (!showFiles)
+    {
+        generatorViewport.setBounds(left);
+        generatorBody.setSize(juce::jmax(1, generatorViewport.getMaximumVisibleWidth()),
+                              juce::jmax(1, generatorBody.getHeight()));
+        effectsInspector.layoutExternalGenerators();
+        filterPopover.setVisible(false);
+        miniRoll.setBounds({});
+        miniRoll.setVisible(false);
+        previewHeader.setBounds({});
+        kindGrid.setVisible(false);
+        fileList.setVisible(false);
+    }
+    else
+    {
+        sidebar.setBounds(left.removeFromLeft(sideW));
+        browserCol = left;
+        browserBar.setBounds(browserCol.removeFromTop(juce::jmin(browserBar.idealHeight(), browserCol.getHeight())));
+    }
     if (edOpen)
     {
         rollEditor.setBounds(paneX, paneY, editorW, paneH);
         const int splitW = 6;
         browserRollSplitter.setBounds(paneX - splitW / 2, paneY, splitW, paneH);
-        browserRollSplitter.setVisible(true);
-        browserRollSplitter.toFront(false);
+        browserRollSplitter.setVisible(showFiles);
+        if (showFiles)
+            browserRollSplitter.toFront(false);
         paneX += editorW;
     }
     else
     {
         browserRollSplitter.setVisible(false);
     }
-    if (fxOpen)
+    if (showFx)
         effectsInspector.setBounds(paneX, paneY, fxW, paneH);
 
-    // Preview stack pinned under the file list — never taller than the column.
-    // Prefer keeping a usable file-list strip; shrink the roll (content refits).
-    const int previewHeaderH = metrics::scaled(26);
-    const int fileListMinH = metrics::listHeaderH() + metrics::listRowH() * 2;
-    const int colH = browserCol.getHeight();
-    const int softMaxStack = juce::jmax(0, colH - fileListMinH);
-    const int desiredRollH = previewOpen ? metrics::miniRollH()
-                                           + (showPreviewVelocity ? metrics::scaled(PianoRollMini::kVelocityH) : 0) : 0;
-    int stackH = juce::jmin(previewHeaderH + desiredRollH, softMaxStack);
-    // In a very short window, still keep the Preview title row if possible.
-    if (stackH < previewHeaderH)
-        stackH = juce::jmin(previewHeaderH, colH);
-    const int headerH = juce::jmin(previewHeaderH, stackH);
-    const int rollH = previewOpen ? juce::jmax(0, stackH - headerH) : 0;
+    // Mini preview only when the piano roll is closed (Files tab).
+    if (showFiles)
+    {
+        const int fileListMinH = metrics::listHeaderH() + metrics::listRowH() * 2;
+        const int colH = browserCol.getHeight();
+        const int softMaxStack = juce::jmax(0, colH - fileListMinH);
+        // Notes + velocity share height evenly when velocity is shown.
+        // Notes + velocity share height evenly.
+        const int desiredRollH = previewOpen ? juce::jmax(metrics::miniRollH(), metrics::scaled(80)) : 0;
+        const int rollH = juce::jmin(desiredRollH, softMaxStack);
 
-    if (rollH > 0)
-        miniRoll.setBounds(browserCol.removeFromBottom(rollH));
-    else
-        miniRoll.setBounds({});
-    miniRoll.setVisible(rollH > 0);
-
-    if (headerH > 0)
-        previewHeader.setBounds(browserCol.removeFromBottom(headerH));
-    else
+        if (rollH > 0)
+            miniRoll.setBounds(browserCol.removeFromBottom(rollH));
+        else
+            miniRoll.setBounds({});
+        miniRoll.setVisible(rollH > 0);
+        miniRoll.setShowVelocity(true);
         previewHeader.setBounds({});
 
-    fileList.setBounds(browserCol);
-    kindGrid.setBounds(browserCol);
-    fileList.setVisible(!gridView);
-    kindGrid.setVisible(gridView);
-    browserColW = fileList.getWidth();
+        fileList.setBounds(browserCol);
+        kindGrid.setBounds(browserCol);
+        fileList.setVisible(!gridView);
+        kindGrid.setVisible(gridView);
+        browserColW = fileList.getWidth();
+    }
 
-    if (sidebar.isFilterOpen())
+    if (showFiles && sidebar.isFilterOpen())
     {
         const int w = juce::jmin(metrics::scaled(300), juce::jmax(200, browserBar.getWidth() - metrics::scaled(16)));
         const int top = browserBar.getBottom() - metrics::scaled(4);
@@ -3450,12 +3720,9 @@ void MidiToolkitEditor::layoutContent()
         filterPopover.setVisible(false);
     }
 
-    // Dim veil covers the file-driven piano stack (list + preview + editor pane).
     if (passthroughVeil.isVisible())
     {
-        juce::Rectangle<int> veil = fileList.getBounds()
-                                        .getUnion(previewHeader.getBounds())
-                                        .getUnion(miniRoll.getBounds());
+        juce::Rectangle<int> veil = fileList.getBounds().getUnion(miniRoll.getBounds());
         if (edOpen)
             veil = veil.getUnion(rollEditor.getBounds());
         passthroughVeil.setBounds(veil);
@@ -3520,6 +3787,8 @@ public:
         textPopup.setItems(pctLabels, pctIdx);
         tooltipsSwitch.setToggleState(tweaks().showTooltips.load() != 0, juce::dontSendNotification);
         tooltipsSwitch.setTooltip("Show hover tips on controls");
+        alternateRowsSwitch.setToggleState(tweaks().alternateRows.load() != 0, juce::dontSendNotification);
+        alternateRowsSwitch.setTooltip("Shade every other file-list row");
 
         auto wire = [this](fx::FlatPopup& p, std::function<void(int)> apply)
         {
@@ -3547,6 +3816,12 @@ public:
             if (onChanged) onChanged();
         };
         addAndMakeVisible(tooltipsSwitch);
+        alternateRowsSwitch.onClick = [this]
+        {
+            tweaks().alternateRows.store(alternateRowsSwitch.getToggleState() ? 1 : 0);
+            if (onChanged) onChanged();
+        };
+        addAndMakeVisible(alternateRowsSwitch);
 
         closeBtn.ghost = true;
         closeBtn.iconScale = 0.95f;
@@ -3559,8 +3834,17 @@ public:
         saveDefaultBtn.onClick = [this] { if (onSaveDefault) onSaveDefault(); };
         addAndMakeVisible(saveDefaultBtn);
 
-        setSize(kPanelW, 440);
         setTab(1); // Design
+        setSize(kPanelW, contentHeightForTab(tab));
+    }
+
+    static int contentHeightForTab(int t)
+    {
+        const int header = kHeaderH + kTabH + 8 + kFooterH + 20;
+        const int rowH = 40 + 6;
+        if (t == 0) return header + rowH + 8;
+        if (t == 1) return header + rowH * 8 + 8; // theme..tooltips + alternate rows
+        return header + 56;
     }
 
     void setTab(int t)
@@ -3575,9 +3859,13 @@ public:
         fontPopup.setVisible(design);
         surfacePopup.setVisible(design);
         tooltipsSwitch.setVisible(design);
+        alternateRowsSwitch.setVisible(design);
         saveDefaultBtn.setVisible(output);
+        setSize(kPanelW, contentHeightForTab(tab));
         resized();
         repaint();
+        if (auto* parent = getParentComponent())
+            parent->resized();
     }
 
     void paint(juce::Graphics& g) override
@@ -3657,6 +3945,7 @@ public:
             paintRow("Surface", "Flat, drop shadows, or frosted");
             paintRow("Row spacing", "Tighter or roomier list rows");
             paintRow("Show tooltips", "");
+            paintRow("Alternate rows", "Shade every other file-list row");
         }
         else
         {
@@ -3713,6 +4002,7 @@ public:
         fontPopup.setBounds({});
         surfacePopup.setBounds({});
         tooltipsSwitch.setBounds({});
+        alternateRowsSwitch.setBounds({});
         saveDefaultBtn.setBounds({});
 
         if (tab == 0)
@@ -3738,6 +4028,12 @@ public:
                 tooltipsSwitch.setBounds(tipRow.removeFromBottom(18).removeFromLeft(sw));
             else
                 tooltipsSwitch.setBounds(tipRow.removeFromRight(sw).withSizeKeepingCentre(sw, 18));
+            auto altRow = body.removeFromTop(rowH);
+            const int aw = alternateRowsSwitch.idealWidth();
+            if (narrow)
+                alternateRowsSwitch.setBounds(altRow.removeFromBottom(18).removeFromLeft(aw));
+            else
+                alternateRowsSwitch.setBounds(altRow.removeFromRight(aw).withSizeKeepingCentre(aw, 18));
         }
     }
 
@@ -3746,6 +4042,7 @@ private:
     juce::Rectangle<int> tabBounds[3];
     fx::FlatPopup appearancePopup, sizePopup, textPopup, spacingPopup, fontPopup, surfacePopup;
     fx::FlatSwitch tooltipsSwitch;
+    fx::FlatSwitch alternateRowsSwitch;
     IconBtn closeBtn { icons::x, "Close" };
     IconBtn saveDefaultBtn { icons::save, "Save" };
 };
@@ -3785,9 +4082,12 @@ void MidiToolkitEditor::showTweaksMenu()
             const int margin = 12;
             const int w = juce::jmin(SettingsPanel::kPanelW,
                                      juce::jmax(220, getWidth() - margin * 2));
-            const int h = juce::jmax(280, getHeight() - margin * 2);
+            const int h = juce::jmin(panel.getHeight() > 0 ? panel.getHeight()
+                                                          : SettingsPanel::contentHeightForTab(1),
+                                    juce::jmax(200, getHeight() - margin * 2));
             view.setBounds(getLocalBounds().withSizeKeepingCentre(w, h));
-            panel.setSize(w, h);
+            panel.setSize(w, panel.getHeight() > 0 ? panel.getHeight()
+                                                   : SettingsPanel::contentHeightForTab(1));
         }
 
         void paint(juce::Graphics& g) override
@@ -3863,27 +4163,18 @@ bool MidiToolkitEditor::keyPressed(const juce::KeyPress& key)
     if (key == juce::KeyPress::escapeKey && sidebar.keyPressed(key))
         return true;
 
-    // Space: toggle preview arm. When synced, that follows the DAW playhead
-    // (plugin playhead moves with the host). Most VST3 hosts including Live
-    // refuse to let plugins start/stop the DAW transport itself.
     if (key == juce::KeyPress::spaceKey)
     {
+        // Synced: the mac monitor already handed space to the host window.
+        // If it didn't (embedded view, or another platform), leave the key
+        // unhandled so the host can use it for play/stop.
         if (processorRef.syncToHost.load())
-        {
-            // Synced: arm/disarm so the plugin follows (or ignores) the host.
-            // If the host is already playing, arming starts preview immediately.
-            const bool arm = !processorRef.previewArmed.load();
-            processorRef.previewArmed.store(arm);
-            if (!arm)
-                processorRef.freerunBeat.store(0.0);
-        }
-        else
-        {
-            const bool arm = !processorRef.previewArmed.load();
-            processorRef.previewArmed.store(arm);
-            if (!arm)
-                processorRef.freerunBeat.store(0.0);
-        }
+            return false;
+
+        const bool arm = !processorRef.previewArmed.load();
+        processorRef.previewArmed.store(arm);
+        if (!arm)
+            processorRef.freerunBeat.store(0.0);
         return true;
     }
 

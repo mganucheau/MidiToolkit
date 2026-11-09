@@ -8,9 +8,13 @@
 namespace pflow {
 
 MidiToolkitProcessor::MidiToolkitProcessor()
-   // True AU MIDI effects have no audio buses. The Live-facing FX VST3 is an
-   // instrument-style shell (silent stereo out) so Ableton will open it.
-   #if JucePlugin_IsMidiEffect
+   // Logic AU MIDI FX has no audio buses. The Live VST3 has stereo in and out
+   // so Ableton will open it and pass a keyboard through to the instrument.
+   #if defined(MIDITOOLKIT_FX_LIVE_VST3)
+    : AudioProcessor(BusesProperties()
+                         .withInput("Input", juce::AudioChannelSet::stereo(), true)
+                         .withOutput("Output", juce::AudioChannelSet::stereo(), true))
+   #elif JucePlugin_IsMidiEffect
     : AudioProcessor(BusesProperties())
    #else
     : AudioProcessor(BusesProperties()
@@ -34,6 +38,7 @@ MidiToolkitProcessor::~MidiToolkitProcessor()
 void MidiToolkitProcessor::applyLibraryToMemory()
 {
     starredFiles = library_.starredFiles;
+    starredFolders = library_.starredFolders;
     savedSearches = library_.savedSearches;
 }
 
@@ -85,6 +90,7 @@ void MidiToolkitProcessor::applySharedUiSessionFromLibrary()
     tweaks().showTooltips.store(s.tweakShowTooltips != 0 ? 1 : 0);
     tweaks().fontFamily.store(juce::jlimit(0, (int) FontFamily::Count - 1, s.tweakFontFamily));
     tweaks().surfaceStyle.store(juce::jlimit(0, (int) SurfaceStyle::Count - 1, s.tweakSurfaceStyle));
+    tweaks().alternateRows.store(s.tweakAlternateRows != 0 ? 1 : 0);
 
     hasDefaultView = s.hasDefaultView;
     defEditorOpen = s.defEditorOpen;
@@ -143,6 +149,7 @@ void MidiToolkitProcessor::persistSharedUiSession()
     s.tweakShowTooltips = tweaks().showTooltips.load();
     s.tweakFontFamily = tweaks().fontFamily.load();
     s.tweakSurfaceStyle = tweaks().surfaceStyle.load();
+    s.tweakAlternateRows = tweaks().alternateRows.load();
     s.hasDefaultView = hasDefaultView;
     s.defEditorOpen = defEditorOpen;
     s.defEffectsOpen = defEffectsOpen;
@@ -167,6 +174,9 @@ void MidiToolkitProcessor::syncLibraryFromMemory()
     for (const auto& s : starredFiles)
         if (s.isNotEmpty() && !library_.starredFiles.contains(s))
             library_.starredFiles.add(s);
+    for (const auto& s : starredFolders)
+        if (s.isNotEmpty() && !library_.starredFolders.contains(s))
+            library_.starredFolders.add(s);
     library_.savedSearches = savedSearches;
     // Keep the shared workspace snapshot current whenever we flush the library.
     {
@@ -196,6 +206,7 @@ void MidiToolkitProcessor::syncLibraryFromMemory()
         s.tweakShowTooltips = tweaks().showTooltips.load();
         s.tweakFontFamily = tweaks().fontFamily.load();
         s.tweakSurfaceStyle = tweaks().surfaceStyle.load();
+        s.tweakAlternateRows = tweaks().alternateRows.load();
         s.hasDefaultView = hasDefaultView;
         s.defEditorOpen = defEditorOpen;
         s.defEffectsOpen = defEffectsOpen;
@@ -215,6 +226,7 @@ void MidiToolkitProcessor::syncLibraryFromMemory()
     }
     library_.save();
     starredFiles = library_.starredFiles;
+    starredFolders = library_.starredFolders;
 }
 
 void MidiToolkitProcessor::saveLibrary()
@@ -226,6 +238,12 @@ void MidiToolkitProcessor::toggleStarred(const juce::String& path)
 {
     library_.toggleStarred(path);
     starredFiles = library_.starredFiles;
+}
+
+void MidiToolkitProcessor::toggleStarredFolder(const juce::String& path)
+{
+    library_.toggleStarredFolder(path);
+    starredFolders = library_.starredFolders;
 }
 
 void MidiToolkitProcessor::addSavedSearch(const SavedSearchEntry& entry)
@@ -261,7 +279,10 @@ void MidiToolkitProcessor::prepareToPlay(double sr, int)
 void MidiToolkitProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                                         juce::MidiBuffer& midi)
 {
-    buffer.clear();
+    // Silent instrument builds have no input. The Live FX VST3 keeps the input
+    // so a keyboard's MIDI (and any audio) is not thrown away.
+    if (getTotalNumInputChannels() <= 0)
+        buffer.clear();
 
     if (auto* playHead = getPlayHead())
     {
@@ -334,10 +355,14 @@ void MidiToolkitProcessor::processBlock(juce::AudioBuffer<float>& buffer,
         return;
     }
 
-    // Clip-preview path: discard host MIDI, keep any live-note release events.
-    midi.clear();
+    // Clip preview used to drop the keyboard. Run host notes through the same
+    // live transform, then mix them with the preview.
+    juce::MidiBuffer liveMidi;
+    liveMidi.swapWith(midi);
+    liveFx_.process(liveMidi, sampleRate_, hostBpm.load(), hostBeatPos.load(),
+                    buffer.getNumSamples(), hostPlaying.load());
     for (const auto metadata : flushEvents)
-        midi.addEvent(metadata.getMessage(), metadata.samplePosition);
+        liveMidi.addEvent(metadata.getMessage(), metadata.samplePosition);
 
     const bool synced = syncToHost.load();
     const bool hostIsPlaying = hostPlaying.load();
@@ -357,6 +382,8 @@ void MidiToolkitProcessor::processBlock(juce::AudioBuffer<float>& buffer,
             flushActiveNotes(midi, 0);
         wasSounding_ = false;
         lastBeatPos_ = -1.0;
+        for (const auto metadata : liveMidi)
+            midi.addEvent(metadata.getMessage(), metadata.samplePosition);
         return;
     }
     wasSounding_ = true;
@@ -498,7 +525,39 @@ void MidiToolkitProcessor::processBlock(juce::AudioBuffer<float>& buffer,
         lastBeatPos_ = endBeat;
     }
 
+    // Pitch Input: transpose the file preview so browsing follows the latched key.
+    // Generators apply the same root themselves. Recording leaves notes alone.
+    const auto fxSnap = liveFx_.getState();
+    const int latch = liveFx_.pitchLatchMidi();
+    if (fxSnap.edit.pitchInput && latch >= 0 && fxSnap.sourceRoot >= 0)
+    {
+        const int delta = (latch % 12) - (fxSnap.sourceRoot % 12);
+        if (delta != 0)
+        {
+            juce::MidiBuffer shifted;
+            for (const auto metadata : generated)
+            {
+                auto msg = metadata.getMessage();
+                if (msg.isNoteOnOrOff())
+                {
+                    const int ch = msg.getChannel();
+                    if (ch != 10)
+                        msg = msg.isNoteOn()
+                            ? juce::MidiMessage::noteOn(ch,
+                                  juce::jlimit(0, 127, msg.getNoteNumber() + delta),
+                                  msg.getVelocity())
+                            : juce::MidiMessage::noteOff(ch,
+                                  juce::jlimit(0, 127, msg.getNoteNumber() + delta));
+                }
+                shifted.addEvent(msg, metadata.samplePosition);
+            }
+            generated.swapWith(shifted);
+        }
+    }
+
     for (const auto metadata : generated)
+        midi.addEvent(metadata.getMessage(), metadata.samplePosition);
+    for (const auto metadata : liveMidi)
         midi.addEvent(metadata.getMessage(), metadata.samplePosition);
 }
 
@@ -552,10 +611,15 @@ void MidiToolkitProcessor::setRecordingEnabled(bool enabled)
         requestNoteFlush();
         recorder.start();
         recordingActive.store(true);
-        return;
     }
-    recorder.stop();
-    recordingActive.store(false);
+    else
+    {
+        recorder.stop();
+        recordingActive.store(false);
+    }
+    auto snap = liveFx_.getState();
+    snap.recording = enabled;
+    liveFx_.setState(snap);
 }
 
 void MidiToolkitProcessor::setPassthroughEnabled(bool enabled)
@@ -755,6 +819,7 @@ void MidiToolkitProcessor::getStateInformation(juce::MemoryBlock& dest)
     xml.setAttribute("tweakShowTooltips", tweaks().showTooltips.load());
     xml.setAttribute("tweakFontFamily", tweaks().fontFamily.load());
     xml.setAttribute("tweakSurfaceStyle", tweaks().surfaceStyle.load());
+    xml.setAttribute("tweakAlternateRows", tweaks().alternateRows.load());
     xml.setAttribute("syncSessionBars", syncSessionBars.load());
     xml.setAttribute("lastBrowserDir", lastBrowserDir);
     xml.setAttribute("trimEmptyMeasuresPreview", trimEmptyMeasuresPreview ? 1 : 0);
@@ -799,6 +864,7 @@ void MidiToolkitProcessor::getStateInformation(juce::MemoryBlock& dest)
     xml.setAttribute("lockOctaveAbs", 1);
     xml.setAttribute("lockOctave", lockedEdit.octave);
     xml.setAttribute("lockPitchShift", lockedEdit.pitchShift);
+    xml.setAttribute("lockPitchInput", lockedEdit.pitchInput ? 1 : 0);
     xml.setAttribute("lockOctaveRange", lockedEdit.octaveRange);
     xml.setAttribute("lockOutsideRange", (int) lockedEdit.outsideRange);
     xml.setAttribute("lockPitchMin", lockedEdit.pitchMin);
@@ -827,21 +893,40 @@ void MidiToolkitProcessor::getStateInformation(juce::MemoryBlock& dest)
     xml.setAttribute("lockDelayTime", lockedGroove.delayTimeIndex);
     xml.setAttribute("lockDelayAmount", lockedGroove.delayAmount);
     xml.setAttribute("lockDelayFeedback", lockedGroove.delayFeedback);
-    xml.setAttribute("lockArpMode", lockedGroove.arpModeIndex);
+    xml.setAttribute("lockArpOn", lockedGroove.arpEnabled ? 1 : 0);
+    xml.setAttribute("lockArpInput", lockedGroove.arpInput ? 1 : 0);
+    xml.setAttribute("lockArpDirection", lockedGroove.arpDirectionIndex);
+    xml.setAttribute("lockArpShape", lockedGroove.arpShapeIndex);
     xml.setAttribute("lockArpRate", lockedGroove.arpRateIndex);
     xml.setAttribute("lockArpGate", lockedGroove.arpGate);
     xml.setAttribute("lockArpOctaves", lockedGroove.arpOctaves);
-    xml.setAttribute("lockArpLatch", lockedGroove.arpLatch ? 1 : 0);
+    xml.setAttribute("lockArpVar", lockedGroove.arpVariation);
+    xml.setAttribute("lockArpNonce", lockedGroove.arpNonce);
     xml.setAttribute("lockMelodyOn", lockedGroove.melodyEnabled ? 1 : 0);
+    xml.setAttribute("lockMelodyInput", lockedGroove.melodyInput ? 1 : 0);
+    xml.setAttribute("lockMelodyNonce", lockedGroove.melodyNonce);
     xml.setAttribute("lockMelodyStyle", lockedGroove.melodyStyleIndex);
-    xml.setAttribute("lockMelodyRate", lockedGroove.melodyRateIndex);
-    xml.setAttribute("lockMelodyDensity", lockedGroove.melodyDensity);
-    xml.setAttribute("lockMelodyRange", lockedGroove.melodyRange);
+    xml.setAttribute("lockMelodyContour", lockedGroove.melodyContourIndex);
+    xml.setAttribute("lockMelodySpeed", lockedGroove.melodySpeedIndex);
+    xml.setAttribute("lockMelodyPhrase", lockedGroove.melodyPhraseIndex);
     xml.setAttribute("lockMelodyVar", lockedGroove.melodyVariation);
+    xml.setAttribute("lockChordsOn", lockedGroove.chordsEnabled ? 1 : 0);
+    xml.setAttribute("lockChordsInput", lockedGroove.chordsInput ? 1 : 0);
+    xml.setAttribute("lockChordVoicing", lockedGroove.chordVoicingIndex);
+    xml.setAttribute("lockChordColor", lockedGroove.chordColorIndex);
+    xml.setAttribute("lockChordRhythm", lockedGroove.chordRhythmIndex);
+    xml.setAttribute("lockChordVar", lockedGroove.chordVariation);
+    xml.setAttribute("lockChordNonce", lockedGroove.chordNonce);
+    xml.setAttribute("lockBassOn", lockedGroove.bassEnabled ? 1 : 0);
+    xml.setAttribute("lockBassInput", lockedGroove.bassInput ? 1 : 0);
+    xml.setAttribute("lockBassMotion", lockedGroove.bassMotionIndex);
+    xml.setAttribute("lockBassVar", lockedGroove.bassVariation);
+    xml.setAttribute("lockBassNonce", lockedGroove.bassNonce);
     xml.setAttribute("lockDrumsOn", lockedGroove.drumsEnabled ? 1 : 0);
     xml.setAttribute("lockDrumStyle", lockedGroove.drumStyleIndex);
     xml.setAttribute("lockDrumDensity", lockedGroove.drumDensity);
     xml.setAttribute("lockDrumVar", lockedGroove.drumVariation);
+    xml.setAttribute("lockDrumNonce", lockedGroove.drumNonce);
     xml.setAttribute("lockStrumDir", lockedGroove.strumDirectionIndex);
     xml.setAttribute("lockStrumSpeed", lockedGroove.strumSpeed);
     xml.setAttribute("lockStrumAmount", lockedGroove.strumAmount);
@@ -901,6 +986,7 @@ void MidiToolkitProcessor::getStateInformation(juce::MemoryBlock& dest)
         e->setAttribute("octaveAbs", 1);
         e->setAttribute("octave", edit.octave);
         e->setAttribute("pitchShift", edit.pitchShift);
+        e->setAttribute("pitchInput", edit.pitchInput ? 1 : 0);
         e->setAttribute("octaveRange", edit.octaveRange);
         e->setAttribute("outsideRange", (int) edit.outsideRange);
         e->setAttribute("pitchMin", edit.pitchMin);
@@ -968,21 +1054,40 @@ void MidiToolkitProcessor::getStateInformation(juce::MemoryBlock& dest)
         e->setAttribute("delayTime", k.delayTimeIndex);
         e->setAttribute("delayAmount", k.delayAmount);
         e->setAttribute("delayFeedback", k.delayFeedback);
-        e->setAttribute("arpMode", k.arpModeIndex);
+        e->setAttribute("arpOn", k.arpEnabled ? 1 : 0);
+        e->setAttribute("arpInput", k.arpInput ? 1 : 0);
+        e->setAttribute("arpDirection", k.arpDirectionIndex);
+        e->setAttribute("arpShape", k.arpShapeIndex);
         e->setAttribute("arpRate", k.arpRateIndex);
         e->setAttribute("arpGate", k.arpGate);
         e->setAttribute("arpOctaves", k.arpOctaves);
-        e->setAttribute("arpLatch", k.arpLatch ? 1 : 0);
+        e->setAttribute("arpVar", k.arpVariation);
+        e->setAttribute("arpNonce", k.arpNonce);
         e->setAttribute("melodyOn", k.melodyEnabled ? 1 : 0);
+        e->setAttribute("melodyInput", k.melodyInput ? 1 : 0);
         e->setAttribute("melodyStyle", k.melodyStyleIndex);
-        e->setAttribute("melodyRate", k.melodyRateIndex);
-        e->setAttribute("melodyDensity", k.melodyDensity);
-        e->setAttribute("melodyRange", k.melodyRange);
+        e->setAttribute("melodyContour", k.melodyContourIndex);
+        e->setAttribute("melodySpeed", k.melodySpeedIndex);
+        e->setAttribute("melodyPhrase", k.melodyPhraseIndex);
         e->setAttribute("melodyVar", k.melodyVariation);
+        e->setAttribute("melodyNonce", k.melodyNonce);
+        e->setAttribute("chordsOn", k.chordsEnabled ? 1 : 0);
+        e->setAttribute("chordsInput", k.chordsInput ? 1 : 0);
+        e->setAttribute("chordVoicing", k.chordVoicingIndex);
+        e->setAttribute("chordColor", k.chordColorIndex);
+        e->setAttribute("chordRhythm", k.chordRhythmIndex);
+        e->setAttribute("chordVar", k.chordVariation);
+        e->setAttribute("chordNonce", k.chordNonce);
+        e->setAttribute("bassOn", k.bassEnabled ? 1 : 0);
+        e->setAttribute("bassInput", k.bassInput ? 1 : 0);
+        e->setAttribute("bassMotion", k.bassMotionIndex);
+        e->setAttribute("bassVar", k.bassVariation);
+        e->setAttribute("bassNonce", k.bassNonce);
         e->setAttribute("drumsOn", k.drumsEnabled ? 1 : 0);
         e->setAttribute("drumStyle", k.drumStyleIndex);
         e->setAttribute("drumDensity", k.drumDensity);
         e->setAttribute("drumVar", k.drumVariation);
+        e->setAttribute("drumNonce", k.drumNonce);
         e->setAttribute("strumDir", k.strumDirectionIndex);
         e->setAttribute("strumSpeed", k.strumSpeed);
         e->setAttribute("strumAmount", k.strumAmount);
@@ -1045,6 +1150,7 @@ void MidiToolkitProcessor::setStateInformation(const void* data, int sizeInBytes
                 xml->getIntAttribute("tweakFontFamily", tweaks().fontFamily.load())));
             tweaks().surfaceStyle.store(juce::jlimit(0, (int) SurfaceStyle::Count - 1,
                 xml->getIntAttribute("tweakSurfaceStyle", tweaks().surfaceStyle.load())));
+            tweaks().alternateRows.store(xml->getIntAttribute("tweakAlternateRows", 0) != 0 ? 1 : 0);
             syncSessionBars.store(juce::jlimit(1, 256, xml->getIntAttribute("syncSessionBars",
                 xml->getIntAttribute("arrangementBars", syncSessionBars.load()))));
             lastBrowserDir = xml->getStringAttribute("lastBrowserDir");
@@ -1109,6 +1215,7 @@ void MidiToolkitProcessor::setStateInformation(const void* data, int sizeInBytes
                 lockedEdit.octave = rel == 0 ? -1 : juce::jlimit(0, 6, 4 + rel);
             }
             lockedEdit.pitchShift = juce::jlimit(-12, 12, xml->getIntAttribute("lockPitchShift", 0));
+            lockedEdit.pitchInput = xml->getIntAttribute("lockPitchInput", 0) != 0;
             lockedEdit.octaveRange = juce::jlimit(0, 3, xml->getIntAttribute("lockOctaveRange", 0));
             lockedEdit.outsideRange = xml->getIntAttribute("lockOutsideRange", 1) == 0
                                            ? OutsideRangeMode::Clip
@@ -1166,26 +1273,52 @@ void MidiToolkitProcessor::setStateInformation(const void* data, int sizeInBytes
                 xml->getIntAttribute("lockDelayTime", (int) DelayTime::Eighth));
             lockedGroove.delayAmount = juce::jlimit(0, 100, xml->getIntAttribute("lockDelayAmount", 0));
             lockedGroove.delayFeedback = juce::jlimit(0, 100, xml->getIntAttribute("lockDelayFeedback", 40));
-            lockedGroove.arpModeIndex = juce::jlimit(0, (int) ArpMode::Count - 1,
-                xml->getIntAttribute("lockArpMode", 0));
+            lockedGroove.arpEnabled = xml->getIntAttribute("lockArpOn", 0) != 0;
+            lockedGroove.arpInput = xml->getIntAttribute("lockArpInput", 0) != 0;
+            lockedGroove.arpDirectionIndex = juce::jlimit(0, (int) ArpDirection::Count - 1,
+                xml->getIntAttribute("lockArpDirection", xml->getIntAttribute("lockArpMode", 0)));
+            lockedGroove.arpShapeIndex = juce::jlimit(0, (int) ArpShape::Count - 1,
+                xml->getIntAttribute("lockArpShape", 0));
             lockedGroove.arpRateIndex = juce::jlimit(0, (int) DelayTime::Count - 1,
                 xml->getIntAttribute("lockArpRate", (int) DelayTime::Sixteenth));
             lockedGroove.arpGate = juce::jlimit(10, 100, xml->getIntAttribute("lockArpGate", 70));
             lockedGroove.arpOctaves = juce::jlimit(1, 3, xml->getIntAttribute("lockArpOctaves", 1));
-            lockedGroove.arpLatch = xml->getIntAttribute("lockArpLatch", 0) != 0;
+            lockedGroove.arpVariation = juce::jlimit(1, 16, xml->getIntAttribute("lockArpVar", 1));
+            lockedGroove.arpNonce = xml->getIntAttribute("lockArpNonce", 0);
             lockedGroove.melodyEnabled = xml->getIntAttribute("lockMelodyOn", 0) != 0;
+            lockedGroove.melodyInput = xml->getIntAttribute("lockMelodyInput", 0) != 0;
             lockedGroove.melodyStyleIndex = juce::jlimit(0, (int) MelodyStyle::Count - 1,
                 xml->getIntAttribute("lockMelodyStyle", 0));
-            lockedGroove.melodyRateIndex = juce::jlimit(0, (int) DelayTime::Count - 1,
-                xml->getIntAttribute("lockMelodyRate", (int) DelayTime::Eighth));
-            lockedGroove.melodyDensity = juce::jlimit(0, 100, xml->getIntAttribute("lockMelodyDensity", 50));
-            lockedGroove.melodyRange = juce::jlimit(8, 24, xml->getIntAttribute("lockMelodyRange", 12));
+            lockedGroove.melodyContourIndex = juce::jlimit(0, (int) MelodyContour::Count - 1,
+                xml->getIntAttribute("lockMelodyContour", 0));
+            lockedGroove.melodySpeedIndex = juce::jlimit(0, (int) MelodySpeed::Count - 1,
+                xml->getIntAttribute("lockMelodySpeed", (int) MelodySpeed::Medium));
+            lockedGroove.melodyPhraseIndex = juce::jlimit(0, (int) MelodyPhrase::Count - 1,
+                xml->getIntAttribute("lockMelodyPhrase", (int) MelodyPhrase::FourBars));
             lockedGroove.melodyVariation = juce::jlimit(1, 16, xml->getIntAttribute("lockMelodyVar", 1));
+            lockedGroove.melodyNonce = xml->getIntAttribute("lockMelodyNonce", 0);
+            lockedGroove.chordsEnabled = xml->getIntAttribute("lockChordsOn", 0) != 0;
+            lockedGroove.chordsInput = xml->getIntAttribute("lockChordsInput", 0) != 0;
+            lockedGroove.chordVoicingIndex = juce::jlimit(0, (int) ChordVoicing::Count - 1,
+                xml->getIntAttribute("lockChordVoicing", 0));
+            lockedGroove.chordColorIndex = juce::jlimit(0, (int) ChordColor::Count - 1,
+                xml->getIntAttribute("lockChordColor", 0));
+            lockedGroove.chordRhythmIndex = juce::jlimit(0, (int) ChordRhythm::Count - 1,
+                xml->getIntAttribute("lockChordRhythm", 0));
+            lockedGroove.chordVariation = juce::jlimit(1, 16, xml->getIntAttribute("lockChordVar", 1));
+            lockedGroove.chordNonce = xml->getIntAttribute("lockChordNonce", 0);
+            lockedGroove.bassEnabled = xml->getIntAttribute("lockBassOn", 0) != 0;
+            lockedGroove.bassInput = xml->getIntAttribute("lockBassInput", 0) != 0;
+            lockedGroove.bassMotionIndex = juce::jlimit(0, (int) BassMotion::Count - 1,
+                xml->getIntAttribute("lockBassMotion", 0));
+            lockedGroove.bassVariation = juce::jlimit(1, 16, xml->getIntAttribute("lockBassVar", 1));
+            lockedGroove.bassNonce = xml->getIntAttribute("lockBassNonce", 0);
             lockedGroove.drumsEnabled = xml->getIntAttribute("lockDrumsOn", 0) != 0;
             lockedGroove.drumStyleIndex = juce::jlimit(0, (int) DrumStyle::Count - 1,
                 xml->getIntAttribute("lockDrumStyle", 0));
             lockedGroove.drumDensity = juce::jlimit(0, 100, xml->getIntAttribute("lockDrumDensity", 50));
             lockedGroove.drumVariation = juce::jlimit(1, 16, xml->getIntAttribute("lockDrumVar", 1));
+            lockedGroove.drumNonce = xml->getIntAttribute("lockDrumNonce", 0);
             lockedGroove.strumDirectionIndex = juce::jlimit(0, (int) StrumDirection::Count - 1,
                 xml->getIntAttribute("lockStrumDir", 0));
             lockedGroove.strumSpeed = juce::jlimit(0, 100, xml->getIntAttribute("lockStrumSpeed", 40));
@@ -1244,6 +1377,7 @@ void MidiToolkitProcessor::setStateInformation(const void* data, int sizeInBytes
                         e.octave = rel == 0 ? -1 : juce::jlimit(0, 6, 4 + rel);
                     }
                     e.pitchShift = juce::jlimit(-12, 12, child->getIntAttribute("pitchShift", 0));
+                    e.pitchInput = child->getIntAttribute("pitchInput", 0) != 0;
                     e.octaveRange = juce::jlimit(0, 3, child->getIntAttribute("octaveRange", 0));
                     e.outsideRange = child->getIntAttribute("outsideRange", 1) == 0
                                          ? OutsideRangeMode::Clip
@@ -1336,26 +1470,52 @@ void MidiToolkitProcessor::setStateInformation(const void* data, int sizeInBytes
                         child->getIntAttribute("delayTime", (int) DelayTime::Eighth));
                     k.delayAmount = juce::jlimit(0, 100, child->getIntAttribute("delayAmount", 0));
                     k.delayFeedback = juce::jlimit(0, 100, child->getIntAttribute("delayFeedback", 40));
-                    k.arpModeIndex = juce::jlimit(0, (int) ArpMode::Count - 1,
-                        child->getIntAttribute("arpMode", 0));
+                    k.arpEnabled = child->getIntAttribute("arpOn", 0) != 0;
+                    k.arpInput = child->getIntAttribute("arpInput", 0) != 0;
+                    k.arpDirectionIndex = juce::jlimit(0, (int) ArpDirection::Count - 1,
+                        child->getIntAttribute("arpDirection", child->getIntAttribute("arpMode", 0)));
+                    k.arpShapeIndex = juce::jlimit(0, (int) ArpShape::Count - 1,
+                        child->getIntAttribute("arpShape", 0));
                     k.arpRateIndex = juce::jlimit(0, (int) DelayTime::Count - 1,
                         child->getIntAttribute("arpRate", (int) DelayTime::Sixteenth));
                     k.arpGate = juce::jlimit(10, 100, child->getIntAttribute("arpGate", 70));
                     k.arpOctaves = juce::jlimit(1, 3, child->getIntAttribute("arpOctaves", 1));
-                    k.arpLatch = child->getIntAttribute("arpLatch", 0) != 0;
+                    k.arpVariation = juce::jlimit(1, 16, child->getIntAttribute("arpVar", 1));
+                    k.arpNonce = child->getIntAttribute("arpNonce", 0);
                     k.melodyEnabled = child->getIntAttribute("melodyOn", 0) != 0;
+                    k.melodyInput = child->getIntAttribute("melodyInput", 0) != 0;
                     k.melodyStyleIndex = juce::jlimit(0, (int) MelodyStyle::Count - 1,
                         child->getIntAttribute("melodyStyle", 0));
-                    k.melodyRateIndex = juce::jlimit(0, (int) DelayTime::Count - 1,
-                        child->getIntAttribute("melodyRate", (int) DelayTime::Eighth));
-                    k.melodyDensity = juce::jlimit(0, 100, child->getIntAttribute("melodyDensity", 50));
-                    k.melodyRange = juce::jlimit(8, 24, child->getIntAttribute("melodyRange", 12));
+                    k.melodyContourIndex = juce::jlimit(0, (int) MelodyContour::Count - 1,
+                        child->getIntAttribute("melodyContour", 0));
+                    k.melodySpeedIndex = juce::jlimit(0, (int) MelodySpeed::Count - 1,
+                        child->getIntAttribute("melodySpeed", (int) MelodySpeed::Medium));
+                    k.melodyPhraseIndex = juce::jlimit(0, (int) MelodyPhrase::Count - 1,
+                        child->getIntAttribute("melodyPhrase", (int) MelodyPhrase::FourBars));
                     k.melodyVariation = juce::jlimit(1, 16, child->getIntAttribute("melodyVar", 1));
+                    k.melodyNonce = child->getIntAttribute("melodyNonce", 0);
+                    k.chordsEnabled = child->getIntAttribute("chordsOn", 0) != 0;
+                    k.chordsInput = child->getIntAttribute("chordsInput", 0) != 0;
+                    k.chordVoicingIndex = juce::jlimit(0, (int) ChordVoicing::Count - 1,
+                        child->getIntAttribute("chordVoicing", 0));
+                    k.chordColorIndex = juce::jlimit(0, (int) ChordColor::Count - 1,
+                        child->getIntAttribute("chordColor", 0));
+                    k.chordRhythmIndex = juce::jlimit(0, (int) ChordRhythm::Count - 1,
+                        child->getIntAttribute("chordRhythm", 0));
+                    k.chordVariation = juce::jlimit(1, 16, child->getIntAttribute("chordVar", 1));
+                    k.chordNonce = child->getIntAttribute("chordNonce", 0);
+                    k.bassEnabled = child->getIntAttribute("bassOn", 0) != 0;
+                    k.bassInput = child->getIntAttribute("bassInput", 0) != 0;
+                    k.bassMotionIndex = juce::jlimit(0, (int) BassMotion::Count - 1,
+                        child->getIntAttribute("bassMotion", 0));
+                    k.bassVariation = juce::jlimit(1, 16, child->getIntAttribute("bassVar", 1));
+                    k.bassNonce = child->getIntAttribute("bassNonce", 0);
                     k.drumsEnabled = child->getIntAttribute("drumsOn", 0) != 0;
                     k.drumStyleIndex = juce::jlimit(0, (int) DrumStyle::Count - 1,
                         child->getIntAttribute("drumStyle", 0));
                     k.drumDensity = juce::jlimit(0, 100, child->getIntAttribute("drumDensity", 50));
                     k.drumVariation = juce::jlimit(1, 16, child->getIntAttribute("drumVar", 1));
+                    k.drumNonce = child->getIntAttribute("drumNonce", 0);
                     k.strumDirectionIndex = juce::jlimit(0, (int) StrumDirection::Count - 1,
                         child->getIntAttribute("strumDir", 0));
                     k.strumSpeed = juce::jlimit(0, 100, child->getIntAttribute("strumSpeed", 40));

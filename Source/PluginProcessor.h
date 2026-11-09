@@ -52,7 +52,16 @@ public:
 
     bool isBusesLayoutSupported(const BusesLayout& layouts) const override
     {
-       #if JucePlugin_IsMidiEffect
+       #if defined(MIDITOOLKIT_FX_LIVE_VST3)
+        const auto in = layouts.getMainInputChannelSet();
+        const auto out = layouts.getMainOutputChannelSet();
+        const bool inOk = in.isDisabled()
+                       || in == juce::AudioChannelSet::stereo()
+                       || in == juce::AudioChannelSet::mono();
+        const bool outOk = out == juce::AudioChannelSet::stereo()
+                        || out == juce::AudioChannelSet::mono();
+        return inOk && outOk;
+       #elif JucePlugin_IsMidiEffect
         juce::ignoreUnused(layouts);
         return true;
        #else
@@ -164,6 +173,7 @@ public:
     juce::StringArray savedBrowserDirs;
     std::vector<SavedLibraryFolder> savedLibraries;
     juce::StringArray starredFiles;   // favourites — mirrored from LibraryStore
+    juce::StringArray starredFolders;
     std::vector<SavedSearchEntry> savedSearches;
 
     /** Browser UI session mirrored from the editor so it survives UI teardown
@@ -188,7 +198,9 @@ public:
     void updateSavedSearchResults(int index, const juce::StringArray& resultPaths,
                                   const juce::String& rootPath = {});
     bool isStarred(const juce::String& path) const { return starredFiles.contains(path); }
+    bool isStarredFolder(const juce::String& path) const { return starredFolders.contains(path); }
     void toggleStarred(const juce::String& path);
+    void toggleStarredFolder(const juce::String& path);
 
     /** App-owned library (stars, saved searches, search result cache). */
     LibraryStore& library() { return library_; }
@@ -208,6 +220,8 @@ public:
 
     /** Publish Toolkit pitch/groove snapshot for Passthrough mode. */
     void setLiveFxState(const LiveFxState& state);
+    /** Latched MIDI note from Pitch Input (-1 if none). */
+    int liveFxPitchLatch() const { return liveFx_.pitchLatchMidi(); }
 
     /** Enable/disable passthrough; flushes held notes on transition.
         The MIDI FX build ignores attempts to turn this off. */

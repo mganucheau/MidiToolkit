@@ -60,9 +60,10 @@ bool GrooveParams::isDefault() const
         && delayAmount == 0
         && velocityRangeLo <= 1 && velocityRangeHi >= 127
         && variationIndex == 0
-        && arpModeIndex == (int) ArpMode::Off
-        && !arpLatch
+        && !arpEnabled
         && !melodyEnabled
+        && !chordsEnabled
+        && !bassEnabled
         && !drumsEnabled;
 }
 
@@ -79,9 +80,10 @@ int GrooveParams::activeCount() const
     if (delayAmount > 0) ++n;
     if (velocityRangeLo > 1 || velocityRangeHi < 127) ++n;
     if (variationIndex > 0) ++n;
-    if (arpModeIndex != (int) ArpMode::Off) ++n;
-    if (arpLatch) ++n;
+    if (arpEnabled) ++n;
     if (melodyEnabled) ++n;
+    if (chordsEnabled) ++n;
+    if (bassEnabled) ++n;
     if (drumsEnabled) ++n;
     return n;
 }
@@ -121,21 +123,40 @@ void applyGrooveSectionLock(const GrooveParams& locked, GrooveParams& target, ui
         target.delayTimeIndex = locked.delayTimeIndex;
         target.delayAmount = locked.delayAmount;
         target.delayFeedback = locked.delayFeedback;
-        target.arpModeIndex = locked.arpModeIndex;
+        target.arpEnabled = locked.arpEnabled;
+        target.arpInput = locked.arpInput;
+        target.arpDirectionIndex = locked.arpDirectionIndex;
+        target.arpShapeIndex = locked.arpShapeIndex;
         target.arpRateIndex = locked.arpRateIndex;
         target.arpGate = locked.arpGate;
         target.arpOctaves = locked.arpOctaves;
-        target.arpLatch = locked.arpLatch;
+        target.arpVariation = locked.arpVariation;
+        target.arpNonce = locked.arpNonce;
         target.melodyEnabled = locked.melodyEnabled;
+        target.melodyInput = locked.melodyInput;
         target.melodyStyleIndex = locked.melodyStyleIndex;
-        target.melodyRateIndex = locked.melodyRateIndex;
-        target.melodyDensity = locked.melodyDensity;
-        target.melodyRange = locked.melodyRange;
+        target.melodyContourIndex = locked.melodyContourIndex;
+        target.melodySpeedIndex = locked.melodySpeedIndex;
+        target.melodyPhraseIndex = locked.melodyPhraseIndex;
         target.melodyVariation = locked.melodyVariation;
+        target.melodyNonce = locked.melodyNonce;
+        target.chordsEnabled = locked.chordsEnabled;
+        target.chordsInput = locked.chordsInput;
+        target.chordVoicingIndex = locked.chordVoicingIndex;
+        target.chordColorIndex = locked.chordColorIndex;
+        target.chordRhythmIndex = locked.chordRhythmIndex;
+        target.chordVariation = locked.chordVariation;
+        target.chordNonce = locked.chordNonce;
+        target.bassEnabled = locked.bassEnabled;
+        target.bassInput = locked.bassInput;
+        target.bassMotionIndex = locked.bassMotionIndex;
+        target.bassVariation = locked.bassVariation;
+        target.bassNonce = locked.bassNonce;
         target.drumsEnabled = locked.drumsEnabled;
         target.drumStyleIndex = locked.drumStyleIndex;
         target.drumDensity = locked.drumDensity;
         target.drumVariation = locked.drumVariation;
+        target.drumNonce = locked.drumNonce;
         target.strumDirectionIndex = locked.strumDirectionIndex;
         target.strumSpeed = locked.strumSpeed;
         target.strumAmount = locked.strumAmount;

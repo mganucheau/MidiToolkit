@@ -103,8 +103,9 @@ if(APPLE)
     )
 endif()
 
-# Live / VST3 hosts: same product name and forced-passthrough UI, but instrument
-# category with a silent stereo out so Ableton can open it on a MIDI track.
+# Live VST3: not a synth (so it can sit ahead of an instrument), with stereo
+# in and out so Live accepts the bus layout, and MIDI in/out so a keyboard
+# passes through. Category stays Instrument rather than Fx.
 # The Max device (Resources/Max) also hosts the private copy of this bundle by path.
 juce_add_plugin(MidiToolkitFXVST3
     COMPANY_NAME            "MidiToolkit"
@@ -113,10 +114,11 @@ juce_add_plugin(MidiToolkitFXVST3
     PLUGIN_CODE              MdbF
     FORMATS                  VST3
     PRODUCT_NAME             "${MIDITOOLKIT_FX_PRODUCT_NAME}"
-    IS_SYNTH                 TRUE
+    IS_SYNTH                 FALSE
     NEEDS_MIDI_INPUT         TRUE
     NEEDS_MIDI_OUTPUT        TRUE
     IS_MIDI_EFFECT           FALSE
+    VST3_CATEGORIES          Instrument
     EDITOR_WANTS_KEYBOARD_FOCUS TRUE
     COPY_PLUGIN_AFTER_BUILD  FALSE
 )
@@ -251,6 +253,7 @@ set(MIDITOOLKIT_SOURCES
     Source/MidiFileData.cpp
     Source/EditModel.cpp
     Source/GrooveEngine.cpp
+    Source/GeneratorEngines.cpp
     Source/LiveMidiFx.cpp
     Source/UiAtoms.cpp
     Source/TransportBar.cpp
@@ -303,7 +306,7 @@ endforeach()
 if(TARGET MidiToolkitFX)
     target_compile_definitions(MidiToolkitFX PUBLIC MIDITOOLKIT_MIDI_FX=1)
 endif()
-target_compile_definitions(MidiToolkitFXVST3 PUBLIC MIDITOOLKIT_MIDI_FX=1)
+target_compile_definitions(MidiToolkitFXVST3 PUBLIC MIDITOOLKIT_MIDI_FX=1 MIDITOOLKIT_FX_LIVE_VST3=1)
 
 option(MIDITOOLKIT_BUILD_TESTS "Build unit tests" ON)
 option(MIDITOOLKIT_BUILD_PROBE "Build the VST3 MIDI-out probe tool" ON)

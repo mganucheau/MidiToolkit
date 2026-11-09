@@ -131,6 +131,7 @@ public:
     /** Refresh Filter histogram bars from loaded browser clips. */
     void setFilterHistograms(const std::vector<StepClip>& clips);
     std::function<void()> onShowStarred;
+    std::function<void()> onShowStarredFolders;
     std::function<void()> onShowSearch;
     /** Text search (Enter / saved search) — scans disk by query. */
     std::function<void(const BrowserSearch&)> onRunSearch;
@@ -166,8 +167,8 @@ public:
     void deactivateSearch(bool clearCriteria = false);
 
 private:
-    enum class RowKind { Open, Starred, SavedDir, SavedSearch };
-    enum class SectionId { Library, Search, Saved };  // Folders · Favorites · Saved Searches
+    enum class RowKind { Open, Starred, StarredFolders, SavedDir, SavedSearch };
+    enum class SectionId { Library, Search, Saved };  // library dirs · Favorites · Saved Searches
 
     struct RowHit
     {
@@ -639,8 +640,7 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(KindGridView)
 };
 
-// Browser column header (Groove): folder title · count · Grid · Subfolders · Saved · Rescan,
-// then the search field and the Filters toggle.
+// Browser column search row (Filters). Grid / Subfolders live on the Files tab bar.
 
 class BrowserToolbar : public juce::Component
 {
@@ -653,11 +653,11 @@ public:
 
     /** Host the sidebar's search field in the search row. */
     void setSearchComponent(juce::Component* c);
-    void setTitle(const juce::String& t);
-    void setCount(int shown, int total);
-    void setGrid(bool on);
-    void setSubfolders(bool on);
-    void setSaved(bool on, bool canSave);
+    void setTitle(const juce::String&);
+    void setCount(int, int);
+    void setGrid(bool);
+    void setSubfolders(bool);
+    void setSaved(bool, bool);
     void setFiltersActive(bool open, int activeCount);
 
     std::function<void()> onToggleGrid;
@@ -667,15 +667,8 @@ public:
     std::function<void()> onToggleFilters;
 
 private:
-    juce::String title { "Select a folder" };
-    juce::String countText;
     juce::Component* search = nullptr;
-    ChipBtn btnGrid { "Grid" };
-    ChipBtn btnSubfolders { "Subfolders" };
-    IconBtn btnSaved { icons::star, "Save folder to Library" };
-    IconBtn btnRescan { icons::refresh, "Rescan folder" };
     IconBtn btnFilters { icons::sliders, "Filters" };
-    juce::Rectangle<int> headerBounds, searchRowBounds;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(BrowserToolbar)
 };

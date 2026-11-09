@@ -83,34 +83,47 @@ ClipKind hintKindFromFileName(const juce::String& nameOrPath)
         return false;
     };
 
-    // Drums / kit — check before bass so "drum bass" style names still hit drums first
-    // only when an explicit drum token is present.
-    if (hasToken("drums") || hasToken("drum") || hasToken("drumkit")
-        || hasToken("kit") || hasToken("perc") || hasToken("percussion")
+    // Strong drum tokens first (kit / hats / kick…). Generic groove/beat wait until
+    // pitched tokens are ruled out so Deep_Bass_Groove stays Bass.
+    const bool strongDrums = hasToken("drums") || hasToken("drum") || hasToken("drumkit")
+        || hasToken("kit") || hasToken("drm") || hasToken("perc") || hasToken("percussion")
         || hasToken("break") || hasToken("breaks") || hasToken("breakbeat")
-        || hasToken("hats") || hasToken("hat") || hasToken("kick") || hasToken("snare")
-        || hasToken("beat") || hasToken("beats") || hasToken("loopkit")
-        || lower.contains("drumkit") || lower.contains("drum_kit") || lower.contains("drum-kit"))
+        || hasToken("hats") || hasToken("hat") || hasToken("hh") || hasToken("hihat")
+        || hasToken("hihats") || hasToken("kick") || hasToken("snare") || hasToken("clap")
+        || hasToken("fill") || hasToken("fills") || hasToken("loopkit")
+        || lower.contains("drumkit") || lower.contains("drum_kit") || lower.contains("drum-kit")
+        || lower.contains("hi-hat") || lower.contains("hi_hat");
+    if (strongDrums)
         return ClipKind::Drums;
 
-    // Bass — full words plus short tokens BA / BAS used in pack naming.
+    // Bass — full words plus short tokens BA / BAS / SUB used in pack naming.
     if (hasToken("bassline") || hasToken("basslin") || hasToken("bass")
-        || hasToken("bas") || hasToken("ba")
+        || hasToken("bas") || hasToken("ba") || hasToken("sub") || hasToken("subbass")
         || hasTokenPrefix("bass")
-        || lower.contains("bassline") || lower.contains("bass_line") || lower.contains("bass-line"))
+        || lower.contains("bassline") || lower.contains("bass_line") || lower.contains("bass-line")
+        || lower.contains("subbass") || lower.contains("sub_bass"))
         return ClipKind::Bass;
 
     // Keys / piano / pads / chords.
     if (hasToken("piano") || hasToken("keys") || hasToken("key") || hasToken("keyz")
         || hasToken("chord") || hasToken("chords") || hasToken("pad") || hasToken("pads")
-        || hasToken("rhodes") || hasToken("epiano") || hasToken("ep")
+        || hasToken("rhodes") || hasToken("epiano") || hasToken("ep") || hasToken("keys")
         || lower.contains("e-piano") || lower.contains("e_piano") || lower.contains("keys_"))
         return ClipKind::Piano;
 
-    // Lead / melody.
-    if (hasToken("lead") || hasToken("melody") || hasToken("melo") || hasToken("mel")
-        || hasToken("topline") || hasToken("synth") || hasTokenPrefix("lead"))
+    // Lead / melody / arp (no separate Arpeggio kind — arps map to Lead).
+    if (hasToken("lead") || hasToken("ld") || hasToken("melody") || hasToken("melo")
+        || hasToken("mel") || hasToken("topline") || hasToken("synth") || hasToken("hook")
+        || hasToken("arp") || hasToken("arpeggio") || hasToken("arpeggios") || hasToken("arpseq")
+        || hasTokenPrefix("lead") || hasTokenPrefix("arp")
+        || lower.contains("arpeggio"))
         return ClipKind::Lead;
+
+    // Generic rhythm words only after pitched tokens fail.
+    if (hasToken("groove") || hasToken("grooves") || hasToken("beat") || hasToken("beats")
+        || hasToken("top") || hasToken("tops") || hasToken("rhythm") || hasToken("rhythms")
+        || hasToken("loop") || hasToken("loops") || hasToken("percussion"))
+        return ClipKind::Drums;
 
     return ClipKind::Lead;
 }
@@ -359,6 +372,7 @@ void applyPitchLock(const ClipEdit& locked, ClipEdit& target)
 {
     target.octave = locked.octave;
     target.pitchShift = locked.pitchShift;
+    target.pitchInput = locked.pitchInput;
     target.octaveRange = locked.octaveRange;
     target.outsideRange = locked.outsideRange;
     target.pitchMin = locked.pitchMin;
@@ -822,20 +836,21 @@ void applyKind(StepClip& s, int meanPitch, int drumHits, int totalHits, const Po
     const double drumFrac = totalHits > 0 ? (double) drumHits / (double) totalHits : 0.0;
     s.hasDrumContent = channel10Hits > 0 || drumFrac >= 0.10;
 
-    const ClipKind fileHint = hintKindFromFileName(
-        s.filePath.isNotEmpty() ? s.filePath : s.name);
+    const juce::String nameSrc = s.filePath.isNotEmpty() ? s.filePath : s.name;
+    const ClipKind fileHint = hintKindFromFileName(nameSrc);
     const bool fileHinted = [&]()
     {
         // hintKindFromFileName returns Lead both for "lead" and for "no match".
         // Treat Lead as a real hint only when the name clearly says so.
         if (fileHint == ClipKind::Lead)
         {
-            const auto tokens = fileNameTokens(
-                s.filePath.isNotEmpty() ? s.filePath : s.name);
+            const auto tokens = fileNameTokens(nameSrc);
             for (const auto& t : tokens)
-                if (tokenEquals(t, "lead") || tokenEquals(t, "melody") || tokenEquals(t, "melo")
-                    || tokenEquals(t, "mel") || tokenEquals(t, "topline") || tokenEquals(t, "synth")
-                    || tokenStartsWith(t, "lead"))
+                if (tokenEquals(t, "lead") || tokenEquals(t, "ld") || tokenEquals(t, "melody")
+                    || tokenEquals(t, "melo") || tokenEquals(t, "mel") || tokenEquals(t, "topline")
+                    || tokenEquals(t, "synth") || tokenEquals(t, "hook") || tokenEquals(t, "arp")
+                    || tokenEquals(t, "arpeggio") || tokenEquals(t, "arpseq")
+                    || tokenStartsWith(t, "lead") || tokenStartsWith(t, "arp"))
                     return true;
             return false;
         }
@@ -847,6 +862,23 @@ void applyKind(StepClip& s, int meanPitch, int drumHits, int totalHits, const Po
     const bool kickC1 = hasKickPatternOnC1(notes);
     // Bass register roughly C1–C3 (Ableton numbering: 36–48) plus a little headroom.
     const bool bassRegister = meanPitch >= 24 && meanPitch <= 52;
+    const bool strongDrumNotes = kickC1 || drumFrac >= 0.70 || channel10Hits > 0;
+
+    // Confident filename match wins unless notes strongly contradict it.
+    if (fileHinted)
+    {
+        const bool contradicted =
+            (fileHint == ClipKind::Lead && strongDrumNotes && drumFrac >= 0.70)
+            || (fileHint == ClipKind::Bass && strongDrumNotes && drumFrac >= 0.70 && !bassRegister)
+            || (fileHint == ClipKind::Piano && strongDrumNotes && drumFrac >= 0.70)
+            || (fileHint == ClipKind::Drums && chords && drumFrac < 0.25 && !kickC1);
+        if (!contradicted)
+        {
+            s.kind = fileHint;
+            s.kindConfidence = 90;
+            return;
+        }
+    }
 
     // 1) Strong musical drum signals, or a drum filename.
     // A bass filename blocks weak drumFrac matches (low notes can look like kicks).

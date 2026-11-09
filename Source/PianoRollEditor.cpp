@@ -87,7 +87,11 @@ void PianoRollMini::paint(juce::Graphics& g)
     auto ruler = b.removeFromTop((float) kRulerH);
     juce::Rectangle<float> vel;
     if (showVelocity)
-        vel = b.removeFromBottom((float) kVelocityH);
+    {
+        // Notes and velocity share the remaining height evenly.
+        const float lane = juce::jmax(12.0f, b.getHeight() * 0.5f);
+        vel = b.removeFromBottom(lane);
+    }
 
     auto gutter = b.removeFromLeft(kGutterW);
     ruler.removeFromLeft(kGutterW);
@@ -288,8 +292,7 @@ PianoRollEditor::PianoRollEditor()
         else
             toggleTrim();
     };
-    addChildComponent(btnTrim);
-    btnTrim.setVisible(false);
+    addAndMakeVisible(btnTrim);
 
     btnFold.setComponentID("btnFold");
     btnFold.accentText = true;
@@ -417,7 +420,7 @@ void PianoRollEditor::setRecordingNotes(const StepClip& c, double playhead)
     velocityLane.repaint();
     gutter.repaint();
     if (inputMode)
-        repaint(0, 0, getWidth(), toolbarH); // "Recording · bar N"
+        repaint(0, 0, getWidth(), toolbarHeight()); // "Recording · bar N"
 }
 
 void PianoRollEditor::endRecording(const StepClip& c, const ClipEdit& e, const GrooveParams& g,
@@ -425,7 +428,7 @@ void PianoRollEditor::endRecording(const StepClip& c, const ClipEdit& e, const G
 {
     recordingVisual = false;
     setClip(c, e, g);
-    repaint(0, 0, getWidth(), toolbarH);
+    repaint(0, 0, getWidth(), toolbarHeight());
     setLoopSteps(0.0, loopEnd, true);
     setPlayheadStep(0.0, false);
 }
@@ -1190,7 +1193,7 @@ void PianoRollEditor::resized()
     btnZoomOut.setVisible(false);
     selBadge.setVisible(false);
 
-    titleBounds = r.removeFromTop(toolbarH).reduced(8, 0);
+    titleBounds = r.removeFromTop(toolbarHeight()).reduced(8, 0);
     layoutHeaderTools();
 
     // The note view gives up height first so the velocity header + lane stay on screen.
@@ -1236,110 +1239,63 @@ void PianoRollEditor::paint(juce::Graphics& g)
     g.setColour(ds::surface100());
     g.fillRect(getLocalBounds());
     g.setColour(ds::surface300());
-    g.fillRect(0, 0, getWidth(), toolbarH);
+    g.fillRect(0, 0, getWidth(), toolbarHeight());
     g.setColour(ds::line());
-    g.fillRect(0, toolbarH - 1, getWidth(), 1);
+    g.fillRect(0, toolbarHeight() - 1, getWidth(), 1);
 
-    // Title · subtitle (ellipsised into whatever the tools leave free)
     auto t = titleBounds;
-    const juce::String title = inputMode ? "Input" : "Piano Roll";
-    juce::String sub;
-    if (inputMode)
-        sub = inputSub;
-    else if (hasClip)
-        sub = clip.name + juce::String::fromUTF8(" \u00b7 ") + juce::String(juce::jmax(1, resolved.bars))
-              + (resolved.bars == 1 ? " bar" : " bars");
-
-    const auto titleFont = uiFontFixed(11.0f, true);
+    const juce::String title = "Piano Roll";
+    const auto titleFont = uiFontFixed(12.0f, true);
     g.setFont(titleFont);
     g.setColour(ds::ink());
     const int tw = juce::jmin(t.getWidth(),
                               (int) std::ceil(juce::GlyphArrangement::getStringWidth(titleFont, title)) + 1);
     g.drawText(title, t.removeFromLeft(tw), juce::Justification::centredLeft, false);
-    t.removeFromLeft(6);
 
-    if (inputMode)
+    if (recordingVisual)
     {
-        // Record status on the right: ● Recording · bar N  /  Press record to capture
-        const bool rec = recordingVisual;
-        const juce::String status = rec ? "Recording " + juce::String::fromUTF8("\u00b7")
-                                            + " bar " + juce::String((int) (playheadStep / kStepsPerBar) + 1)
-                                        : juce::String("Press record to capture");
+        const juce::String status = "Recording " + juce::String::fromUTF8("\u00b7")
+                                  + " bar " + juce::String((int) (playheadStep / kStepsPerBar) + 1);
         const auto sf = uiFontFixed(11.0f, false);
         const int sw = (int) std::ceil(juce::GlyphArrangement::getStringWidth(sf, status)) + 1;
-        auto right = getLocalBounds().removeFromTop(toolbarH).reduced(8, 0);
-        auto sb = right.removeFromRight(juce::jmin(right.getWidth() / 2, sw));
-        const auto col = rec ? ds::record() : ds::inkMuted();
-        g.setColour(col);
+        auto right = getLocalBounds().removeFromTop(toolbarHeight()).reduced(8, 0);
+        auto sb = right.removeFromRight(juce::jmin(right.getWidth() / 3, sw));
+        g.setColour(ds::record());
         g.setFont(sf);
         g.drawText(status, sb, juce::Justification::centredLeft, true);
-        auto dot = juce::Rectangle<float>(8.0f, 8.0f).withCentre({ (float) sb.getX() - 8.0f, (float) sb.getCentreY() });
-        g.fillEllipse(dot);
-        t.setRight(juce::jmin(t.getRight(), sb.getX() - 20));
     }
 
-    if (sub.isNotEmpty() && t.getWidth() > 16)
-    {
-        g.setFont(monoFontFixed(10.5f));
-        g.setColour(ds::inkMuted());
-        g.drawText(sub, t, juce::Justification::centredLeft, true);
-    }
-
-    if (!inputMode)
-    {
-        g.setFont(uiFontFixed(11.0f, false));
-        g.setColour(ds::inkMuted());
-        if (!zoomLabelBounds.isEmpty())
-            g.drawText("Zoom", zoomLabelBounds, juce::Justification::centredRight, false);
-        if (!gridLabelBounds.isEmpty())
-            g.drawText("Snap", gridLabelBounds, juce::Justification::centredRight, false);
-    }
+    g.setFont(uiFontFixed(11.0f, false));
+    g.setColour(ds::inkMuted());
+    if (!zoomLabelBounds.isEmpty())
+        g.drawText("Scale", zoomLabelBounds, juce::Justification::centredRight, false);
 }
 
 void PianoRollEditor::layoutHeaderTools()
 {
-    // Header (right to left): Revert · Snap [div] · Zoom [Clip/n] · Fold
+    // Header (right to left): Trim · Scale [bars zoom] · Fold
     auto bar = titleBounds;
-    const int ctrlH = 18; // Groove control-md
-    const bool tools = !inputMode;
-    btnFold.setVisible(tools);
-    barsZoomPopup.setVisible(tools);
-    divisionPopup.setVisible(tools);
-    btnRevertNotes.setVisible(tools);
+    const int ctrlH = 18;
+    btnFold.setVisible(true);
+    barsZoomPopup.setVisible(true);
+    btnTrim.setVisible(true);
+    divisionPopup.setVisible(false);
+    btnRevertNotes.setVisible(false);
     zoomLabelBounds = gridLabelBounds = {};
-    if (!tools)
-    {
-        titleBounds = bar;
-        return;
-    }
 
     auto place = [&bar](juce::Component& c, int w)
     {
         c.setBounds(bar.removeFromRight(w).withSizeKeepingCentre(w, ctrlH));
         bar.removeFromRight(4);
     };
-    // Title + a short subtitle need ~150px; drop labels first, then Zoom.
-    const int revertW = btnRevertNotes.idealWidth();
-    const int gridW = juce::jmax(46, divisionPopup.idealWidth() - 8);
+    const int trimW = btnTrim.idealWidth();
     const int zoomW = juce::jmax(56, barsZoomPopup.idealWidth() - 8);
     const int foldW = btnFold.idealWidth();
-    const int labels = 26 + 4 + 30 + 4;
-    const int full = revertW + gridW + zoomW + foldW + 4 * 4 + 8 + labels;
-    const bool showLabels = bar.getWidth() - full >= 150;
-    const bool showZoom = bar.getWidth() - (full - labels) >= 120;
-
-    place(btnRevertNotes, revertW);
+    place(btnTrim, trimW);
+    place(barsZoomPopup, zoomW);
+    zoomLabelBounds = bar.removeFromRight(36);
     bar.removeFromRight(4);
-    place(divisionPopup, gridW);
-    if (showLabels) { gridLabelBounds = bar.removeFromRight(26); bar.removeFromRight(8); }
-    barsZoomPopup.setVisible(showZoom);
-    if (showZoom)
-    {
-        place(barsZoomPopup, zoomW);
-        if (showLabels) { zoomLabelBounds = bar.removeFromRight(30); bar.removeFromRight(8); }
-    }
     place(btnFold, foldW);
-    bar.removeFromRight(4);
     titleBounds = bar;
 }
 

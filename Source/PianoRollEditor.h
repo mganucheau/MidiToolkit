@@ -319,7 +319,8 @@ private:
     ScalePanel scalePanel { *this };
 
     static constexpr int stripH = 0;
-    static constexpr int toolbarH = 26; // Groove device header (surface-300)
+    /** Matches Files / Generator and Effects headers (metrics::paneHeaderH). */
+    int toolbarHeight() const { return metrics::paneHeaderH(); }
     static constexpr int gutterW = 56;
 
     juce::Rectangle<int> zoomLabelBounds, gridLabelBounds, titleBounds;

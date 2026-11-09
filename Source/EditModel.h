@@ -184,6 +184,8 @@ struct ClipEdit
     /** Absolute target octave 0..6. -1 = keep the clip's native octave. */
     int  octave    = -1;
     int  pitchShift = 0;   // whole-file semitone transpose, -12..12
+    /** Keyboard latches a root for browsing / generator parts with Input off. */
+    bool pitchInput = false;
     /** 0 = Off. 1..3 = keep notes inside that many octaves from the target C. */
     int  octaveRange = 0;
     /** Clip clamps outside notes. Fold wraps them into the window. */

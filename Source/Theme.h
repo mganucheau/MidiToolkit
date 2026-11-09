@@ -143,6 +143,8 @@ struct Tweaks
     std::atomic<int> showTooltips { 1 }; // 1 = on
     std::atomic<int> fontFamily { (int) FontFamily::Archivo };
     std::atomic<int> surfaceStyle { (int) SurfaceStyle::Flat };
+    /** Shade every other file-list row for readability. */
+    std::atomic<int> alternateRows { 0 }; // 1 = on
 };
 
 /** Standout amber used for tip bubbles and the control highlight under them. */

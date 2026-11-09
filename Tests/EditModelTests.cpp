@@ -652,6 +652,12 @@ TEST_CASE("filename keywords hint Bass Drums and Piano", "[editmodel]")
     CHECK(hintKindFromFileName("Keys_Rhodes_Pad.mid") == ClipKind::Piano);
     CHECK(hintKindFromFileName("Piano_Chords_Em.mid") == ClipKind::Piano);
     CHECK(hintKindFromFileName("Lead_Synth_Hook.mid") == ClipKind::Lead);
+    CHECK(hintKindFromFileName("Arp_Cmaj_120.mid") == ClipKind::Lead);
+    CHECK(hintKindFromFileName("LD_Pluck_01.mid") == ClipKind::Lead);
+    CHECK(hintKindFromFileName("Hats_16th_Loop.mid") == ClipKind::Drums);
+    CHECK(hintKindFromFileName("HH_Closed_01.mid") == ClipKind::Drums);
+    CHECK(hintKindFromFileName("Groove_A_120.mid") == ClipKind::Drums);
+    CHECK(hintKindFromFileName("Top_Loop_01.mid") == ClipKind::Drums);
 }
 
 TEST_CASE("bass filename wins over ambiguous mid register mono line", "[editmodel]")
