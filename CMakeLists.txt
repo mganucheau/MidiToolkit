@@ -82,25 +82,42 @@ juce_add_plugin(MidiToolkit
     COPY_PLUGIN_AFTER_BUILD  TRUE
 )
 
-# Passthrough-only sibling. AU stays a MIDI effect (aumi) for Logic.
-# The VST3 is an instrument: Live rejects VST3 effects that have no audio input,
-# and Live has no slot for a third-party MIDI effect in front of a synth.
+# MIDI FX for Logic (AU aumi). Always passthrough in the editor.
+# Ableton rejects true MIDI-effect VST3s ("effect category, no audio input bus"),
+# so the Live-facing VST3 is a separate instrument-style target below.
 set(MIDITOOLKIT_FX_PRODUCT_NAME "Midi Toolkit FX")
-juce_add_plugin(MidiToolkitFX
+if(APPLE)
+    juce_add_plugin(MidiToolkitFX
+        COMPANY_NAME            "MidiToolkit"
+        BUNDLE_ID               com.miditoolkit.app.fx
+        PLUGIN_MANUFACTURER_CODE MdbR
+        PLUGIN_CODE              MdbF
+        FORMATS                  AU
+        PRODUCT_NAME             "${MIDITOOLKIT_FX_PRODUCT_NAME}"
+        IS_SYNTH                 FALSE
+        NEEDS_MIDI_INPUT         TRUE
+        NEEDS_MIDI_OUTPUT        TRUE
+        IS_MIDI_EFFECT           TRUE
+        EDITOR_WANTS_KEYBOARD_FOCUS TRUE
+        COPY_PLUGIN_AFTER_BUILD  FALSE
+    )
+endif()
+
+# Live / VST3 hosts: same product name and forced-passthrough UI, but instrument
+# category with a silent stereo out so Ableton can open it on a MIDI track.
+# The Max device (Resources/Max) also hosts the private copy of this bundle by path.
+juce_add_plugin(MidiToolkitFXVST3
     COMPANY_NAME            "MidiToolkit"
-    BUNDLE_ID               com.miditoolkit.app.fx
+    BUNDLE_ID               com.miditoolkit.app.fx.vst3
     PLUGIN_MANUFACTURER_CODE MdbR
     PLUGIN_CODE              MdbF
-    FORMATS                  ${_miditoolkit_formats}
+    FORMATS                  VST3
     PRODUCT_NAME             "${MIDITOOLKIT_FX_PRODUCT_NAME}"
     IS_SYNTH                 TRUE
     NEEDS_MIDI_INPUT         TRUE
     NEEDS_MIDI_OUTPUT        TRUE
-    IS_MIDI_EFFECT           TRUE
-    VST3_CATEGORIES          Instrument
+    IS_MIDI_EFFECT           FALSE
     EDITOR_WANTS_KEYBOARD_FOCUS TRUE
-    # Live lists a scanned VST3 instrument in the plug-in browser and replaces
-    # the track instrument with it. The Live device hosts this bundle by path.
     COPY_PLUGIN_AFTER_BUILD  FALSE
 )
 
@@ -111,48 +128,58 @@ juce_add_plugin(MidiToolkitFX
 # It runs even when the bundles are already up to date, so the plugins folder
 # is replaced at the end of every build.
 if(APPLE)
+    set(_fx_private_vst3 "$ENV{HOME}/Library/Application Support/Midi Toolkit/${MIDITOOLKIT_FX_PRODUCT_NAME}.vst3")
     foreach(_fmt IN ITEMS VST3 AU)
         if(TARGET MidiToolkit_${_fmt})
-            if(_fmt STREQUAL "VST3")
-                set(_kind VST3)
-            else()
-                set(_kind AU)
-            endif()
             add_custom_command(TARGET MidiToolkit_${_fmt} POST_BUILD
                 COMMAND "${CMAKE_COMMAND}"
                     "-DPLUGIN_SRC=$<TARGET_BUNDLE_DIR:MidiToolkit_${_fmt}>"
-                    "-DPLUGIN_KIND=${_kind}"
+                    "-DPLUGIN_KIND=${_fmt}"
                     "-DPRODUCT_NAME=${MIDITOOLKIT_PRODUCT_NAME}"
                     -P "${CMAKE_SOURCE_DIR}/cmake/InstallPlugins.cmake"
                 COMMENT "Installing ${_fmt} -> ~/Library/Audio/Plug-Ins"
                 VERBATIM)
-            if(TARGET MidiToolkitFX_${_fmt})
-                if(_fmt STREQUAL "VST3")
-                    # Not the scanned VST3 folder. Live would list it as an instrument.
-                    add_custom_command(TARGET MidiToolkitFX_${_fmt} POST_BUILD
-                        COMMAND "${CMAKE_COMMAND}"
-                            "-DPLUGIN_SRC=$<TARGET_BUNDLE_DIR:MidiToolkitFX_${_fmt}>"
-                            "-DPLUGIN_KIND=VST3"
-                            "-DPRODUCT_NAME=${MIDITOOLKIT_FX_PRODUCT_NAME}"
-                            "-DPLUGIN_DEST=$ENV{HOME}/Library/Application Support/Midi Toolkit/${MIDITOOLKIT_FX_PRODUCT_NAME}.vst3"
-                            -P "${CMAKE_SOURCE_DIR}/cmake/InstallPlugins.cmake"
-                        COMMAND "${CMAKE_COMMAND}" -E rm -rf
-                            "$ENV{HOME}/Library/Audio/Plug-Ins/VST3/${MIDITOOLKIT_FX_PRODUCT_NAME}.vst3"
-                        COMMENT "Installing Midi Toolkit FX engine outside Live's plug-in scan"
-                        VERBATIM)
-                else()
-                    add_custom_command(TARGET MidiToolkitFX_${_fmt} POST_BUILD
-                        COMMAND "${CMAKE_COMMAND}"
-                            "-DPLUGIN_SRC=$<TARGET_BUNDLE_DIR:MidiToolkitFX_${_fmt}>"
-                            "-DPLUGIN_KIND=${_kind}"
-                            "-DPRODUCT_NAME=${MIDITOOLKIT_FX_PRODUCT_NAME}"
-                            -P "${CMAKE_SOURCE_DIR}/cmake/InstallPlugins.cmake"
-                        COMMENT "Installing Midi Toolkit FX ${_fmt} -> ~/Library/Audio/Plug-Ins"
-                        VERBATIM)
-                endif()
-            endif()
         endif()
     endforeach()
+    if(TARGET MidiToolkitFX_AU)
+        add_custom_command(TARGET MidiToolkitFX_AU POST_BUILD
+            COMMAND "${CMAKE_COMMAND}"
+                "-DPLUGIN_SRC=$<TARGET_BUNDLE_DIR:MidiToolkitFX_AU>"
+                "-DPLUGIN_KIND=AU"
+                "-DPRODUCT_NAME=${MIDITOOLKIT_FX_PRODUCT_NAME}"
+                -P "${CMAKE_SOURCE_DIR}/cmake/InstallPlugins.cmake"
+            COMMENT "Installing FX AU -> ~/Library/Audio/Plug-Ins/Components"
+            VERBATIM)
+    endif()
+    if(TARGET MidiToolkitFXVST3_VST3)
+        # Scanned VST3 folder for Live's browser, plus the private copy the Max
+        # device loads, plus the legacy build-tree path Live already scans.
+        # Re-sign after copy: moduleinfo / ditto otherwise leave a broken ad-hoc
+        # seal and Live silently skips the bundle.
+        add_custom_command(TARGET MidiToolkitFXVST3_VST3 POST_BUILD
+            COMMAND "${CMAKE_COMMAND}"
+                "-DPLUGIN_SRC=$<TARGET_BUNDLE_DIR:MidiToolkitFXVST3_VST3>"
+                "-DPLUGIN_KIND=VST3"
+                "-DPRODUCT_NAME=${MIDITOOLKIT_FX_PRODUCT_NAME}"
+                -P "${CMAKE_SOURCE_DIR}/cmake/InstallPlugins.cmake"
+            COMMAND "${CMAKE_COMMAND}"
+                "-DPLUGIN_SRC=$<TARGET_BUNDLE_DIR:MidiToolkitFXVST3_VST3>"
+                "-DPLUGIN_KIND=VST3"
+                "-DPRODUCT_NAME=${MIDITOOLKIT_FX_PRODUCT_NAME}"
+                "-DPLUGIN_DEST=${_fx_private_vst3}"
+                -P "${CMAKE_SOURCE_DIR}/cmake/InstallPlugins.cmake"
+            COMMAND "${CMAKE_COMMAND}" -E make_directory
+                "${CMAKE_BINARY_DIR}/MidiToolkitFX_artefacts/Release/VST3"
+            COMMAND "${CMAKE_COMMAND}" -E rm -rf
+                "${CMAKE_BINARY_DIR}/MidiToolkitFX_artefacts/Release/VST3/${MIDITOOLKIT_FX_PRODUCT_NAME}.vst3"
+            COMMAND ditto
+                "$<TARGET_BUNDLE_DIR:MidiToolkitFXVST3_VST3>"
+                "${CMAKE_BINARY_DIR}/MidiToolkitFX_artefacts/Release/VST3/${MIDITOOLKIT_FX_PRODUCT_NAME}.vst3"
+            COMMAND codesign --force --deep --sign -
+                "${CMAKE_BINARY_DIR}/MidiToolkitFX_artefacts/Release/VST3/${MIDITOOLKIT_FX_PRODUCT_NAME}.vst3"
+            COMMENT "Installing FX VST3 -> ~/Library/Audio/Plug-Ins/VST3 + private + build-tree copies (re-signed)"
+            VERBATIM)
+    endif()
     if(TARGET MidiToolkit_VST3 AND TARGET MidiToolkit_AU)
         add_custom_target(MidiToolkit_InstallPlugins ALL
             COMMAND "${CMAKE_COMMAND}"
@@ -166,19 +193,22 @@ if(APPLE)
                 "-DPRODUCT_NAME=${MIDITOOLKIT_PRODUCT_NAME}"
                 -P "${CMAKE_SOURCE_DIR}/cmake/InstallPlugins.cmake"
             COMMAND "${CMAKE_COMMAND}"
-                "-DPLUGIN_SRC=$<TARGET_BUNDLE_DIR:MidiToolkitFX_VST3>"
+                "-DPLUGIN_SRC=$<TARGET_BUNDLE_DIR:MidiToolkitFXVST3_VST3>"
                 "-DPLUGIN_KIND=VST3"
                 "-DPRODUCT_NAME=${MIDITOOLKIT_FX_PRODUCT_NAME}"
-                "-DPLUGIN_DEST=$ENV{HOME}/Library/Application Support/Midi Toolkit/${MIDITOOLKIT_FX_PRODUCT_NAME}.vst3"
                 -P "${CMAKE_SOURCE_DIR}/cmake/InstallPlugins.cmake"
-            COMMAND "${CMAKE_COMMAND}" -E rm -rf
-                "$ENV{HOME}/Library/Audio/Plug-Ins/VST3/${MIDITOOLKIT_FX_PRODUCT_NAME}.vst3"
+            COMMAND "${CMAKE_COMMAND}"
+                "-DPLUGIN_SRC=$<TARGET_BUNDLE_DIR:MidiToolkitFXVST3_VST3>"
+                "-DPLUGIN_KIND=VST3"
+                "-DPRODUCT_NAME=${MIDITOOLKIT_FX_PRODUCT_NAME}"
+                "-DPLUGIN_DEST=${_fx_private_vst3}"
+                -P "${CMAKE_SOURCE_DIR}/cmake/InstallPlugins.cmake"
             COMMAND "${CMAKE_COMMAND}"
                 "-DPLUGIN_SRC=$<TARGET_BUNDLE_DIR:MidiToolkitFX_AU>"
                 "-DPLUGIN_KIND=AU"
                 "-DPRODUCT_NAME=${MIDITOOLKIT_FX_PRODUCT_NAME}"
                 -P "${CMAKE_SOURCE_DIR}/cmake/InstallPlugins.cmake"
-            DEPENDS MidiToolkit_VST3 MidiToolkit_AU MidiToolkitFX_VST3 MidiToolkitFX_AU
+            DEPENDS MidiToolkit_VST3 MidiToolkit_AU MidiToolkitFXVST3_VST3 MidiToolkitFX_AU
             COMMENT "Replacing instrument and MIDI FX in ~/Library/Audio/Plug-Ins"
             VERBATIM)
     endif()
@@ -193,10 +223,10 @@ elseif(WIN32)
             COMMENT "Installing VST3 into Common Files"
             VERBATIM)
     endif()
-    if(TARGET MidiToolkitFX_VST3)
-        add_custom_command(TARGET MidiToolkitFX_VST3 POST_BUILD
+    if(TARGET MidiToolkitFXVST3_VST3)
+        add_custom_command(TARGET MidiToolkitFXVST3_VST3 POST_BUILD
             COMMAND "${CMAKE_COMMAND}"
-                "-DPLUGIN_SRC=$<TARGET_FILE_DIR:MidiToolkitFX_VST3>/../.."
+                "-DPLUGIN_SRC=$<TARGET_FILE_DIR:MidiToolkitFXVST3_VST3>/../.."
                 "-DPLUGIN_KIND=VST3"
                 "-DPRODUCT_NAME=${MIDITOOLKIT_FX_PRODUCT_NAME}"
                 -P "${CMAKE_SOURCE_DIR}/cmake/InstallPlugins.cmake"
@@ -215,11 +245,7 @@ juce_add_binary_data(MidiToolkitAssets
         Resources/Fonts/IBMPlexMono-Medium.ttf
 )
 
-target_include_directories(MidiToolkit PRIVATE
-    "${CMAKE_BINARY_DIR}/Generated"
-    "${CMAKE_SOURCE_DIR}/Source")
-
-set(MIDITOOLKIT_PLUGIN_SOURCES
+set(MIDITOOLKIT_SOURCES
     Source/PluginProcessor.cpp
     Source/PluginEditor.cpp
     Source/MidiFileData.cpp
@@ -238,60 +264,46 @@ set(MIDITOOLKIT_PLUGIN_SOURCES
     Source/FolderIndex.cpp
     "${PF_BUILDINFO_CPP}"
 )
-target_sources(MidiToolkit PRIVATE ${MIDITOOLKIT_PLUGIN_SOURCES})
-if(APPLE)
-    target_sources(MidiToolkit PRIVATE Source/NativeWindowChrome.mm)
+
+set(_miditoolkit_plugin_targets MidiToolkit MidiToolkitFXVST3)
+if(TARGET MidiToolkitFX)
+    list(APPEND _miditoolkit_plugin_targets MidiToolkitFX)
 endif()
-add_dependencies(MidiToolkit MidiToolkitBuildInfo)
+foreach(_plug IN LISTS _miditoolkit_plugin_targets)
+    target_include_directories(${_plug} PRIVATE
+        "${CMAKE_BINARY_DIR}/Generated"
+        "${CMAKE_SOURCE_DIR}/Source")
+    target_sources(${_plug} PRIVATE ${MIDITOOLKIT_SOURCES})
+    if(APPLE)
+        target_sources(${_plug} PRIVATE Source/NativeWindowChrome.mm)
+    endif()
+    add_dependencies(${_plug} MidiToolkitBuildInfo)
 
-target_compile_definitions(MidiToolkit PUBLIC
-    JUCE_WEB_BROWSER=0
-    JUCE_USE_CURL=0
-    JUCE_VST3_CAN_REPLACE_VST2=0
-    JUCE_DISPLAY_SPLASH_SCREEN=0
-    JUCE_ALSA=0
-)
+    target_compile_definitions(${_plug} PUBLIC
+        JUCE_WEB_BROWSER=0
+        JUCE_USE_CURL=0
+        JUCE_VST3_CAN_REPLACE_VST2=0
+        JUCE_DISPLAY_SPLASH_SCREEN=0
+        JUCE_ALSA=0
+    )
 
-target_link_libraries(MidiToolkit
-    PRIVATE
-        MidiToolkitAssets
-        juce::juce_audio_utils
-        juce::juce_audio_processors
-        juce::juce_gui_extra
-        juce::juce_data_structures
-    PUBLIC
-        juce::juce_recommended_config_flags
-        juce::juce_recommended_lto_flags
-        juce::juce_recommended_warning_flags
-)
-
-target_include_directories(MidiToolkitFX PRIVATE
-    "${CMAKE_BINARY_DIR}/Generated"
-    "${CMAKE_SOURCE_DIR}/Source")
-target_sources(MidiToolkitFX PRIVATE ${MIDITOOLKIT_PLUGIN_SOURCES})
-if(APPLE)
-    target_sources(MidiToolkitFX PRIVATE Source/NativeWindowChrome.mm)
+    target_link_libraries(${_plug}
+        PRIVATE
+            MidiToolkitAssets
+            juce::juce_audio_utils
+            juce::juce_audio_processors
+            juce::juce_gui_extra
+            juce::juce_data_structures
+        PUBLIC
+            juce::juce_recommended_config_flags
+            juce::juce_recommended_lto_flags
+            juce::juce_recommended_warning_flags
+    )
+endforeach()
+if(TARGET MidiToolkitFX)
+    target_compile_definitions(MidiToolkitFX PUBLIC MIDITOOLKIT_MIDI_FX=1)
 endif()
-add_dependencies(MidiToolkitFX MidiToolkitBuildInfo)
-target_compile_definitions(MidiToolkitFX PUBLIC
-    JUCE_WEB_BROWSER=0
-    JUCE_USE_CURL=0
-    JUCE_VST3_CAN_REPLACE_VST2=0
-    JUCE_DISPLAY_SPLASH_SCREEN=0
-    JUCE_ALSA=0
-)
-target_link_libraries(MidiToolkitFX
-    PRIVATE
-        MidiToolkitAssets
-        juce::juce_audio_utils
-        juce::juce_audio_processors
-        juce::juce_gui_extra
-        juce::juce_data_structures
-    PUBLIC
-        juce::juce_recommended_config_flags
-        juce::juce_recommended_lto_flags
-        juce::juce_recommended_warning_flags
-)
+target_compile_definitions(MidiToolkitFXVST3 PUBLIC MIDITOOLKIT_MIDI_FX=1)
 
 option(MIDITOOLKIT_BUILD_TESTS "Build unit tests" ON)
 option(MIDITOOLKIT_BUILD_PROBE "Build the VST3 MIDI-out probe tool" ON)

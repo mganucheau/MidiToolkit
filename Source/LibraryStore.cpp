@@ -143,6 +143,8 @@ SharedUiSession LibraryStore::uiSessionFromXml(const juce::XmlElement& el)
     const bool themeCatalog = el.getIntAttribute("themeCatalog", 0) != 0;
     s.tweakAppearance = migrateThemeIndex(el.getIntAttribute("tweakAppearance", 0), themeCatalog);
     s.tweakShowTooltips = el.getIntAttribute("tweakShowTooltips", 1) != 0 ? 1 : 0;
+    s.tweakFontFamily = juce::jlimit(0, 3, el.getIntAttribute("tweakFontFamily", 0));
+    s.tweakSurfaceStyle = juce::jlimit(0, 2, el.getIntAttribute("tweakSurfaceStyle", 0));
     s.hasDefaultView = el.getIntAttribute("hasDefaultView", 0) != 0;
     s.defEditorOpen = el.getIntAttribute("defEditorOpen", 0) != 0;
     s.defEffectsOpen = el.getIntAttribute("defEffectsOpen", 0) != 0;
@@ -216,6 +218,8 @@ void LibraryStore::uiSessionToXml(juce::XmlElement& el, const SharedUiSession& s
     el.setAttribute("themeCatalog", 1);
     el.setAttribute("tweakAppearance", s.tweakAppearance);
     el.setAttribute("tweakShowTooltips", s.tweakShowTooltips);
+    el.setAttribute("tweakFontFamily", s.tweakFontFamily);
+    el.setAttribute("tweakSurfaceStyle", s.tweakSurfaceStyle);
     el.setAttribute("hasDefaultView", s.hasDefaultView ? 1 : 0);
     el.setAttribute("defEditorOpen", s.defEditorOpen ? 1 : 0);
     el.setAttribute("defEffectsOpen", s.defEffectsOpen ? 1 : 0);

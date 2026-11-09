@@ -8,8 +8,14 @@
 namespace pflow {
 
 MidiToolkitProcessor::MidiToolkitProcessor()
+   // True AU MIDI effects have no audio buses. The Live-facing FX VST3 is an
+   // instrument-style shell (silent stereo out) so Ableton will open it.
+   #if JucePlugin_IsMidiEffect
+    : AudioProcessor(BusesProperties())
+   #else
     : AudioProcessor(BusesProperties()
                          .withOutput("Output", juce::AudioChannelSet::stereo(), true))
+   #endif
 {
     library_.load();
     applyLibraryToMemory();
@@ -69,7 +75,7 @@ void MidiToolkitProcessor::applySharedUiSessionFromLibrary()
     effectsOpen = s.effectsOpen;
     previewOpen = s.previewOpen;
     sidebarCollapsed = s.sidebarCollapsed;
-    passthrough = s.passthrough;
+    passthrough = s.passthrough || kMidiFxBuild;
     passthroughActive.store(passthrough);
 
     tweaks().density.store(juce::jlimit(0, 1, s.tweakDensity));
@@ -77,6 +83,8 @@ void MidiToolkitProcessor::applySharedUiSessionFromLibrary()
     tweaks().textScalePct.store(juce::jlimit(60, 150, s.tweakTextScalePct));
     tweaks().appearance.store(juce::jlimit(0, kNumAppearances - 1, s.tweakAppearance));
     tweaks().showTooltips.store(s.tweakShowTooltips != 0 ? 1 : 0);
+    tweaks().fontFamily.store(juce::jlimit(0, (int) FontFamily::Count - 1, s.tweakFontFamily));
+    tweaks().surfaceStyle.store(juce::jlimit(0, (int) SurfaceStyle::Count - 1, s.tweakSurfaceStyle));
 
     hasDefaultView = s.hasDefaultView;
     defEditorOpen = s.defEditorOpen;
@@ -96,7 +104,7 @@ void MidiToolkitProcessor::applySharedUiSessionFromLibrary()
 
 void MidiToolkitProcessor::lockMidiFxPassthrough()
 {
-#if JucePlugin_IsMidiEffect
+#if MIDITOOLKIT_MIDI_FX
     passthrough = true;
     passthroughActive.store(true);
 #endif
@@ -104,7 +112,7 @@ void MidiToolkitProcessor::lockMidiFxPassthrough()
 
 void MidiToolkitProcessor::persistSharedUiSession()
 {
-#if JucePlugin_IsMidiEffect
+#if MIDITOOLKIT_MIDI_FX
     // The instrument and the MIDI FX share library.xml. Writing passthrough
     // from this build would open the instrument in Through next time.
     return;
@@ -127,12 +135,14 @@ void MidiToolkitProcessor::persistSharedUiSession()
     s.effectsOpen = effectsOpen;
     s.previewOpen = previewOpen;
     s.sidebarCollapsed = sidebarCollapsed;
-    s.passthrough = passthrough;
+    s.passthrough = kMidiFxBuild ? library_.uiSession.passthrough : passthrough;
     s.tweakDensity = tweaks().density.load();
     s.tweakSize = tweaks().size.load();
     s.tweakTextScalePct = tweaks().textScalePct.load();
     s.tweakAppearance = tweaks().appearance.load();
     s.tweakShowTooltips = tweaks().showTooltips.load();
+    s.tweakFontFamily = tweaks().fontFamily.load();
+    s.tweakSurfaceStyle = tweaks().surfaceStyle.load();
     s.hasDefaultView = hasDefaultView;
     s.defEditorOpen = defEditorOpen;
     s.defEffectsOpen = defEffectsOpen;
@@ -178,12 +188,14 @@ void MidiToolkitProcessor::syncLibraryFromMemory()
         s.effectsOpen = effectsOpen;
         s.previewOpen = previewOpen;
         s.sidebarCollapsed = sidebarCollapsed;
-        s.passthrough = passthrough;
+        s.passthrough = kMidiFxBuild ? library_.uiSession.passthrough : passthrough;
         s.tweakDensity = tweaks().density.load();
         s.tweakSize = tweaks().size.load();
         s.tweakTextScalePct = tweaks().textScalePct.load();
         s.tweakAppearance = tweaks().appearance.load();
         s.tweakShowTooltips = tweaks().showTooltips.load();
+        s.tweakFontFamily = tweaks().fontFamily.load();
+        s.tweakSurfaceStyle = tweaks().surfaceStyle.load();
         s.hasDefaultView = hasDefaultView;
         s.defEditorOpen = defEditorOpen;
         s.defEffectsOpen = defEffectsOpen;
@@ -297,7 +309,7 @@ void MidiToolkitProcessor::processBlock(juce::AudioBuffer<float>& buffer,
         return;
     }
 
-#if JucePlugin_IsMidiEffect
+#if MIDITOOLKIT_MIDI_FX
     const bool pass = true;
 #else
     const bool pass = passthroughActive.load();
@@ -548,7 +560,7 @@ void MidiToolkitProcessor::setRecordingEnabled(bool enabled)
 
 void MidiToolkitProcessor::setPassthroughEnabled(bool enabled)
 {
-#if JucePlugin_IsMidiEffect
+#if MIDITOOLKIT_MIDI_FX
     enabled = true;
 #endif
     const bool was = passthroughActive.load();
@@ -741,6 +753,8 @@ void MidiToolkitProcessor::getStateInformation(juce::MemoryBlock& dest)
     xml.setAttribute("themeCatalog", 1);
     xml.setAttribute("tweakAppearance", tweaks().appearance.load());
     xml.setAttribute("tweakShowTooltips", tweaks().showTooltips.load());
+    xml.setAttribute("tweakFontFamily", tweaks().fontFamily.load());
+    xml.setAttribute("tweakSurfaceStyle", tweaks().surfaceStyle.load());
     xml.setAttribute("syncSessionBars", syncSessionBars.load());
     xml.setAttribute("lastBrowserDir", lastBrowserDir);
     xml.setAttribute("trimEmptyMeasuresPreview", trimEmptyMeasuresPreview ? 1 : 0);
@@ -1027,6 +1041,10 @@ void MidiToolkitProcessor::setStateInformation(const void* data, int sizeInBytes
                 xml->getIntAttribute("tweakAppearance", 0),
                 xml->getIntAttribute("themeCatalog", 0) != 0));
             tweaks().showTooltips.store(xml->getIntAttribute("tweakShowTooltips", 1) != 0 ? 1 : 0);
+            tweaks().fontFamily.store(juce::jlimit(0, (int) FontFamily::Count - 1,
+                xml->getIntAttribute("tweakFontFamily", tweaks().fontFamily.load())));
+            tweaks().surfaceStyle.store(juce::jlimit(0, (int) SurfaceStyle::Count - 1,
+                xml->getIntAttribute("tweakSurfaceStyle", tweaks().surfaceStyle.load())));
             syncSessionBars.store(juce::jlimit(1, 256, xml->getIntAttribute("syncSessionBars",
                 xml->getIntAttribute("arrangementBars", syncSessionBars.load()))));
             lastBrowserDir = xml->getStringAttribute("lastBrowserDir");
@@ -1038,7 +1056,7 @@ void MidiToolkitProcessor::setStateInformation(const void* data, int sizeInBytes
             effectsOpen = xml->getIntAttribute("effectsOpen", 0) != 0;
             previewOpen = xml->getIntAttribute("previewOpen", 1) != 0;
             sidebarCollapsed = xml->getIntAttribute("sidebarCollapsed", 0) != 0;
-            passthrough = xml->getIntAttribute("passthrough", 0) != 0;
+            passthrough = kMidiFxBuild || xml->getIntAttribute("passthrough", 0) != 0;
             passthroughActive.store(passthrough);
             browseMode = juce::jlimit(0, 2, xml->getIntAttribute("browseMode", 0));
             starredFilter = xml->getIntAttribute("starredFilter", 0) != 0;

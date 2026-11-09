@@ -1193,8 +1193,10 @@ void PianoRollEditor::resized()
     titleBounds = r.removeFromTop(toolbarH).reduced(8, 0);
     layoutHeaderTools();
 
-    const int laneH = velocityOpen ? VelocityLane::headerH + VelocityLane::laneH
-                                   : VelocityLane::headerH;
+    // The note view gives up height first so the velocity header + lane stay on screen.
+    const int laneH = juce::jmin(r.getHeight(),
+                                 velocityOpen ? VelocityLane::headerH + VelocityLane::laneH
+                                              : VelocityLane::headerH);
     velocityLane.setBounds(r.removeFromBottom(laneH));
 
     auto rollArea = r;

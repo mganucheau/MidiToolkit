@@ -48,6 +48,8 @@ struct SharedUiSession
     int tweakTextScalePct = 100;
     int tweakAppearance = 0;    // Appearance::System
     int tweakShowTooltips = 1;
+    int tweakFontFamily = 0;    // FontFamily::Archivo
+    int tweakSurfaceStyle = 0;  // SurfaceStyle::Flat
 
     bool hasDefaultView = false;
     bool defEditorOpen = false;

@@ -892,7 +892,7 @@ MidiToolkitEditor::MidiToolkitEditor(MidiToolkitProcessor& p)
     content.addChildComponent(passthroughVeil);
 
     restoreBrowserSession();
-#if JucePlugin_IsMidiEffect
+#if MIDITOOLKIT_MIDI_FX
     processorRef.passthrough = true;
     processorRef.passthroughActive.store(true);
     processorRef.editorOpen = false;
@@ -903,7 +903,7 @@ MidiToolkitEditor::MidiToolkitEditor(MidiToolkitProcessor& p)
     refreshSidebar();
 
     setResizable(true, true);
-#if JucePlugin_IsMidiEffect
+#if MIDITOOLKIT_MIDI_FX
     lastWindowH = passthroughDefaultHeight();
     setSize(passthroughWindowWidth(), lastWindowH);
 #else
@@ -2658,7 +2658,7 @@ void MidiToolkitEditor::applyPassthroughUi()
 
 void MidiToolkitEditor::togglePassthrough()
 {
-#if !JucePlugin_IsMidiEffect
+#if !MIDITOOLKIT_MIDI_FX
     if (recording)
         return;
     processorRef.passthrough = !processorRef.passthrough;

@@ -10,6 +10,10 @@
 #include <atomic>
 #include <map>
 
+#ifndef MIDITOOLKIT_MIDI_FX
+ #define MIDITOOLKIT_MIDI_FX 0
+#endif
+
 namespace pflow {
 
 /** Lightweight MIDI-file browser: session-synced preview only (no arrangement). */
@@ -25,14 +29,16 @@ public:
 
     bool acceptsMidi() const override { return true; }
     bool producesMidi() const override { return true; }
+   #if JucePlugin_IsMidiEffect
+    bool isMidiEffect() const override { return true; }
+   #endif
+    /** Midi Toolkit FX (Logic AU MIDI effect and Live instrument-style VST3):
+        always Through, never writes the instrument's shared passthrough flag. */
+    static constexpr bool kMidiFxBuild = MIDITOOLKIT_MIDI_FX != 0;
 
     const juce::String getName() const override
     {
-#if JucePlugin_IsMidiEffect
-        return "Midi Toolkit FX";
-#else
-        return "Midi Toolkit";
-#endif
+        return kMidiFxBuild ? "Midi Toolkit FX" : "Midi Toolkit";
     }
 
     bool hasEditor() const override { return true; }
@@ -46,21 +52,15 @@ public:
 
     bool isBusesLayoutSupported(const BusesLayout& layouts) const override
     {
+       #if JucePlugin_IsMidiEffect
+        juce::ignoreUnused(layouts);
+        return true;
+       #else
         const auto mainOut = layouts.getMainOutputChannelSet();
-#if JucePlugin_IsMidiEffect
-        const auto mainIn = layouts.getMainInputChannelSet();
-        const auto audioOk = [](const juce::AudioChannelSet& set)
-        {
-            return set.isDisabled()
-                || set == juce::AudioChannelSet::stereo()
-                || set == juce::AudioChannelSet::mono();
-        };
-        return audioOk(mainIn) && audioOk(mainOut);
-#else
         if (mainOut.isDisabled()) return false;
         return mainOut == juce::AudioChannelSet::stereo()
             || mainOut == juce::AudioChannelSet::mono();
-#endif
+       #endif
     }
 
     double getTailLengthSeconds() const override { return 0.0; }
