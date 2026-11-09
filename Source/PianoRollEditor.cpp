@@ -1275,7 +1275,7 @@ void PianoRollEditor::layoutHeaderTools()
 {
     // Header (right to left): Trim · Scale [bars zoom] · Fold
     auto bar = titleBounds;
-    const int ctrlH = 18;
+    const int ctrlH = metrics::chromeIconButton();
     btnFold.setVisible(true);
     barsZoomPopup.setVisible(true);
     btnTrim.setVisible(true);
@@ -1283,7 +1283,7 @@ void PianoRollEditor::layoutHeaderTools()
     btnRevertNotes.setVisible(false);
     zoomLabelBounds = gridLabelBounds = {};
 
-    auto place = [&bar](juce::Component& c, int w)
+    auto place = [&bar, ctrlH](juce::Component& c, int w)
     {
         c.setBounds(bar.removeFromRight(w).withSizeKeepingCentre(w, ctrlH));
         bar.removeFromRight(4);

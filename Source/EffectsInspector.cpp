@@ -1461,7 +1461,7 @@ void EffectsInspector::resized()
     auto r = getLocalBounds();
     const int headerH = metrics::paneHeaderH();
     auto header = r.removeFromTop(headerH).reduced(metrics::scaled(8), 0).withTrimmedBottom(1);
-    const int ctl = metrics::scaled(18);
+    const int ctl = metrics::chromeIconButton();
     btnReset.setBounds(header.removeFromRight(ctl).withSizeKeepingCentre(ctl, ctl));
     header.removeFromRight(metrics::scaled(4));
     btnEffectsLock.setBounds(header.removeFromRight(ctl).withSizeKeepingCentre(ctl, ctl));

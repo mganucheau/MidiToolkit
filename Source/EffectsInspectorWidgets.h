@@ -13,13 +13,13 @@ namespace fx {
 constexpr float kFontPt = 12.0f;
 constexpr float kAnnotPt = 11.0f;
 constexpr float kPopupFontPt = 12.0f;
-constexpr float kSectionTitlePt = 11.0f;
+constexpr float kSectionTitlePt = 12.0f;
 constexpr float kPaneTitlePt = 13.0f;
-constexpr int kSectionHeaderH = 22;   // Groove device header (control-md + padding)
+constexpr int kSectionHeaderH = 26;   // Slightly taller device section headers
 constexpr int kSectionPadH = 12;       // chevron starts here
 constexpr int kSectionRowInset = 22;   // content indent past the chevron
-constexpr int kContentPadX = 10;       // left (inside the section frame)
-constexpr int kContentPadR = 10;
+constexpr int kContentPadX = 8;        // left (inside the section frame; fits 275px column)
+constexpr int kContentPadR = 8;
 constexpr int kRowMinH = 24;
 constexpr int kControlH = 24;
 constexpr int kSliderRowH = 24;
@@ -2330,7 +2330,7 @@ public:
 
         auto titleR = header.withTrimmedLeft(chevronBounds().getRight() + 2);
         titleR.setRight(resetBounds().getX() - 4);
-        g.setFont(uiFontFixed(11.0f, true));
+        g.setFont(sectionTitleFont());
         g.setColour(ds::ink());
         const int titleW = (int) std::ceil(juce::GlyphArrangement::getStringWidth(g.getCurrentFont(), title)) + 2;
         g.drawText(title, titleR.removeFromLeft(juce::jmin(titleW, titleR.getWidth())),

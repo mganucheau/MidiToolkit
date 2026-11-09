@@ -161,7 +161,7 @@ namespace region {
     constexpr int sidebarW     = 156;  // library
     constexpr int fileListW    = 368;  // file list column
     constexpr int gridBrowserW = 584;  // six 96 px kind columns + hairlines
-    constexpr int toolkitW     = 300;
+    constexpr int toolkitW     = 275;
     constexpr int rollMinW     = 320;
     constexpr int velocityH    = 100;
     constexpr int previewH     = 134;  // 14 ruler + 120 notes

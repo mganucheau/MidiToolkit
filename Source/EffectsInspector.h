@@ -275,7 +275,7 @@ private:
     juce::Component body;
     bool notifyingHeight = false;
 
-    static constexpr int kPanelW = 300;
+    static constexpr int kPanelW = 275;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(EffectsInspector)
 };

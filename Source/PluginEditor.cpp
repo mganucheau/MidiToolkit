@@ -3269,7 +3269,7 @@ void MidiToolkitEditor::LeftPaneTabs::setSubfolders(bool on)
 void MidiToolkitEditor::LeftPaneTabs::resized()
 {
     auto row = getLocalBounds().reduced(metrics::scaled(8), 0);
-    const int ctl = metrics::scaled(18);
+    const int ctl = metrics::chromeIconButton();
     if (tab == 0)
     {
         const int subW = btnSubfolders.idealWidth();
