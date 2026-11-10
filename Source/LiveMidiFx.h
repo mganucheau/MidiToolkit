@@ -45,9 +45,12 @@ public:
 
     /** Process host MIDI in-place with Toolkit transforms.
         When the host transport is stopped, timing follows an internal clock so
-        swing and quantize still land on offbeats. */
+        swing and quantize still land on offbeats.
+        `allowGeneratorPlayback`: when false (Passthrough / effect mode), only
+        input-driven generators run — no freerunning file/generator playback. */
     void process(juce::MidiBuffer& midi, double sampleRate, double hostBpm,
-                 double hostBeatPos, int numSamples, bool hostIsPlaying = true);
+                 double hostBeatPos, int numSamples, bool hostIsPlaying = true,
+                 bool allowGeneratorPlayback = true);
 
     /** Release every held / pending live note into `out`. */
     void flush(juce::MidiBuffer& out, int samplePosition = 0);
@@ -90,7 +93,8 @@ private:
                          int velocity, int samplePos, int numSamples, double sampleRate, double bpm,
                          double beatPos, bool isNoteOn, bool drumChannel);
     void runGenerators(juce::MidiBuffer& out, const LiveFxState& snap, double sampleRate,
-                       double bpm, double beatPos, int numSamples);
+                       double bpm, double beatPos, int numSamples,
+                       bool allowGeneratorPlayback);
     std::vector<int> heldPitchesSorted(bool asPlayed) const;
     int effectiveKeyRoot(const LiveFxState& snap) const;
 

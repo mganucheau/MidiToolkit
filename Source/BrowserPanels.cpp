@@ -9,7 +9,7 @@ namespace {
 
 // Groove Panel library metrics.
 constexpr int kSidebarHeaderH = 24;   // panel header band
-constexpr int kSidebarSectionH = 18;  // section label row
+constexpr int kSidebarSectionH = 22;  // section label row (matches Effects title size)
 constexpr int kSidebarRowH = 22;      // list row
 constexpr int kOpenFolderH = 24;
 constexpr int kCardHeaderH = 22;
@@ -21,9 +21,9 @@ constexpr int kPadH = 8;
 constexpr int kRowPadX = 8;
 constexpr int kIconCol = 14;
 constexpr int kRowIconGap = 6;
-constexpr float kCapPt = 11.0f;
-constexpr float kTitlePt = 13.0f;
-/** Match effect-section row labels (inspector 12pt). */
+/** Match Effects section titles (Playback) — 12pt semibold. */
+constexpr float kSectionTitlePt = 12.0f;
+/** Match Effects row labels (Trim) — 12pt. */
 constexpr float kCtrlPt = 12.0f;
 constexpr float kSidebarIconStroke = 1.3f;
 
@@ -1501,10 +1501,12 @@ void FavoritesSidebar::mouseUp(const juce::MouseEvent&)
 void FavoritesSidebar::paintSectionLabel(juce::Graphics& g, const juce::String& title,
                                          juce::Rectangle<int> bounds)
 {
-    // Groove `label`: 11 px Medium, title case, ink-muted.
+    // Match Effects section titles (Playback): 12pt semibold + slight tracking.
     if (bounds.isEmpty()) return;
     g.setColour(ds::inkMuted());
-    g.setFont(uiFontFixed(kCapPt, false));
+    auto font = uiFontFixed(kSectionTitlePt, true);
+    font.setExtraKerningFactor(0.07f);
+    g.setFont(font);
     g.drawText(title, bounds, juce::Justification::centredLeft, false);
 }
 
@@ -1522,7 +1524,9 @@ void FavoritesSidebar::paintOpenFolderButton(juce::Graphics& g, juce::Rectangle<
              ds::ink(), 1.5f);
     inner.removeFromLeft(6);
     g.setColour(ds::ink());
-    g.setFont(uiFontFixed(kCtrlPt, true));
+    auto font = uiFontFixed(kSectionTitlePt, true);
+    font.setExtraKerningFactor(0.07f);
+    g.setFont(font);
     g.drawText(juce::String::fromUTF8("Open Folder\xe2\x80\xa6"), inner, juce::Justification::centredLeft, true);
     if (focus)
         drawFocusRing(g, face, ds::radius::sm);
@@ -3111,6 +3115,9 @@ KindGridView::KindGridView()
     setWantsKeyboardFocus(true);
     for (int i = 0; i < kGridCols; ++i)
         cols.push_back({ (ClipKind) i, {} });
+    vScroll.addListener(this);
+    vScroll.setAutoHide(false);
+    addAndMakeVisible(vScroll);
 }
 
 int KindGridView::idealWidth()
@@ -3139,7 +3146,7 @@ int KindGridView::cellH() const
 int KindGridView::defaultColWidth() const
 {
     const int n = juce::jmax(1, numVisibleCols());
-    return juce::jmax(1, (getWidth() - (n - 1)) / n);
+    return juce::jmax(1, (gridBodyWidth() - (n - 1)) / n);
 }
 
 void KindGridView::refresh()
@@ -3166,6 +3173,7 @@ void KindGridView::refresh()
             }
     scrollY = juce::jlimit(0, maxScroll(), scrollY);
     ensureSelectedVisible();
+    syncScrollBar();
     repaint();
 }
 
@@ -3224,13 +3232,21 @@ void KindGridView::ensureSelectedVisible()
     else if (y + h > scrollY + viewH)
         scrollY = juce::jmax(0, y + h - viewH);
     scrollY = juce::jlimit(0, maxScroll(), scrollY);
+    syncScrollBar();
+}
+
+int KindGridView::gridBodyWidth() const
+{
+    const int sb = vScroll.isVisible() ? vScroll.getWidth() : 0;
+    return juce::jmax(1, getWidth() - sb);
 }
 
 juce::Rectangle<int> KindGridView::columnBounds(int c) const
 {
     const int n = juce::jmax(1, numVisibleCols());
     const int gaps = n - 1;
-    const int avail = juce::jmax(0, getWidth() - gaps);
+    const int bodyW = gridBodyWidth();
+    const int avail = juce::jmax(0, bodyW - gaps);
 
     int fixedSum = 0, autoCount = 0;
     for (int i = 0; i < n; ++i)
@@ -3248,7 +3264,7 @@ juce::Rectangle<int> KindGridView::columnBounds(int c) const
         const int k = (int) cols[(size_t) i].kind;
         int w = colWidthOverride[k] > 0 ? colWidthOverride[k] : autoW;
         if (i == n - 1)
-            w = juce::jmax(1, getWidth() - x);
+            w = juce::jmax(1, bodyW - x);
         if (i == c)
             return { x, 0, w, getHeight() };
         x += w + 1;
@@ -3267,7 +3283,87 @@ int KindGridView::maxScroll() const
 
 void KindGridView::resized()
 {
+    const int sbW = juce::jmax(10, metrics::scaled(10));
+    const int headH = metrics::scaled(kGridHeadH);
+    vScroll.setBounds(getWidth() - sbW, headH, sbW, juce::jmax(0, getHeight() - headH));
     scrollY = juce::jlimit(0, maxScroll(), scrollY);
+    syncScrollBar();
+}
+
+void KindGridView::syncScrollBar()
+{
+    const int headH = metrics::scaled(kGridHeadH);
+    const int viewH = juce::jmax(1, getHeight() - headH);
+    size_t rows = 0;
+    for (const auto& c : cols)
+        rows = std::max(rows, c.entries.size());
+    const int contentH = juce::jmax(viewH, (int) rows * cellH());
+    // Always show the thumb track so users can jump quickly.
+    vScroll.setVisible(true);
+    vScroll.setRangeLimits(0.0, (double) contentH);
+    vScroll.setCurrentRange((double) scrollY, (double) viewH, juce::dontSendNotification);
+    vScroll.setSingleStepSize((double) cellH());
+}
+
+void KindGridView::scrollBarMoved(juce::ScrollBar*, double newRangeStart)
+{
+    const int next = juce::jlimit(0, maxScroll(), (int) std::lround(newRangeStart));
+    if (next == scrollY) return;
+    scrollY = next;
+    repaint();
+}
+
+void KindGridView::selectAt(int col, int row)
+{
+    if (!juce::isPositiveAndBelow(col, numVisibleCols())) return;
+    const auto& list = cols[(size_t) col].entries;
+    if (!juce::isPositiveAndBelow(row, (int) list.size())) return;
+    const int entry = list[(size_t) row];
+    if (onSelect) onSelect(entry);
+    ensureSelectedVisible();
+    repaint();
+}
+
+void KindGridView::moveSelection(int dCol, int dRow)
+{
+    if (source == nullptr || numVisibleCols() <= 0) return;
+    int col = columnIndexForEntry(source->getSelectedIndex());
+    int row = col >= 0 ? rowOfEntry(col, source->getSelectedIndex()) : -1;
+    if (col < 0 || row < 0)
+    {
+        // Nothing selected — land on the first clip that exists.
+        for (int c = 0; c < numVisibleCols(); ++c)
+            if (!cols[(size_t) c].entries.empty())
+            {
+                selectAt(c, 0);
+                return;
+            }
+        return;
+    }
+
+    if (dCol != 0)
+    {
+        int c = col;
+        while (true)
+        {
+            c += dCol > 0 ? 1 : -1;
+            if (!juce::isPositiveAndBelow(c, numVisibleCols()))
+                break;
+            const auto& list = cols[(size_t) c].entries;
+            if (list.empty()) continue;
+            selectAt(c, juce::jmin(row, (int) list.size() - 1));
+            return;
+        }
+        return;
+    }
+
+    if (dRow != 0)
+    {
+        const auto& list = cols[(size_t) col].entries;
+        const int next = row + dRow;
+        if (juce::isPositiveAndBelow(next, (int) list.size()))
+            selectAt(col, next);
+    }
 }
 
 int KindGridView::columnDividerAt(juce::Point<int> p) const
@@ -3419,6 +3515,7 @@ void KindGridView::paint(juce::Graphics& g)
 void KindGridView::mouseDown(const juce::MouseEvent& e)
 {
     grabKeyboardFocus();
+    if (onActivated) onActivated();
     dragStarted = false;
     resizingCol = false;
     resizeColIndex = columnDividerAt(e.getPosition());
@@ -3442,7 +3539,7 @@ void KindGridView::mouseDrag(const juce::MouseEvent& e)
     {
         const int kind = (int) cols[(size_t) resizeColIndex].kind;
         const int minW = metrics::scaled(56);
-        const int maxW = juce::jmax(minW, getWidth() - (numVisibleCols() - 1) * minW);
+        const int maxW = juce::jmax(minW, gridBodyWidth() - (numVisibleCols() - 1) * minW);
         const int next = juce::jlimit(minW, maxW, resizeStartW + (e.getScreenX() - resizeStartX));
         if (colWidthOverride[kind] != next)
         {
@@ -3493,26 +3590,17 @@ void KindGridView::mouseWheelMove(const juce::MouseEvent&, const juce::MouseWhee
     if (next != scrollY)
     {
         scrollY = next;
+        syncScrollBar();
         repaint();
     }
 }
 
 bool KindGridView::keyPressed(const juce::KeyPress& key)
 {
-    if (key == juce::KeyPress::upKey)
-    {
-        if (onStep) onStep(-1);
-        ensureSelectedVisible();
-        repaint();
-        return true;
-    }
-    if (key == juce::KeyPress::downKey)
-    {
-        if (onStep) onStep(1);
-        ensureSelectedVisible();
-        repaint();
-        return true;
-    }
+    if (key == juce::KeyPress::leftKey)  { moveSelection(-1, 0); return true; }
+    if (key == juce::KeyPress::rightKey) { moveSelection(1, 0);  return true; }
+    if (key == juce::KeyPress::upKey)    { moveSelection(0, -1); return true; }
+    if (key == juce::KeyPress::downKey)  { moveSelection(0, 1);  return true; }
     return false;
 }
 

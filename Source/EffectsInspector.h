@@ -200,24 +200,29 @@ private:
     fx::InlineRow arpGenerateRow;
     fx::FlatSwitch arpInputSwitch;
     fx::InlineRow arpInputRow;
-    fx::FlatPopup arpDirectionPopup;
-    fx::InlineRow arpDirectionRow;
-    fx::FlatPopup arpShapePopup;
+    fx::FlatPopup arpLengthPopup;
+    fx::InlineRow arpLengthRow;
+    fx::FlatPopup arpFormPopup;
+    fx::InlineRow arpFormRow;
+    fx::FlatPopup arpShapePopup; // Type / phrasing morph
     fx::InlineRow arpShapeRow;
     fx::FlatPopup arpRatePopup;
     fx::InlineRow arpRateRow;
+    fx::FlatSliderRow arpDensitySl;
+    fx::FlatSliderRow arpIntensitySl;
+    fx::FlatSliderRow arpDynamicsSl;
     fx::FlatSliderRow arpGateSl;
-    fx::FlatPopup arpOctavesPopup;
-    fx::InlineRow arpOctavesRow;
 
     fx::FlatTextButton melodyGenerateBtn { "New" };
     fx::InlineRow melodyGenerateRow;
     fx::FlatSwitch melodyInputSwitch;
     fx::InlineRow melodyInputRow;
+    fx::FlatPopup melodyLengthPopup;
+    fx::InlineRow melodyLengthRow;
+    fx::FlatPopup melodyFormPopup;
+    fx::InlineRow melodyFormRow;
     fx::FlatPopup melodyStylePopup;
     fx::InlineRow melodyStyleRow;
-    fx::FlatPopup melodyPhrasePopup;
-    fx::InlineRow melodyPhraseRow;
     fx::FlatPopup melodyContourPopup;
     fx::InlineRow melodyContourRow;
     fx::FlatPopup melodySpeedPopup;
@@ -227,6 +232,10 @@ private:
     fx::InlineRow chordsGenerateRow;
     fx::FlatSwitch chordsInputSwitch;
     fx::InlineRow chordsInputRow;
+    fx::FlatPopup chordLengthPopup;
+    fx::InlineRow chordLengthRow;
+    fx::FlatPopup chordFormPopup;
+    fx::InlineRow chordFormRow;
     fx::FlatPopup chordVoicingPopup;
     fx::InlineRow chordVoicingRow;
     fx::FlatPopup chordColorPopup;
@@ -238,6 +247,10 @@ private:
     fx::InlineRow bassGenerateRow;
     fx::FlatSwitch bassInputSwitch;
     fx::InlineRow bassInputRow;
+    fx::FlatPopup bassLengthPopup;
+    fx::InlineRow bassLengthRow;
+    fx::FlatPopup bassFormPopup;
+    fx::InlineRow bassFormRow;
     fx::FlatPopup bassMotionPopup;
     fx::InlineRow bassMotionRow;
 
@@ -245,7 +258,12 @@ private:
     fx::InlineRow drumGenerateRow;
     fx::FlatPopup drumStylePopup;
     fx::InlineRow drumStyleRow;
+    fx::FlatPopup drumLengthPopup;
+    fx::InlineRow drumLengthRow;
+    fx::FlatPopup drumFormPopup;
+    fx::InlineRow drumFormRow;
     fx::FlatSliderRow drumDensitySl;
+    fx::FlatSliderRow drumFillSl;
 
     fx::PitchRow octaveRow;
     fx::FlatPopup octaveRangePopup;

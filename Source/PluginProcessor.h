@@ -143,7 +143,8 @@ public:
     bool effectsOpen = false;
     bool previewOpen = true;
     bool sidebarCollapsed = false;
-    /** Live MIDI through Toolkit effects (replaces clip preview while on). */
+    /** Effect mode: transform MIDI in; no file/generator playback.
+        Off = generate-only: play clips/generators out; ignore MIDI input. */
     bool passthrough = false;
     std::atomic<bool> passthroughActive { false };
     BrowserColumnVisibility columnVisibility;

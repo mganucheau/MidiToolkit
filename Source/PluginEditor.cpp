@@ -642,12 +642,14 @@ MidiToolkitEditor::MidiToolkitEditor(MidiToolkitProcessor& p)
     kindGrid.setKindMask(sidebar.getCriteria().kindMask);
     kindGrid.onSelect = [this](int idx)
     {
+        claimKeyNav(KeyNavTarget::Browser);
         fileList.setSelectedIndex(idx, juce::sendNotification);
         kindGrid.ensureSelectedVisible();
         kindGrid.repaint();
     };
     kindGrid.onOpen = [this](int idx) { if (fileList.onOpenInPianoRoll) fileList.onOpenInPianoRoll(idx); };
     kindGrid.onDragFile = [this](const juce::File& f) { if (fileList.onDragFile) fileList.onDragFile(f); };
+    kindGrid.onActivated = [this] { claimKeyNav(KeyNavTarget::Browser); };
     kindGrid.onStep = [this](int d)
     {
         fileList.selectAdjacent(d);
@@ -1136,14 +1138,15 @@ MidiToolkitEditor::MidiToolkitEditor(MidiToolkitProcessor& p)
 
     restoreBrowserSession();
 #if MIDITOOLKIT_MIDI_FX
-    // Audio through stays on; Passthrough button is effects-only layout (not locked).
-    processorRef.passthroughActive.store(true);
     processorRef.editorOpen = false;
     if (!processorRef.hasDefaultView)
     {
         processorRef.effectsOpen = true;
-        processorRef.passthrough = false; // Files + Effects side by side by default
+        // FX defaults to effect mode (transform track MIDI). Turn Passthrough
+        // off to play generated/file clips instead of accepting input.
+        processorRef.passthrough = true;
     }
+    processorRef.setPassthroughEnabled(processorRef.passthrough);
     effectsInspector.setGeneratorsEnabled(true);
     effectsInspector.setPaneTab(1);
     setLeftPaneTab(0);
@@ -1339,6 +1342,11 @@ void MidiToolkitEditor::applyNativeWindowChrome()
 
 void MidiToolkitEditor::darkModeSettingChanged()
 {
+    if (currentAppearance() != Appearance::System)
+        return;
+    lnf.refreshColours();
+    sendLookAndFeelChange();
+    repaint();
 }
 
 // ── data ─────────────────────────────────────────────────────────────────────
@@ -2940,11 +2948,8 @@ void MidiToolkitEditor::applyPassthroughUi()
     rollEditor.setAlpha(1.0f);
     fileList.setEnabled(true);
     rollEditor.setEnabled(true);
-#if MIDITOOLKIT_MIDI_FX
-    const bool liveInput = true;
-#else
+    // Passthrough accepts MIDI in; generate-only does not (except while recording).
     const bool liveInput = pass || recording;
-#endif
     rollEditor.setInputMode(liveInput, recording && !pass ? "Live MIDI" : "Live MIDI through the Toolkit");
     if (pass)
     {
@@ -3314,7 +3319,10 @@ void MidiToolkitEditor::toggleEditorFold()
     processorRef.previewOpen = !processorRef.editorOpen;
     // Piano roll needs the left column; leave effects-only layout.
     if (processorRef.editorOpen)
+    {
         processorRef.passthrough = false;
+        processorRef.setPassthroughEnabled(false);
+    }
     transport.setPassthrough(processorRef.passthrough);
     persistBrowserSession();
     applyLayoutState();
@@ -3325,7 +3333,10 @@ void MidiToolkitEditor::toggleEffectsFold()
     processorRef.effectsOpen = !processorRef.effectsOpen;
     // Passthrough is effects-only — turning Effects off exits it.
     if (!processorRef.effectsOpen)
+    {
         processorRef.passthrough = false;
+        processorRef.setPassthroughEnabled(false);
+    }
     transport.setPassthrough(processorRef.passthrough);
     transport.setEffectsOpen(processorRef.effectsOpen);
     if (recording)
@@ -4041,10 +4052,8 @@ public:
 
     SettingsPanel()
     {
-        juce::StringArray themeNames;
-        for (int i = 0; i < kNumThemes; ++i)
-            themeNames.add(juce::String(themeAt(i).dark ? "Dark  " : "Light  ") + themeAt(i).name);
-        appearancePopup.setItems(themeNames, themeIndex());
+        appearancePopup.setItems({ "Auto", "Light", "Dark" },
+                                 juce::jlimit(0, 2, tweaks().appearance.load()));
         sizePopup.setItems({ "Small", "Medium", "Large" }, tweaks().size.load());
         spacingPopup.setItems({ "Compact", "Comfortable" }, tweaks().density.load());
         fontPopup.setItems({ "Archivo", "System", "Helvetica Neue", "Avenir Next" },
@@ -4077,7 +4086,7 @@ public:
             };
             addAndMakeVisible(p);
         };
-        wire(appearancePopup, [](int i) { tweaks().appearance.store(i); });
+        wire(appearancePopup, [](int i) { tweaks().appearance.store(juce::jlimit(0, 2, i)); });
         wire(sizePopup, [](int i) { tweaks().size.store(i); });
         wire(textPopup, [](int i)
         {
@@ -4150,12 +4159,8 @@ public:
     {
         const auto& t = inspectorTokens();
         auto bounds = getLocalBounds().toFloat();
-        if (currentSurfaceStyle() == SurfaceStyle::Depth)
-        {
-            g.setColour(juce::Colours::black.withAlpha(0.20f));
-            g.fillRoundedRectangle(bounds.translated(0, 3), 10.0f);
-        }
-        g.setColour(currentSurfaceStyle() == SurfaceStyle::Liquid ? t.panelBg.withAlpha(0.92f) : t.panelBg);
+        // Solid panel — no frosted / translucent fill over the plugin.
+        g.setColour(ds::surface100());
         g.fillRoundedRectangle(bounds, 10.0f);
         g.setColour(t.controlHairline);
         g.drawRoundedRectangle(bounds.reduced(0.5f), 10.0f, 1.0f);
@@ -4216,7 +4221,7 @@ public:
         }
         else if (tab == 1)
         {
-            paintRow("Theme", "Ten light themes, then ten dark");
+            paintRow("Appearance", "Auto follows the system; Light is Pearl, Dark is Ink");
             paintRow("UI size", "Scales spacing, panels, and controls");
             paintRow("Text size", "Scales type and icons only");
             paintRow("Font", "Interface typeface; values stay mono");
@@ -4333,11 +4338,6 @@ void MidiToolkitEditor::showTweaksMenu()
     {
         content.removeChildComponent(existing);
         delete existing;
-        if (settingsRaisedHeight)
-        {
-            setSize(getWidth(), juce::jmax(passthroughMinHeight(), heightBeforeSettings));
-            settingsRaisedHeight = false;
-        }
         return;
     }
 
@@ -4350,22 +4350,26 @@ void MidiToolkitEditor::showTweaksMenu()
         Overlay()
         {
             view.setViewedComponent(&panel, false);
-            view.setScrollBarsShown(false, false);
+            view.setScrollBarsShown(true, false);
             view.setScrollBarThickness(10);
             addAndMakeVisible(view);
         }
 
         void resized() override
         {
+            // Fit inside the current window — never grow the plugin to open Settings.
             const int margin = 12;
+            const int minW = 220;
+            const int minH = 200; // passthrough with sections folded
             const int w = juce::jmin(SettingsPanel::kPanelW,
-                                     juce::jmax(220, getWidth() - margin * 2));
-            const int h = juce::jmin(panel.getHeight() > 0 ? panel.getHeight()
-                                                          : SettingsPanel::contentHeightForTab(1),
-                                    juce::jmax(200, getHeight() - margin * 2));
+                                     juce::jmax(minW, getWidth() - margin * 2));
+            const int availH = juce::jmax(minH, getHeight() - margin * 2);
+            const int contentH = panel.getHeight() > 0 ? panel.getHeight()
+                                                      : SettingsPanel::contentHeightForTab(1);
+            const int h = juce::jmin(contentH, availH);
             view.setBounds(getLocalBounds().withSizeKeepingCentre(w, h));
-            panel.setSize(w, panel.getHeight() > 0 ? panel.getHeight()
-                                                   : SettingsPanel::contentHeightForTab(1));
+            view.setScrollBarsShown(contentH > h, false);
+            panel.setSize(w, contentH);
         }
 
         void paint(juce::Graphics& g) override
@@ -4380,19 +4384,6 @@ void MidiToolkitEditor::showTweaksMenu()
                 onDismiss();
         }
     };
-
-    const int defH = passthroughDefaultHeight();
-    if (getHeight() < defH)
-    {
-        heightBeforeSettings = getHeight();
-        settingsRaisedHeight = true;
-        setSize(getWidth(), defH);
-    }
-    else
-    {
-        settingsRaisedHeight = false;
-        heightBeforeSettings = getHeight();
-    }
 
     auto* overlay = new Overlay();
     overlay->setComponentID("settingsOverlay");
@@ -4409,11 +4400,6 @@ void MidiToolkitEditor::showTweaksMenu()
     {
         content.removeChildComponent(overlay);
         delete overlay;
-        if (settingsRaisedHeight)
-        {
-            setSize(getWidth(), juce::jmax(passthroughMinHeight(), heightBeforeSettings));
-            settingsRaisedHeight = false;
-        }
     };
     overlay->panel.onClose = overlay->onDismiss;
     overlay->panel.onSaveDefault = [this] { saveCurrentViewAsDefault(); };
@@ -4504,6 +4490,11 @@ bool MidiToolkitEditor::keyPressed(const juce::KeyPress& key)
         if (keyNavTarget == KeyNavTarget::Effects)
             return true;   // effects are mouse-driven; don't steal browser rows
 
+        if (gridView)
+        {
+            kindGrid.grabKeyboardFocus();
+            return kindGrid.keyPressed(key);
+        }
         fileList.grabBrowseFocus();
         return fileList.keyPressed(key);
     }
@@ -4513,6 +4504,12 @@ bool MidiToolkitEditor::keyPressed(const juce::KeyPress& key)
 
     if (keyNavTarget == KeyNavTarget::Browser)
     {
+        if (gridView)
+        {
+            if (!kindGrid.hasKeyboardFocus(true))
+                kindGrid.grabKeyboardFocus();
+            return kindGrid.keyPressed(key);
+        }
         if (!fileList.hasKeyboardFocus(true))
             fileList.grabBrowseFocus();
         return fileList.keyPressed(key);
@@ -4531,7 +4528,12 @@ void MidiToolkitEditor::claimKeyNav(KeyNavTarget target)
             focused->giveAwayKeyboardFocus();
     grabKeyboardFocus();
     if (target == KeyNavTarget::Browser)
-        fileList.grabKeyboardFocus();
+    {
+        if (gridView)
+            kindGrid.grabKeyboardFocus();
+        else
+            fileList.grabKeyboardFocus();
+    }
     else if (target == KeyNavTarget::Editor && rollEditor.isVisible())
         rollEditor.grabKeyboardFocus();
 }

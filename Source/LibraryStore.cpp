@@ -216,7 +216,7 @@ void LibraryStore::uiSessionToXml(juce::XmlElement& el, const SharedUiSession& s
     el.setAttribute("tweakDensity", s.tweakDensity);
     el.setAttribute("tweakSize", s.tweakSize);
     el.setAttribute("tweakTextScalePct", s.tweakTextScalePct);
-    el.setAttribute("themeCatalog", 1);
+    el.setAttribute("themeCatalog", 0); // Appearance Auto/Light/Dark (Pearl/Ink)
     el.setAttribute("tweakAppearance", s.tweakAppearance);
     el.setAttribute("tweakShowTooltips", s.tweakShowTooltips);
     el.setAttribute("tweakFontFamily", s.tweakFontFamily);

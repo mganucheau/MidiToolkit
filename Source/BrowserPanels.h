@@ -606,7 +606,8 @@ inline juce::Colour kindClipColour(ClipKind k)
 }
 
 /** Grid browser: files as clip slots in one column per kind (Groove ClipSlot look). */
-class KindGridView : public juce::Component
+class KindGridView : public juce::Component,
+                     private juce::ScrollBar::Listener
 {
 public:
     KindGridView();
@@ -633,7 +634,8 @@ public:
     std::function<void(int)> onSelect;                  // entry index
     std::function<void(int)> onOpen;                    // entry index (double-click)
     std::function<void(const juce::File&)> onDragFile;
-    std::function<void(int)> onStep;                    // -1 / +1 with arrow keys
+    std::function<void(int)> onStep;                    // -1 / +1 with arrow keys (legacy vertical)
+    std::function<void()> onActivated;                  // sticky browser key-nav
 
 private:
     struct Column { ClipKind kind; std::vector<int> entries; };
@@ -647,11 +649,17 @@ private:
     int rowOfEntry(int col, int entryIdx) const;
     ClipKind selectedColumnKind() const;
     int defaultColWidth() const;
+    int gridBodyWidth() const;
+    void syncScrollBar();
+    void selectAt(int col, int row);
+    void moveSelection(int dCol, int dRow);
+    void scrollBarMoved(juce::ScrollBar*, double newRangeStart) override;
 
     const FileListPanel* source = nullptr;
     std::vector<Column> cols;
     uint8_t kindMask = 0;
     int scrollY = 0;
+    juce::ScrollBar vScroll { true };
     /** Per-kind width override (0 = share remaining space evenly). */
     int colWidthOverride[kNumClipKinds] = {};
     bool playing = false;

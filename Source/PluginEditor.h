@@ -393,8 +393,6 @@ private:
     void syncPassthroughWindowHeight();
     /** User-dragged passthrough height above the default fold. 0 = use default. */
     int userPassthroughH = 0;
-    int heightBeforeSettings = 0;
-    bool settingsRaisedHeight = false;
     double layoutAnimStartMs = 0.0;
     static constexpr double kLayoutAnimMs = 220.0;
 

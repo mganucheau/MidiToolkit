@@ -98,6 +98,28 @@ enum class ArpShape : int
     Count
 };
 
+/** Clip length for every generator part. */
+enum class GeneratorLength : int
+{
+    TwoBars = 0,
+    FourBars,
+    EightBars,
+    SixteenBars,
+    Count
+};
+
+/** Phrase tiling for 8 / 16-bar clips (Auto picks from the seed). */
+enum class GeneratorForm : int
+{
+    Auto = 0,
+    AAAB,
+    ABAB,
+    ABAC,
+    ABCA,
+    AABA,
+    Count
+};
+
 enum class MelodyStyle : int
 {
     March = 0,
@@ -132,6 +154,7 @@ enum class MelodyPhrase : int
     TwoBars,
     FourBars,
     EightBars,
+    SixteenBars,
     Count
 };
 
@@ -169,10 +192,11 @@ enum class BassMotion : int
 
 enum class DrumStyle : int
 {
-    Straight = 0,
-    HalfTime,
-    Shuffle,
-    Sparse,
+    House = 0,
+    Breakbeat,
+    Dub,
+    Techno,
+    Funk,
     Count
 };
 
@@ -319,13 +343,55 @@ inline const char* melodyPhraseLabel(MelodyPhrase p)
 {
     switch (p)
     {
-        case MelodyPhrase::OneBar:    return "1 Bar";
-        case MelodyPhrase::TwoBars:   return "2 Bars";
-        case MelodyPhrase::FourBars:  return "4 Bars";
-        case MelodyPhrase::EightBars: return "8 Bars";
-        case MelodyPhrase::Count:     break;
+        case MelodyPhrase::OneBar:      return "1 Bar";
+        case MelodyPhrase::TwoBars:     return "2 Bars";
+        case MelodyPhrase::FourBars:    return "4 Bars";
+        case MelodyPhrase::EightBars:   return "8 Bars";
+        case MelodyPhrase::SixteenBars: return "16 Bars";
+        case MelodyPhrase::Count:       break;
     }
     return "4 Bars";
+}
+
+inline const char* generatorLengthLabel(GeneratorLength len)
+{
+    switch (len)
+    {
+        case GeneratorLength::TwoBars:     return "2 Bars";
+        case GeneratorLength::FourBars:    return "4 Bars";
+        case GeneratorLength::EightBars:   return "8 Bars";
+        case GeneratorLength::SixteenBars: return "16 Bars";
+        case GeneratorLength::Count:       break;
+    }
+    return "4 Bars";
+}
+
+inline int generatorLengthBars(GeneratorLength len)
+{
+    switch (len)
+    {
+        case GeneratorLength::TwoBars:     return 2;
+        case GeneratorLength::FourBars:    return 4;
+        case GeneratorLength::EightBars:   return 8;
+        case GeneratorLength::SixteenBars: return 16;
+        case GeneratorLength::Count:       break;
+    }
+    return 4;
+}
+
+inline const char* generatorFormLabel(GeneratorForm f)
+{
+    switch (f)
+    {
+        case GeneratorForm::Auto: return "Auto";
+        case GeneratorForm::AAAB: return "AAAB";
+        case GeneratorForm::ABAB: return "ABAB";
+        case GeneratorForm::ABAC: return "ABAC";
+        case GeneratorForm::ABCA: return "ABCA";
+        case GeneratorForm::AABA: return "AABA";
+        case GeneratorForm::Count: break;
+    }
+    return "Auto";
 }
 
 inline const char* chordVoicingLabel(ChordVoicing v)
@@ -380,13 +446,14 @@ inline const char* drumStyleLabel(DrumStyle s)
 {
     switch (s)
     {
-        case DrumStyle::Straight: return "Straight";
-        case DrumStyle::HalfTime: return "Half Time";
-        case DrumStyle::Shuffle:  return "Shuffle";
-        case DrumStyle::Sparse:   return "Sparse";
-        case DrumStyle::Count:    break;
+        case DrumStyle::House:     return "House";
+        case DrumStyle::Breakbeat: return "Breakbeat";
+        case DrumStyle::Dub:       return "Dub";
+        case DrumStyle::Techno:    return "Techno";
+        case DrumStyle::Funk:      return "Funk";
+        case DrumStyle::Count:     break;
     }
-    return "Straight";
+    return "House";
 }
 
 inline const char* strumDirectionLabel(StrumDirection d)
@@ -429,11 +496,16 @@ struct GrooveParams
 
     bool arpEnabled = false;
     bool arpInput = false;
-    int arpDirectionIndex = (int) ArpDirection::Up;
-    int arpShapeIndex = (int) ArpShape::Walk;
+    int arpDirectionIndex = (int) ArpDirection::Up;   // legacy / lock compat
+    int arpShapeIndex = (int) ArpShape::Walk;         // morphs toward classic phrasing (Sting Type)
     int arpRateIndex = (int) DelayTime::Sixteenth;
     int arpGate = 70;               // 10..100 %
-    int arpOctaves = 1;             // 1..3
+    int arpOctaves = 2;             // 1..3 span for pattern octave lane
+    int arpDensity = 55;            // 0..100 note activity
+    int arpIntensity = 70;          // 0..100 overall velocity
+    int arpDynamics = 55;           // 0..100 accent contrast
+    int arpLengthIndex = (int) GeneratorLength::FourBars;
+    int arpFormIndex = (int) GeneratorForm::Auto;
     int arpVariation = 1;           // 1..16 seed
     int arpNonce = 0;
 
@@ -443,6 +515,8 @@ struct GrooveParams
     int melodyContourIndex = (int) MelodyContour::Even;
     int melodySpeedIndex = (int) MelodySpeed::Medium;
     int melodyPhraseIndex = (int) MelodyPhrase::FourBars;
+    int melodyLengthIndex = (int) GeneratorLength::FourBars;
+    int melodyFormIndex = (int) GeneratorForm::Auto;
     int melodyVariation = 1;        // 1..16 seed
     /** Bumped by Generate so the live engine restarts the phrase. */
     int melodyNonce = 0;
@@ -452,18 +526,25 @@ struct GrooveParams
     int chordVoicingIndex = (int) ChordVoicing::Close;
     int chordColorIndex = (int) ChordColor::Triad;
     int chordRhythmIndex = (int) ChordRhythm::Block;
+    int chordLengthIndex = (int) GeneratorLength::FourBars;
+    int chordFormIndex = (int) GeneratorForm::Auto;
     int chordVariation = 1;
     int chordNonce = 0;
 
     bool bassEnabled = false;
     bool bassInput = false;
     int bassMotionIndex = (int) BassMotion::Pulse;
+    int bassLengthIndex = (int) GeneratorLength::FourBars;
+    int bassFormIndex = (int) GeneratorForm::Auto;
     int bassVariation = 1;
     int bassNonce = 0;
 
     bool drumsEnabled = false;
-    int drumStyleIndex = (int) DrumStyle::Straight;
+    int drumStyleIndex = (int) DrumStyle::House;
     int drumDensity = 50;           // 0..100
+    int drumFill = 35;              // 0..100 end-of-phrase fill amount
+    int drumLengthIndex = (int) GeneratorLength::FourBars;
+    int drumFormIndex = (int) GeneratorForm::Auto;
     int drumVariation = 1;          // 1..16 seed
     int drumNonce = 0;
 
@@ -514,6 +595,14 @@ struct GrooveParams
     {
         return (DelayTime) juce::jlimit(0, (int) DelayTime::Count - 1, arpRateIndex);
     }
+    GeneratorLength arpLength() const
+    {
+        return (GeneratorLength) juce::jlimit(0, (int) GeneratorLength::Count - 1, arpLengthIndex);
+    }
+    GeneratorForm arpForm() const
+    {
+        return (GeneratorForm) juce::jlimit(0, (int) GeneratorForm::Count - 1, arpFormIndex);
+    }
     MelodyStyle melodyStyle() const
     {
         return (MelodyStyle) juce::jlimit(0, (int) MelodyStyle::Count - 1, melodyStyleIndex);
@@ -530,6 +619,14 @@ struct GrooveParams
     {
         return (MelodyPhrase) juce::jlimit(0, (int) MelodyPhrase::Count - 1, melodyPhraseIndex);
     }
+    GeneratorLength melodyLength() const
+    {
+        return (GeneratorLength) juce::jlimit(0, (int) GeneratorLength::Count - 1, melodyLengthIndex);
+    }
+    GeneratorForm melodyForm() const
+    {
+        return (GeneratorForm) juce::jlimit(0, (int) GeneratorForm::Count - 1, melodyFormIndex);
+    }
     ChordVoicing chordVoicing() const
     {
         return (ChordVoicing) juce::jlimit(0, (int) ChordVoicing::Count - 1, chordVoicingIndex);
@@ -542,13 +639,37 @@ struct GrooveParams
     {
         return (ChordRhythm) juce::jlimit(0, (int) ChordRhythm::Count - 1, chordRhythmIndex);
     }
+    GeneratorLength chordLength() const
+    {
+        return (GeneratorLength) juce::jlimit(0, (int) GeneratorLength::Count - 1, chordLengthIndex);
+    }
+    GeneratorForm chordForm() const
+    {
+        return (GeneratorForm) juce::jlimit(0, (int) GeneratorForm::Count - 1, chordFormIndex);
+    }
     BassMotion bassMotion() const
     {
         return (BassMotion) juce::jlimit(0, (int) BassMotion::Count - 1, bassMotionIndex);
     }
+    GeneratorLength bassLength() const
+    {
+        return (GeneratorLength) juce::jlimit(0, (int) GeneratorLength::Count - 1, bassLengthIndex);
+    }
+    GeneratorForm bassForm() const
+    {
+        return (GeneratorForm) juce::jlimit(0, (int) GeneratorForm::Count - 1, bassFormIndex);
+    }
     DrumStyle drumStyle() const
     {
         return (DrumStyle) juce::jlimit(0, (int) DrumStyle::Count - 1, drumStyleIndex);
+    }
+    GeneratorLength drumLength() const
+    {
+        return (GeneratorLength) juce::jlimit(0, (int) GeneratorLength::Count - 1, drumLengthIndex);
+    }
+    GeneratorForm drumForm() const
+    {
+        return (GeneratorForm) juce::jlimit(0, (int) GeneratorForm::Count - 1, drumFormIndex);
     }
     StrumDirection strumDirection() const
     {

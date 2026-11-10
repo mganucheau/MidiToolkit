@@ -10,10 +10,11 @@ namespace pflow {
 
 enum class Density { Compact, Comfortable };
 enum class ContentSize { Small, Medium, Large };
+/** Settings → Appearance: Auto follows the OS; Light/Dark resolve to Pearl/Ink. */
 enum class Appearance { System = 0, Light = 1, Dark = 2 };
 
 /** Named themes. Indexes 0–9 are light, 10–19 are dark.
-    Stored appearance 0/1/2 from older builds is migrated on load. */
+    Appearance Auto/Light/Dark maps onto Pearl (5) and Ink (10). */
 struct ThemeSpec
 {
     const char* name;
@@ -47,23 +48,28 @@ inline constexpr ThemeSpec kThemes[] = {
 };
 
 inline constexpr int kNumThemes = (int) (sizeof(kThemes) / sizeof(kThemes[0]));
+inline constexpr int kPearlTheme = 5;
+inline constexpr int kInkTheme = 10;
 
 inline const ThemeSpec& themeAt(int index)
 {
     return kThemes[(size_t) juce::jlimit(0, kNumThemes - 1, index)];
 }
 
-/** Old files stored System=0, Light=1, Dark=2. themeCatalog marks the 20-theme ids. */
+/** Map stored ids → Appearance Auto/Light/Dark.
+    themeCatalog builds stored a named-theme index (0–19); mode builds store 0/1/2. */
 inline int migrateThemeIndex(int stored, bool themeCatalog)
 {
-    if (themeCatalog)
-        return juce::jlimit(0, kNumThemes - 1, stored);
-    return stored >= 2 ? 10 : 0;
+    if (!themeCatalog)
+        return juce::jlimit(0, 2, stored);
+    // Legacy named themes: dark family → Dark, everything else → Light (Pearl defaults).
+    if (stored >= 10) return (int) Appearance::Dark;
+    return (int) Appearance::Light;
 }
 enum class ScalePlacement { Top, Bottom };   // legacy; Pitch & Scale lives in inspector
 
 constexpr int kNumContentSizes = 3;
-constexpr int kNumAppearances = kNumThemes;
+constexpr int kNumAppearances = 3; // Auto / Light / Dark
 constexpr int kNumScalePlacements = 2;
 
 /** Legacy aggregate mapped 1:1 from ds::Palette — prefer ds:: accessors in new code. */
@@ -167,14 +173,22 @@ inline Density currentDensity()
     return (Density) juce::jlimit(0, 1, tweaks().density.load());
 }
 
-inline int themeIndex()
-{
-    return juce::jlimit(0, kNumThemes - 1, tweaks().appearance.load());
-}
-
 inline Appearance currentAppearance()
 {
     return (Appearance) juce::jlimit(0, 2, tweaks().appearance.load());
+}
+
+/** Resolve Appearance Auto/Light/Dark to Pearl (light) or Ink (dark). */
+inline int themeIndex()
+{
+    switch (currentAppearance())
+    {
+        case Appearance::Light: return kPearlTheme;
+        case Appearance::Dark:  return kInkTheme;
+        case Appearance::System:
+        default:
+            return juce::Desktop::getInstance().isDarkModeActive() ? kInkTheme : kPearlTheme;
+    }
 }
 
 /** UI scale for the Small / Medium / Large content-size tweak (layout / chrome). */

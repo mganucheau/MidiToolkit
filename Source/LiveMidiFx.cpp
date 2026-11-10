@@ -388,7 +388,8 @@ void LiveMidiFx::emitTransformed(juce::MidiBuffer& out, const LiveFxState& snap,
 }
 
 void LiveMidiFx::runGenerators(juce::MidiBuffer& out, const LiveFxState& snap, double sampleRate,
-                               double bpm, double beatPos, int numSamples)
+                               double bpm, double beatPos, int numSamples,
+                               bool allowGeneratorPlayback)
 {
     if (sampleRate <= 0.0 || bpm <= 0.0) return;
 
@@ -428,36 +429,40 @@ void LiveMidiFx::runGenerators(juce::MidiBuffer& out, const LiveFxState& snap, d
         }
     };
 
+    // Effect mode: only input-driven generators (held notes → pattern). Freerun
+    // parts are playback and belong in generate-only / preview.
+    const bool inputOnly = !allowGeneratorPlayback;
+
     std::vector<gen::Event> events;
-    if (snap.groove.arpEnabled)
+    if (snap.groove.arpEnabled && (!inputOnly || snap.groove.arpInput))
     {
         const int* arpChord = snap.groove.arpInput ? chordPtr : nullptr;
         const int arpCount = snap.groove.arpInput ? chordCount : 0;
         gen::renderArp(snap.groove, startPpq, endPpq, arpChord, arpCount, keyRoot, mode, events);
         emitEvents(events, 1, false);
     }
-    if (snap.groove.melodyEnabled)
+    if (snap.groove.melodyEnabled && (!inputOnly || snap.groove.melodyInput))
     {
         const int* melChord = snap.groove.melodyInput ? chordPtr : nullptr;
         const int melCount = snap.groove.melodyInput ? chordCount : 0;
         gen::renderMelody(snap.groove, startPpq, endPpq, melChord, melCount, keyRoot, mode, events);
         emitEvents(events, 1, false);
     }
-    if (snap.groove.chordsEnabled)
+    if (snap.groove.chordsEnabled && (!inputOnly || snap.groove.chordsInput))
     {
         const int* chChord = snap.groove.chordsInput ? chordPtr : nullptr;
         const int chCount = snap.groove.chordsInput ? chordCount : 0;
         gen::renderChords(snap.groove, startPpq, endPpq, chChord, chCount, keyRoot, mode, events);
         emitEvents(events, 1, false);
     }
-    if (snap.groove.bassEnabled)
+    if (snap.groove.bassEnabled && (!inputOnly || snap.groove.bassInput))
     {
         const int* bChord = snap.groove.bassInput ? chordPtr : nullptr;
         const int bCount = snap.groove.bassInput ? chordCount : 0;
         gen::renderBass(snap.groove, startPpq, endPpq, bChord, bCount, keyRoot, mode, events);
         emitEvents(events, 1, false);
     }
-    if (snap.groove.drumsEnabled)
+    if (snap.groove.drumsEnabled && allowGeneratorPlayback)
     {
         gen::renderDrums(snap.groove, startPpq, endPpq, events);
         emitEvents(events, 10, true);
@@ -465,7 +470,8 @@ void LiveMidiFx::runGenerators(juce::MidiBuffer& out, const LiveFxState& snap, d
 }
 
 void LiveMidiFx::process(juce::MidiBuffer& midi, double sampleRate, double hostBpm,
-                         double hostBeatPos, int numSamples, bool hostIsPlaying)
+                         double hostBeatPos, int numSamples, bool hostIsPlaying,
+                         bool allowGeneratorPlayback)
 {
     LiveFxState snap;
     {
@@ -553,7 +559,7 @@ void LiveMidiFx::process(juce::MidiBuffer& midi, double sampleRate, double hostB
         out.addEvent(msg, samplePos);
     }
 
-    runGenerators(out, snap, sampleRate, bpm, beatPos, numSamples);
+    runGenerators(out, snap, sampleRate, bpm, beatPos, numSamples, allowGeneratorPlayback);
     syncSustain(snap.groove, out, numSamples);
     midi.swapWith(out);
 }

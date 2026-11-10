@@ -227,7 +227,7 @@ TransportBar::TransportBar()
 
     btnPassthrough.setComponentID("btnPassthrough");
     btnPassthrough.setWantsKeyboardFocus(false);
-    btnPassthrough.setTooltip("Passthrough: show only the Effects column (P)");
+    btnPassthrough.setTooltip("Passthrough: effect mode — transform MIDI in, no file/generator playback (P)");
     btnPassthrough.onClick = [this] { if (onTogglePassthrough) onTogglePassthrough(); };
     addAndMakeVisible(btnPassthrough);
 

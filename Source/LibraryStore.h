@@ -46,7 +46,7 @@ struct SharedUiSession
     int tweakDensity = 1;       // Density::Comfortable
     int tweakSize = 1;          // ContentSize::Medium
     int tweakTextScalePct = 100;
-    int tweakAppearance = 0;    // Appearance::System
+    int tweakAppearance = 0;    // Appearance::System (Auto) / Light / Dark
     int tweakShowTooltips = 1;
     int tweakFontFamily = 0;    // FontFamily::Archivo
     int tweakSurfaceStyle = 0;  // SurfaceStyle::Flat
