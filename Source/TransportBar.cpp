@@ -152,26 +152,32 @@ bool TransportBar::StatusPill::keyPressed(const juce::KeyPress& key)
 int TransportBar::DragChip::idealWidth() const
 {
     const float sc = juce::jmax(0.5f, contentScale());
-    const int textW = (int) std::ceil(juce::GlyphArrangement::getStringWidth(uiFont(11.0f, true), "Drag to DAW")) + 2;
+    const juce::String label = getButtonText().isNotEmpty() ? getButtonText() : "Drag Me";
+    const int textW = (int) std::ceil(juce::GlyphArrangement::getStringWidth(uiFont(11.0f, true), label)) + 2;
     return juce::roundToInt(8.0f * sc) * 2 + juce::roundToInt(10.0f * sc) + juce::roundToInt(4.0f * sc) + textW;
 }
 
 void TransportBar::DragChip::paintButton(juce::Graphics& g, bool over, bool down)
 {
     auto face = getLocalBounds().toFloat();
-    g.setColour((over || down) ? ds::surface300() : ds::surface200());
+    // Warm amber — distinct from Effects / Settings chrome so the drag handle stands out.
+    const auto gold = juce::Colour(0xffe8b84a);
+    const auto fill = over || down ? gold.brighter(0.08f) : gold;
+    g.setColour(fill.withMultipliedAlpha(foregroundAlpha));
     g.fillRoundedRectangle(face, ds::radius::sm);
-    g.setColour(ds::edge());
+    g.setColour(gold.darker(0.25f).withMultipliedAlpha(foregroundAlpha));
     g.drawRoundedRectangle(face.reduced(0.5f), ds::radius::sm, 1.0f);
 
     const float sc = juce::jmax(0.5f, contentScale());
     auto inner = face.reduced(8.0f * sc, 0.0f);
     auto glyph = inner.removeFromLeft(10.0f * sc).withSizeKeepingCentre(10.0f * sc, 10.0f * sc);
-    drawIcon(g, icons::dragOut, glyph, ds::ink().withMultipliedAlpha(foregroundAlpha), 1.3f);
+    const auto ink = gold.contrasting(0.9f).withMultipliedAlpha(foregroundAlpha);
+    drawIcon(g, icons::dragOut, glyph, ink, 1.3f);
     inner.removeFromLeft(4.0f * sc);
     g.setFont(uiFont(11.0f, true));
-    g.setColour(ds::ink().withMultipliedAlpha(foregroundAlpha));
-    g.drawText("Drag to DAW", inner, juce::Justification::centredLeft, false);
+    g.setColour(ink);
+    const juce::String label = getButtonText().isNotEmpty() ? getButtonText() : "Drag Me";
+    g.drawText(label, inner, juce::Justification::centredLeft, false);
     if (hasKeyboardFocus(true))
         drawFocusRing(g, face, ds::radius::sm);
 }
@@ -232,7 +238,8 @@ TransportBar::TransportBar()
     addAndMakeVisible(btnPassthrough);
 
     btnDragToDaw.accentText = false;
-    btnDragToDaw.setTooltip("Drag edited clip onto a DAW track (or right-click to copy)");
+    btnDragToDaw.setButtonText("Drag Me");
+    btnDragToDaw.setTooltip("Drag the current effected clip onto a DAW track (or right-click to copy)");
     btnDragToDaw.setMouseCursor(juce::MouseCursor::DraggingHandCursor);
     btnDragToDaw.onDragStart = [this] { if (onDragToDaw) onDragToDaw(); };
     btnDragToDaw.onCopyToFolder = [this] { if (onCopyToFolder) onCopyToFolder(); };
@@ -594,7 +601,8 @@ void TransportBar::resized()
 
     btnStop.setVisible(false);
     btnEffects.setVisible(true);
-    btnDragToDaw.setVisible(false);   // Drag lives in the preview header (Groove)
+    // Drag Me sits between Effects and Settings when a clip is available.
+    btnDragToDaw.setVisible(hasClip);
     btnEditor.setVisible(true);
     // Passthrough appears left of Piano Roll only while Effects is open.
     btnPassthrough.setVisible(effectsOpen);
@@ -609,10 +617,10 @@ void TransportBar::resized()
     auto rightWidth = [&]()
     {
         int w = btn + groupGap;   // settings
+        if (chipW > 0)              w += chipW + tight; // Drag Me before Settings
         if (btnEffects.isVisible()) w += btnEffects.captionWidth();
         if (btnEditor.isVisible())  w += tight + btnEditor.captionWidth();
         if (btnPassthrough.isVisible()) w += tight + btnPassthrough.idealWidth();
-        if (chipW > 0)              w += groupGap + chipW;
         return w;
     };
 
@@ -657,7 +665,17 @@ void TransportBar::resized()
 
     int xr = getWidth() - rightPad;
     btnSettings.setBounds(xr - btn, y, btn, btn);
-    xr -= btn + groupGap;
+    xr -= btn + tight;
+    if (chipW > 0)
+    {
+        btnDragToDaw.setBounds(xr - chipW, y, chipW, btn);
+        xr -= chipW + groupGap;
+    }
+    else
+    {
+        btnDragToDaw.setBounds({});
+        xr -= groupGap - tight;
+    }
     if (btnEffects.isVisible())
     {
         const int w = btnEffects.captionWidth();
@@ -680,10 +698,6 @@ void TransportBar::resized()
     {
         btnPassthrough.setBounds({});
     }
-    if (chipW > 0)
-        btnDragToDaw.setBounds(xr - chipW, y, chipW, btn);
-    else
-        btnDragToDaw.setBounds({});
 }
 
 void TransportBar::paint(juce::Graphics& g)

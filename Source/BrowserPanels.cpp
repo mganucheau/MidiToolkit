@@ -9,8 +9,9 @@ namespace {
 
 // Groove Panel library metrics.
 constexpr int kSidebarHeaderH = 24;   // panel header band
-constexpr int kSidebarSectionH = 22;  // section label row (matches Effects title size)
-constexpr int kSidebarRowH = 22;      // list row
+constexpr int kSidebarSectionH = 22;  // section label row
+/** Same height as KindGridView clip cells (kGridCellH). */
+constexpr int kSidebarRowH = 22;
 constexpr int kOpenFolderH = 24;
 constexpr int kCardHeaderH = 22;
 constexpr int kSectionGap = 8;
@@ -21,9 +22,8 @@ constexpr int kPadH = 8;
 constexpr int kRowPadX = 8;
 constexpr int kIconCol = 14;
 constexpr int kRowIconGap = 6;
-/** Match Effects section titles (Playback) — 12pt semibold. */
+/** Open Folder / section titles / sidebar row labels — same 12pt face. */
 constexpr float kSectionTitlePt = 12.0f;
-/** Match Effects row labels (Trim) — 12pt. */
 constexpr float kCtrlPt = 12.0f;
 constexpr float kSidebarIconStroke = 1.3f;
 
@@ -940,30 +940,10 @@ std::vector<FavoritesSidebar::LayoutItem> FavoritesSidebar::collectLayout() cons
                         juce::Rectangle<int>(padH, y, W - padH * 2, sidebarSectionH()) });
         y += sidebarSectionH() + sidebarHeaderToRows();
     };
-    auto savedSearchLabel = [&](int rowIdx) -> juce::String
+    auto rowHeightFor = [&](RowKind, int) -> int
     {
-        if (!juce::isPositiveAndBelow(rowIdx, (int) rows.size()))
-            return {};
-        const auto& row = rows[(size_t) rowIdx];
-        if (row.kind != RowKind::SavedSearch
-            || !juce::isPositiveAndBelow(row.index, (int) savedSearches.size()))
-            return {};
-        const auto& entry = savedSearches[(size_t) row.index];
-        return entry.name.isNotEmpty() ? entry.name
-             : entry.search.query.isNotEmpty() ? entry.search.query : juce::String("Search");
-    };
-    auto rowHeightFor = [&](RowKind kind, int rowIdx) -> int
-    {
-        if (kind != RowKind::SavedSearch)
-            return sidebarRowH();
-        const auto label = savedSearchLabel(rowIdx);
-        const int textW = juce::jmax(40, W - 1 - sidebarRowPadX() * 2 - sidebarIconCol() - sidebarRowIconGap());
-        const auto font = uiFontFixed(kCtrlPt, false);
-        juce::GlyphArrangement ga;
-        ga.addFittedText(font, label, 0.0f, 0.0f, (float) textW, 200.0f,
-                         juce::Justification::topLeft, 4, 1.0f);
-        const int textH = juce::jmax(sidebarRowH() - 4, (int) std::ceil(ga.getBoundingBox(0, ga.getNumGlyphs(), true).getHeight()) + 4);
-        return juce::jmax(sidebarRowH(), textH);
+        // Favorites / Files / Folders / Saved Searches — same height as a grid clip.
+        return sidebarRowH();
     };
     auto placeRows = [&](RowKind kind)
     {
@@ -1747,11 +1727,11 @@ void FavoritesSidebar::paintRow(juce::Graphics& g, int rowIdx, const juce::Recta
     }
 
     g.setColour(ds::ink());
-    g.setFont(uiFontFixed(kCtrlPt, isActive));
-    if (row.kind == RowKind::SavedSearch && textArea.getHeight() > sidebarRowH())
-        g.drawFittedText(label, textArea, juce::Justification::centredLeft, 4, 1.0f);
-    else
-        g.drawText(label, textArea, juce::Justification::centredLeft, true);
+    // Match Open Folder face (12pt + tracking).
+    auto rowFont = uiFontFixed(kSectionTitlePt, isActive);
+    rowFont.setExtraKerningFactor(0.07f);
+    g.setFont(rowFont);
+    g.drawText(label, textArea, juce::Justification::centredLeft, true);
 
     if (keyboardFocus)
         drawFocusRing(g, r.toFloat().reduced(1.0f), 0.0f);

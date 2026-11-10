@@ -381,6 +381,9 @@ private:
     bool trackedRecording = false;
     int savedNonRecordW = 0;
     StepClip recordedClip;
+    /** Part index from the last Generate; -1 = take/import (do not live-regenerate). */
+    int lastGeneratedPart = -1;
+    void regenerateGeneratedClip(const GrooveParams& groove);
     int savedNonPassW = 0;
     int savedNonPassH = 0;
     int passthroughWindowHeight() const;

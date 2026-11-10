@@ -27,6 +27,67 @@ bool isGmDrumPitch(int midi)
     return midi >= 35 && midi <= 81;
 }
 
+bool isKickC1Pitch(int midi)
+{
+    // Ableton C1 / GM Bass Drum 1 = 36; Acoustic Bass Drum = 35.
+    return midi == 35 || midi == 36;
+}
+
+bool fitsGmDrumStructure(const std::vector<RollNote>& notes)
+{
+    if (notes.empty())
+        return false;
+
+    int gm = 0, kick = 0, snare = 0, hat = 0, perc = 0, shortHits = 0;
+    double earliest = 1.0e9;
+    int earliestPitch = -1;
+
+    for (const auto& n : notes)
+    {
+        if (n.start < earliest)
+        {
+            earliest = n.start;
+            earliestPitch = n.pitch;
+        }
+        // RollNote lengths are in 16th-steps; kit hits are short (≤ half-beat).
+        if (n.len <= 2.0)
+            ++shortHits;
+
+        if (!isGmDrumPitch(n.pitch))
+            continue;
+        ++gm;
+
+        // Inline voice buckets (same map as classifyDrumVoice below).
+        switch (n.pitch)
+        {
+            case 35: case 36: ++kick; break;
+            case 37: case 38: case 40: ++snare; break;
+            case 42: case 44: case 46: ++hat; break;
+            default: ++perc; break;
+        }
+    }
+
+    const int total = (int) notes.size();
+    // Majority of hits must sit on the GM drum map.
+    if (gm * 2 < total)
+        return false;
+    // Sustained low chords also sit on 36/40/43 — require drum-like lengths.
+    if (shortHits * 2 < total)
+        return false;
+    if (kick < 1)
+        return false;
+
+    // Need another kit voice so a mono bassline parked on C2 (MIDI 36) fails.
+    if (snare + hat + perc < 1)
+        return false;
+
+    // Must start on the kick at C1 (first sounding note is kick near t0).
+    if (!isKickC1Pitch(earliestPitch) || earliest > 0.75)
+        return false;
+
+    return true;
+}
+
 namespace {
 
 bool tokenEquals(const juce::String& tok, const char* word)
@@ -101,22 +162,26 @@ std::optional<ClipKind> kindKeywordFromFileName(const juce::String& nameOrPath)
         return ClipKind::Bass;
 
     // Drums / kit / percussion lexicon.
-    if (hasToken("drums") || hasToken("drum") || hasToken("drumkit")
-        || hasToken("kit") || hasToken("drm") || hasToken("perc") || hasToken("percussion")
-        || hasToken("break") || hasToken("breaks") || hasToken("breakbeat")
+    // Keep this strict — words like "groove", "beat", "top", "rhythm", "fill"
+    // appear on melodic packs and must not force Drums. Content still has to
+    // look like a GM kit (kick at C1) before a drum keyword sticks on parse.
+    if (hasToken("drums") || hasToken("drum") || hasToken("drumkit") || hasToken("loopkit")
+        || hasToken("kit") || hasToken("drm") || hasToken("dr") || hasToken("perc")
+        || hasToken("percussion") || hasToken("break") || hasToken("breaks")
+        || hasToken("breakbeat") || hasToken("amen") || hasToken("boomBap") || hasToken("boombap")
         || hasToken("hats") || hasToken("hat") || hasToken("hh") || hasToken("hihat")
         || hasToken("hihats") || hasToken("highhat") || hasToken("kick") || hasToken("snare")
-        || hasToken("clap") || hasToken("fill") || hasToken("fills") || hasToken("loopkit")
+        || hasToken("clap") || hasToken("claps") || hasToken("rim") || hasToken("rimshot")
         || hasToken("conga") || hasToken("congas") || hasToken("djembe") || hasToken("tom")
-        || hasToken("toms") || hasToken("rim") || hasToken("ride") || hasToken("crash")
-        || hasToken("cymbal") || hasToken("shaker") || hasToken("tamb") || hasToken("tambourine")
-        || hasToken("sn") || hasToken("groove") || hasToken("grooves")
-        || hasToken("beat") || hasToken("beats") || hasToken("top") || hasToken("tops")
-        || hasToken("rhythm") || hasToken("rhythms")
-        || hasPadded("sn") || hasPadded("hh") || hasPadded("kick")
+        || hasToken("toms") || hasToken("ride") || hasToken("crash") || hasToken("cymbal")
+        || hasToken("cymbals") || hasToken("shaker") || hasToken("tamb") || hasToken("tambourine")
+        || hasToken("sn") || hasToken("kickdrum") || hasToken("snr")
+        || hasPadded("sn") || hasPadded("hh") || hasPadded("dr") || hasPadded("drm")
+        || hasPadded("kick") || hasPadded("kit")
         || lower.contains("drumkit") || lower.contains("drum_kit") || lower.contains("drum-kit")
         || lower.contains("hi-hat") || lower.contains("hi_hat") || lower.contains("highhat")
-        || lower.contains("high-hat") || lower.contains("high_hat"))
+        || lower.contains("high-hat") || lower.contains("high_hat")
+        || lower.contains("breakbeat") || lower.contains("boom-bap") || lower.contains("boom_bap"))
         return ClipKind::Drums;
 
     // Arp / sequencer — before Lead so "arp" doesn't fall through as melody.
@@ -166,6 +231,23 @@ bool applyFilenameKindTag(StepClip& clip)
         tagged = kindKeywordFromFileName(clip.name);
     if (!tagged)
         return false;
+
+    // Never let a drum keyword overwrite a content-analyzed non-drum kind when
+    // resident notes are present but don't look like a GM kit.
+    if (*tagged == ClipKind::Drums
+        && clip.notesResident
+        && !clip.notes.empty()
+        && !fitsGmDrumStructure(clip.notes))
+        return false;
+
+    // Indexed browse stubs already carry makeStepClip's kind. A drum keyword
+    // must not clobber that when notes aren't loaded here.
+    if (*tagged == ClipKind::Drums
+        && !clip.notesResident
+        && clip.kind != ClipKind::Drums
+        && clip.kindConfidence >= 70)
+        return false;
+
     clip.kind = *tagged;
     clip.kindConfidence = juce::jmax(clip.kindConfidence, 95);
     if (clip.kind == ClipKind::Drums)
@@ -868,49 +950,6 @@ DrumVoice classifyDrumVoice(int pitch)
     }
 }
 
-/** Ableton/GM "C1" kick seat (MIDI 36). Also accept Acoustic Bass Drum 35. */
-bool isKickC1Pitch(int midi)
-{
-    return midi == 35 || midi == 36;
-}
-
-/** Kick-like pattern: repeated short C1 hits landing on beats 1 and/or 3. */
-bool hasKickPatternOnC1(const std::vector<RollNote>& notes)
-{
-    if (notes.empty())
-        return false;
-
-    int c1Hits = 0;
-    int c1Downbeats = 0;
-    int c1Short = 0;
-    double firstC1 = -1.0;
-    for (const auto& n : notes)
-    {
-        if (!isKickC1Pitch(n.pitch))
-            continue;
-        ++c1Hits;
-        if (n.len <= 1.0)
-            ++c1Short;
-        if (firstC1 < 0.0)
-            firstC1 = n.start;
-        int slot = ((int) std::lround(n.start)) % kStepsPerBar;
-        if (slot < 0) slot += kStepsPerBar;
-        if (slot == 0 || slot == 8)
-            ++c1Downbeats;
-    }
-    if (c1Hits < 2)
-        return false;
-
-    const double frac = (double) c1Hits / (double) notes.size();
-    // Strong: several short C1 hits on the backbeat grid.
-    if (c1Short >= 2 && c1Downbeats >= 1 && (frac >= 0.08 || c1Hits >= 3))
-        return true;
-    // Weaker: clip opens on C1 and keeps returning there rhythmically.
-    if (firstC1 >= 0.0 && firstC1 < 0.75 && c1Downbeats >= 2 && c1Short >= 2)
-        return true;
-    return false;
-}
-
 void applyKind(StepClip& s, int meanPitch, int drumHits, int totalHits, const Polyphony& poly,
                int channel10Hits, const std::vector<RollNote>& notes)
 {
@@ -918,29 +957,43 @@ void applyKind(StepClip& s, int meanPitch, int drumHits, int totalHits, const Po
     s.hasDrumContent = channel10Hits > 0 || drumFrac >= 0.10;
 
     const juce::String nameSrc = s.filePath.isNotEmpty() ? s.filePath : s.name;
+    const bool gmKit = fitsGmDrumStructure(notes);
 
-    // Pass 1: keyword lexicon wins outright — no note override.
+    // Pass 1: non-drum keywords win. Drum keywords only stick when the notes
+    // look like a GM kit starting on kick at C1 (or there are no notes yet).
     if (auto tagged = kindKeywordFromFileName(nameSrc))
     {
-        s.kind = *tagged;
-        s.kindConfidence = 95;
-        if (s.kind == ClipKind::Drums)
-            s.hasDrumContent = true;
-        return;
+        if (*tagged != ClipKind::Drums || notes.empty() || gmKit)
+        {
+            s.kind = *tagged;
+            s.kindConfidence = (*tagged == ClipKind::Drums && gmKit) ? 98 : 95;
+            if (s.kind == ClipKind::Drums)
+                s.hasDrumContent = true;
+            return;
+        }
+        // Drum keyword without GM/C1 shape — fall through to content analysis.
     }
 
-    // Pass 2: note analysis for untagged files only.
+    // Pass 2: note analysis for untagged (or false-positive drum-tagged) files.
     const bool chords = poly.frequentChords || poly.meanPoly >= 2.2 || poly.maxPoly >= 3;
     const bool mono = poly.maxPoly <= 1 && poly.meanPoly < 1.35;
-    const bool kickC1 = hasKickPatternOnC1(notes);
     const bool bassRegister = meanPitch >= 24 && meanPitch <= 52;
     const double ch10Frac = totalHits > 0 ? (double) channel10Hits / (double) totalHits : 0.0;
 
-    // A stray channel-10 click must not flip a chord clip to Drums.
-    if (kickC1 || drumFrac >= 0.70 || ch10Frac >= 0.40)
+    // Require GM kit shape (kick at C1 + other voices). Dense drumFrac alone is
+    // not enough — basslines also live around MIDI 36–48.
+    if (gmKit)
     {
         s.kind = ClipKind::Drums;
-        s.kindConfidence = kickC1 ? 90 : (drumFrac >= 0.90 ? 92 : 78);
+        s.kindConfidence = 92;
+        s.hasDrumContent = true;
+        return;
+    }
+    if (ch10Frac >= 0.70 && drumFrac >= 0.70)
+    {
+        s.kind = ClipKind::Drums;
+        s.kindConfidence = 80;
+        s.hasDrumContent = true;
         return;
     }
 

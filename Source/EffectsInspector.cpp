@@ -567,7 +567,10 @@ EffectsInspector::EffectsInspector()
         arpSec.addRow(&arpInputRow, kRowMinH, [this] { return groove.arpInput; });
         arpSec.addRow(&arpLengthRow, kRowMinH, [this] { return groove.arpEnabled; });
         arpSec.addRow(&arpFormRow, kRowMinH, [this] {
-            return groove.arpEnabled && groove.arpLengthIndex >= (int) GeneratorLength::EightBars;
+            // Visible when folded if Form is non-Auto or length is long enough for tiling.
+            return groove.arpEnabled
+                && (groove.arpFormIndex != (int) GeneratorForm::Auto
+                    || groove.arpLengthIndex >= (int) GeneratorLength::FourBars);
         });
         arpSec.addRow(&arpShapeRow, kRowMinH, [this] { return groove.arpEnabled; });
         arpSec.addRow(&arpRateRow, kRowMinH, [this] { return groove.arpEnabled; });
@@ -642,7 +645,9 @@ EffectsInspector::EffectsInspector()
         melodySec.addRow(&melodyInputRow, kRowMinH, [this] { return groove.melodyInput; });
         melodySec.addRow(&melodyLengthRow, kRowMinH, [this] { return groove.melodyEnabled; });
         melodySec.addRow(&melodyFormRow, kRowMinH, [this] {
-            return groove.melodyEnabled && groove.melodyLengthIndex >= (int) GeneratorLength::EightBars;
+            return groove.melodyEnabled
+                && (groove.melodyFormIndex != (int) GeneratorForm::Auto
+                    || groove.melodyLengthIndex >= (int) GeneratorLength::FourBars);
         });
         melodySec.addRow(&melodyStyleRow, kRowMinH, [this] { return groove.melodyEnabled; });
         melodySec.addRow(&melodyContourRow, kRowMinH, [this] { return groove.melodyEnabled; });
@@ -706,7 +711,9 @@ EffectsInspector::EffectsInspector()
         chordsSec.addRow(&chordsInputRow, kRowMinH, [this] { return groove.chordsInput; });
         chordsSec.addRow(&chordLengthRow, kRowMinH, [this] { return groove.chordsEnabled; });
         chordsSec.addRow(&chordFormRow, kRowMinH, [this] {
-            return groove.chordsEnabled && groove.chordLengthIndex >= (int) GeneratorLength::EightBars;
+            return groove.chordsEnabled
+                && (groove.chordFormIndex != (int) GeneratorForm::Auto
+                    || groove.chordLengthIndex >= (int) GeneratorLength::FourBars);
         });
         chordsSec.addRow(&chordVoicingRow, kRowMinH, [this] { return groove.chordsEnabled; });
         chordsSec.addRow(&chordColorRow, kRowMinH, [this] { return groove.chordsEnabled; });
@@ -752,7 +759,9 @@ EffectsInspector::EffectsInspector()
         bassSec.addRow(&bassInputRow, kRowMinH, [this] { return groove.bassInput; });
         bassSec.addRow(&bassLengthRow, kRowMinH, [this] { return groove.bassEnabled; });
         bassSec.addRow(&bassFormRow, kRowMinH, [this] {
-            return groove.bassEnabled && groove.bassLengthIndex >= (int) GeneratorLength::EightBars;
+            return groove.bassEnabled
+                && (groove.bassFormIndex != (int) GeneratorForm::Auto
+                    || groove.bassLengthIndex >= (int) GeneratorLength::FourBars);
         });
         bassSec.addRow(&bassMotionRow, kRowMinH, [this] { return groove.bassEnabled; });
 
@@ -803,7 +812,9 @@ EffectsInspector::EffectsInspector()
         drumSec.addRow(&drumStyleRow, kRowMinH, [this] { return groove.drumsEnabled; });
         drumSec.addRow(&drumLengthRow, kRowMinH, [this] { return groove.drumsEnabled; });
         drumSec.addRow(&drumFormRow, kRowMinH, [this] {
-            return groove.drumsEnabled && groove.drumLengthIndex >= (int) GeneratorLength::EightBars;
+            return groove.drumsEnabled
+                && (groove.drumFormIndex != (int) GeneratorForm::Auto
+                    || groove.drumLengthIndex >= (int) GeneratorLength::FourBars);
         });
         drumSec.addRow(&drumDensitySl, kSliderRowH, [this] {
             return groove.drumsEnabled && groove.drumDensity != 50;
@@ -1089,6 +1100,14 @@ void EffectsInspector::refreshDependentEnables()
     filterTypeRow.setEnabled(filterOn);
     filterTypePopup.setEnabled(filterOn);
     filterTypeRow.setAlpha(filterOn ? 1.0f : 0.38f);
+
+    // Form tiles four sections — hide below 4 bars even when the section is open.
+    const int four = (int) GeneratorLength::FourBars;
+    arpSec.setRowForcedHidden(&arpFormRow, groove.arpLengthIndex < four);
+    melodySec.setRowForcedHidden(&melodyFormRow, groove.melodyLengthIndex < four);
+    chordsSec.setRowForcedHidden(&chordFormRow, groove.chordLengthIndex < four);
+    bassSec.setRowForcedHidden(&bassFormRow, groove.bassLengthIndex < four);
+    drumSec.setRowForcedHidden(&drumFormRow, groove.drumLengthIndex < four);
 }
 
 int EffectsInspector::resolvedPitchMidi() const

@@ -698,6 +698,7 @@ TEST_CASE("filename keywords hint Bass Drums Keys Lead and Arp", "[editmodel]")
     }
     CHECK(hintKindFromFileName("Kit_01_BoomBap.mid") == ClipKind::Drums);
     CHECK(hintKindFromFileName("Drums_Loop_A.mid") == ClipKind::Drums);
+    CHECK(hintKindFromFileName("DR_Loop_01.mid") == ClipKind::Drums);
     CHECK(hintKindFromFileName("Keys_Rhodes_Pad.mid") == ClipKind::Keys);
     CHECK(hintKindFromFileName("Piano_Chords_Em.mid") == ClipKind::Keys);
     CHECK(hintKindFromFileName("KY_Chords_01.mid") == ClipKind::Keys);
@@ -709,9 +710,45 @@ TEST_CASE("filename keywords hint Bass Drums Keys Lead and Arp", "[editmodel]")
     CHECK(hintKindFromFileName("Hats_16th_Loop.mid") == ClipKind::Drums);
     CHECK(hintKindFromFileName("HH_Closed_01.mid") == ClipKind::Drums);
     CHECK(hintKindFromFileName("SN_Rim_01.mid") == ClipKind::Drums);
-    CHECK(hintKindFromFileName("Groove_A_120.mid") == ClipKind::Drums);
-    CHECK(hintKindFromFileName("Top_Loop_01.mid") == ClipKind::Drums);
+    // Ambiguous pack words must NOT force Drums by filename alone.
+    CHECK(kindKeywordFromFileName("Groove_A_120.mid") == std::nullopt);
+    CHECK(kindKeywordFromFileName("Top_Loop_01.mid") == std::nullopt);
+    CHECK(kindKeywordFromFileName("Rhythm_Guitar_01.mid") == std::nullopt);
+    {
+        auto beat = kindKeywordFromFileName("Beat_Synth_Hook.mid");
+        const bool forcedDrums = beat.has_value() && *beat == ClipKind::Drums;
+        CHECK_FALSE(forcedDrums);
+    }
     CHECK(kindKeywordFromFileName("Untitled_01.mid") == std::nullopt);
+}
+
+TEST_CASE("drum keyword without GM kit does not force Drums", "[editmodel]")
+{
+    // "Kit" in the name but notes are a mid-register melody — not a drum loop.
+    MidiClip clip = test::makeClipWithNotes({
+        { 60, 90, 0.0, 0.5, 1 },
+        { 64, 85, 0.5, 0.5, 1 },
+        { 67, 85, 1.0, 0.5, 1 },
+        { 72, 90, 1.5, 0.5, 1 },
+    }, 4.0);
+    clip.name = "Kit_Melody_Hook";
+    clip.filePath = "/packs/Kit_Melody_Hook.mid";
+    const auto s = makeStepClip(clip);
+    CHECK(s.kind != ClipKind::Drums);
+}
+
+TEST_CASE("mono C2 bassline is not Drums despite kick-range pitch", "[editmodel]")
+{
+    MidiClip clip = test::makeClipWithNotes({
+        { 36, 100, 0.0, 0.5, 1 },
+        { 36, 90, 1.0, 0.5, 1 },
+        { 36, 100, 2.0, 0.5, 1 },
+        { 36, 90, 3.0, 0.5, 1 },
+    }, 4.0);
+    clip.name = "Untitled_Sub";
+    const auto s = makeStepClip(clip);
+    CHECK(s.kind != ClipKind::Drums);
+    CHECK_FALSE(fitsGmDrumStructure(s.notes));
 }
 
 TEST_CASE("bass filename wins over ambiguous mid register mono line", "[editmodel]")

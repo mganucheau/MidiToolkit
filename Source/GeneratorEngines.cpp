@@ -363,7 +363,9 @@ void buildPitchPool(const GrooveParams& g, const int* chordNotes, int chordCount
 
 void generateArpBanks(const GrooveParams& g, std::uint32_t seed, int salt, ArpBanks& banks)
 {
-    const float density = clampf((float) g.arpDensity / 100.0f, 0.05f, 1.0f);
+    // Density 100% → every slot active (render maps slots onto the rate grid).
+    const float density = clampf((float) g.arpDensity / 100.0f, 0.0f, 1.0f);
+    const bool fillAll = g.arpDensity >= 100;
     // Shape index acts like Sting Type: low = more random intervals, high = chord tones.
     const float type = (float) g.arpShapeIndex / (float) juce::jmax(1, (int) ArpShape::Count - 1);
 
@@ -371,7 +373,7 @@ void generateArpBanks(const GrooveParams& g, std::uint32_t seed, int salt, ArpBa
     {
         const float r = unit(seed, i, salt, 3);
         const bool strong = (i % 4) == 0;
-        const bool play = strong ? (r < density * 1.15f + 0.15f) : (r < density);
+        const bool play = fillAll || (strong ? (r < density * 1.15f + 0.15f) : (r < density));
         if (!play)
         {
             banks.noteIdx[i] = 0;
@@ -425,24 +427,32 @@ void renderArpBanksBar(const GrooveParams& g, const ArpBanks& banks,
     const int velHi = juce::roundToInt(96.0f + 28.0f * intensity);
 
     const int stepsPerBar = juce::jmax(1, (int) std::lround(4.0 / stepLength));
+    const bool fillAll = g.arpDensity >= 100;
     for (int s = 0; s < stepsPerBar; ++s)
     {
         const int patternStep = s % 16;
-        const int layer = banks.velLayer[patternStep];
-        if (layer <= 0) continue;
+        int layer = banks.velLayer[patternStep];
+        // Density 100%: every rate step gets a note (1/8 → every eighth, etc.).
+        if (layer <= 0)
+        {
+            if (!fillAll) continue;
+            layer = (s % 4) == 0 ? 3 : 2;
+        }
 
         int flat = juce::jlimit(1, 127, (velLo + velMid + velHi) / 3);
         int layered = layer == 1 ? velLo : (layer == 2 ? velMid : velHi);
         const int velocity = juce::jlimit(1, 127,
             juce::roundToInt((float) flat * (1.0f - dynamics) + (float) layered * dynamics));
 
-        const int idx = ((banks.noteIdx[patternStep] % (int) pool.size()) + (int) pool.size())
-                        % (int) pool.size();
-        int note = pool[(size_t) idx] + banks.octShift[patternStep] * 12;
+        const int rawIdx = banks.velLayer[patternStep] > 0 ? banks.noteIdx[patternStep] : s;
+        const int idx = ((rawIdx % (int) pool.size()) + (int) pool.size()) % (int) pool.size();
+        const int oct = banks.velLayer[patternStep] > 0 ? banks.octShift[patternStep] : 0;
+        const float gMul = banks.velLayer[patternStep] > 0 ? banks.gateMul[patternStep] : 0.75f;
+        int note = pool[(size_t) idx] + oct * 12;
         note = juce::jlimit(0, 127, note);
 
         const double onPpq = bar * 4.0 + s * stepLength;
-        const double offPpq = onPpq + stepLength * (double) (banks.gateMul[patternStep] * gateScale);
+        const double offPpq = onPpq + stepLength * (double) (gMul * gateScale);
         if (onPpq >= startPpq && onPpq < endPpq)
             out.push_back({ onPpq, note, velocity });
         if (offPpq >= startPpq && offPpq < endPpq)
@@ -467,11 +477,30 @@ void renderArp(const GrooveParams& g, double startPpq, double endPpq,
     generateArpBanks(g, seed, 1, bankA);
     generateArpBanks(g, seed, 2, bankB);
     generateArpBanks(g, seed, 3, bankC);
-    // B/C stay related: copy A then lightly re-roll density holes.
+    // Form motifs: B = inverted/shifted A, C = busier offbeat cousin — audible AAAB/ABAB/…
     for (int i = 0; i < 16; ++i)
     {
-        if (unit(seed, i, 40, 1) < 0.55f) bankB.noteIdx[i] = bankA.noteIdx[i];
-        if (unit(seed, i, 41, 1) < 0.55f) bankC.noteIdx[i] = bankA.noteIdx[i];
+        const int j = 15 - i;
+        bankB.noteIdx[i] = (bankA.noteIdx[j] + 1) % 4;
+        bankB.velLayer[i] = bankA.velLayer[j] > 0 ? bankA.velLayer[j]
+                         : (bankA.velLayer[i] > 0 ? 1 : 0);
+        bankB.gateMul[i] = bankA.gateMul[j];
+        bankB.octShift[i] = -bankA.octShift[j];
+
+        if ((i % 2) == 1)
+        {
+            bankC.velLayer[i] = juce::jmax(1, bankA.velLayer[i] > 0 ? bankA.velLayer[i] : 2);
+            bankC.noteIdx[i] = (bankA.noteIdx[i] + 2) % 4;
+            bankC.octShift[i] = bankA.octShift[i] != 0 ? bankA.octShift[i] : 1;
+            bankC.gateMul[i] = 0.55f;
+        }
+        else
+        {
+            bankC.noteIdx[i] = bankA.noteIdx[i];
+            bankC.velLayer[i] = bankA.velLayer[i];
+            bankC.gateMul[i] = bankA.gateMul[i];
+            bankC.octShift[i] = bankA.octShift[i];
+        }
     }
 
     const int phraseBars = generatorLengthBars(g.arpLength());
@@ -860,8 +889,52 @@ void renderBass(const GrooveParams& g, double startPpq, double endPpq,
 
 struct DrumHit { int note; float chance; int velocity; };
 
+/** Instant Haus pattern banks: bit i set → hit on 16th step i. */
+constexpr std::uint16_t hausKickBanks[] = {
+    0b0001000100010001, // 0,4,8,12 — classic four-on-the-floor
+    0b1001000100010001, // + ghost on 15
+    0b0001000100011001, // + offbeat 3
+    0b0101000100010001, // + step 1
+};
+constexpr std::uint16_t hausClapBanks[] = {
+    0b0001000000010000, // 4 + 12
+    0b0001001000010000, // 4 + 6 + 12
+    0b0001000000010100, // 4 + 10 + 12
+    0b0011000000010000, // 4 + 5 + 12
+};
+constexpr std::uint16_t hausHatBanks[] = {
+    0b0101010101010101, // every 8th
+    0b1101010101010101, // + 16th pickup
+    0b0111010101010101, // busier
+    0b0101011101010111, // late-bar chatter
+};
+constexpr std::uint16_t beatKickBanks[] = {
+    0b0100100100010001, // Instant Haus beat-ish
+    0b0100100101010001,
+    0b0001000100010001, // 4OTF variant inside beat mode
+    0b0100101000010001,
+};
+constexpr std::uint16_t beatSnareBanks[] = {
+    0b1001010000010000, // 4, 10, 12, 15
+    0b0001010000010000, // 4 + 12
+    0b1000010000011000, // 4, 11, 12, 15
+    0b0001010010010000, // 4, 8-ish, 12
+};
+constexpr std::uint16_t beatHatBanks[] = {
+    0b0101010101010101,
+    0b1111111111111111, // 16ths
+    0b0111011101110111,
+    0b0100010101000101,
+};
+
+inline bool bankHit(std::uint16_t mask, int step)
+{
+    return ((mask >> (step & 15)) & 1u) != 0;
+}
+
 void drumHitsForStep(DrumStyle style, int step, float density, float fill,
-                     bool fillBar, std::uint32_t seed, std::vector<DrumHit>& hits)
+                     bool fillBar, std::uint32_t seed, int formLetter,
+                     std::vector<DrumHit>& hits)
 {
     hits.clear();
     auto add = [&](int note, float chance, int vel)
@@ -871,49 +944,66 @@ void drumHitsForStep(DrumStyle style, int step, float density, float fill,
 
     const float dens = clampf(density / 100.0f, 0.0f, 1.0f);
     const float fillAmt = clampf(fill / 100.0f, 0.0f, 1.0f);
+    // Form letter picks an Instant Haus pattern bank (A/B/C → audible ABAB etc.).
+    const int bank = juce::jlimit(0, 3, formLetter + (int) ((mix(seed) >> 10) & 1u));
 
-    if (fillBar && fillAmt > 0.05f)
+    if (fillBar && fillAmt > 0.05f && step >= 8)
     {
-        // End-of-phrase fill: denser snare/tom work in the second half.
-        if (step >= 8)
-        {
-            if (step == 8 || step == 10 || step == 12 || step == 14)
-                add(38, 0.55f + 0.4f * fillAmt, 100 + (int) (20 * fillAmt));
-            if (step == 9 || step == 11 || step == 13 || step == 15)
-                add(step >= 13 ? 50 : 47, 0.35f * fillAmt + 0.25f, 88);
-            if (step == 15) add(49, 0.55f * fillAmt, 110); // crash
-            if (step == 8) add(36, 1.0f, 112);
-            return;
-        }
+        // Phrase-end fill only — keep beat 1 kick, then snare/tom work.
+        if (step == 8) add(36, 1.0f, 112);
+        if (step == 8 || step == 10 || step == 12 || step == 14)
+            add(38, 0.55f + 0.4f * fillAmt, 100 + (int) (20 * fillAmt));
+        if (step == 9 || step == 11 || step == 13 || step == 15)
+            add(step >= 13 ? 50 : 47, 0.35f * fillAmt + 0.25f, 88);
+        if (step == 15) add(49, 0.55f * fillAmt, 110); // crash
+        // Still allow closed hats under the fill.
+        if ((step % 2) == 0) add(42, 0.7f, 72);
+        return;
     }
 
     switch (style)
     {
         case DrumStyle::House:
-            // Four-on-the-floor, clap on 2&4, offbeat open hats.
-            if (step == 0 || step == 4 || step == 8 || step == 12) add(36, 1.0f, 114);
-            if (step == 4 || step == 12) add(39, 1.0f, 108); // clap
-            if ((step % 2) == 0) add(42, 0.85f + 0.15f * dens, 78);
-            if ((step % 2) == 1) add(46, 0.35f * dens, 70);
-            if (step == 14) add(36, 0.4f * dens, 90);
+        {
+            // Instant Haus "haus": four-on-the-floor kick skeleton, clap on 2&4,
+            // closed hats on 8ths; density opens offbeat hats / ghosts / perc.
+            if (bankHit(hausKickBanks[bank % 4], step))
+                add(36, 1.0f, step == 0 ? 120 : 114);
+            if (bankHit(hausClapBanks[bank % 4], step))
+                add(39, 1.0f, 110); // clap
+            if (bankHit(hausHatBanks[0], step))
+                add(42, 1.0f, step % 4 == 0 ? 88 : 74); // CH every 8th always
+            if ((step % 2) == 1)
+                add(46, 0.12f + 0.78f * dens, 70); // OH offbeats with density
+            if (dens > 0.45f && bankHit(hausHatBanks[juce::jmin(3, bank + 1)], step)
+                && (step % 2) == 1)
+                add(42, 0.55f * dens, 58); // 16th CH ghosts
+            if (dens > 0.7f && (step == 7 || step == 15))
+                add(37, 0.35f * dens, 64); // rim color
+            if (formLetter >= 1 && (step == 2 || step == 10))
+                add(36, 0.45f, 92); // B/C ghost kicks
+            if (formLetter >= 2 && (step == 6 || step == 14))
+                add(47, 0.4f, 78); // C tom chatter
             break;
+        }
 
         case DrumStyle::Breakbeat:
-            // Amen-ish: syncopated kick + snare on 2 and the & of 3.
-            if (step == 0) { add(36, 1.0f, 116); add(42, 1.0f, 80); }
-            if (step == 2) add(42, 0.7f * dens, 64);
-            if (step == 4) { add(38, 1.0f, 118); add(42, 1.0f, 82); }
-            if (step == 5) add(36, 0.55f * dens, 92);
-            if (step == 6) add(42, 0.6f * dens, 70);
-            if (step == 7) add(38, 0.35f * dens, 86);
-            if (step == 8) { add(36, 0.7f, 104); add(42, 1.0f, 78); }
-            if (step == 10) { add(38, 1.0f, 112); add(42, 0.8f, 74); }
-            if (step == 11) add(36, 0.45f * dens, 88);
-            if (step == 12) add(42, 1.0f, 80);
-            if (step == 13) add(38, 0.4f * dens, 90);
-            if (step == 14) { add(36, 0.5f * dens, 96); add(42, 0.7f, 72); }
-            if (step == 15) add(46, 0.45f * dens, 84);
+        {
+            // Instant Haus "beat" lane: syncopated kick/snare banks; density = hats.
+            if (bankHit(beatKickBanks[bank % 4], step))
+                add(36, 1.0f, 116);
+            if (bankHit(beatSnareBanks[bank % 4], step))
+                add(38, 1.0f, step == 4 || step == 12 ? 118 : 100);
+            if (bankHit(beatHatBanks[dens > 0.55f ? juce::jmin(3, bank + 1) : 0], step))
+                add(42, 0.85f + 0.15f * dens, (step % 2) == 0 ? 80 : 60);
+            if (dens > 0.4f && (step == 3 || step == 11))
+                add(37, 0.45f * dens, 70); // rim
+            if (dens > 0.65f && step == 15)
+                add(46, 0.55f, 82);
+            if (formLetter >= 2 && (step == 7 || step == 13))
+                add(50, 0.5f, 84); // C section tom
             break;
+        }
 
         case DrumStyle::Dub:
             // Sparse kick, snare on 3, space, rim / stick color.
@@ -926,11 +1016,11 @@ void drumHitsForStep(DrumStyle style, int step, float density, float fill,
             break;
 
         case DrumStyle::Techno:
-            // Driving 16ths, solid kick, occasional offbeat kick.
+            // Four-on-the-floor + driving 16th hats.
             if (step == 0 || step == 4 || step == 8 || step == 12) add(36, 1.0f, 116);
-            add(42, 0.75f + 0.2f * dens, (step % 2) == 0 ? 82 : 64);
+            add(42, 0.85f + 0.15f * dens, (step % 2) == 0 ? 84 : 66);
             if (step == 6 || step == 14) add(36, 0.45f * dens, 94);
-            if (step == 4 || step == 12) add(39, 0.7f, 100);
+            if (step == 4 || step == 12) add(39, 0.85f, 102);
             if (step == 15) add(46, 0.35f * dens, 88);
             break;
 
@@ -952,8 +1042,6 @@ void drumHitsForStep(DrumStyle style, int step, float density, float fill,
         case DrumStyle::Count:
             break;
     }
-
-    juce::ignoreUnused(seed);
 }
 
 std::vector<RollNote> eventsToRollNotes(const std::vector<Event>& events, int channel)
@@ -1025,14 +1113,19 @@ void renderDrums(const GrooveParams& g, double startPpq, double endPpq, std::vec
         int letter = 0, local = 0;
         const int phraseBar = wrapBar(absBar, phraseBars);
         mapFormBar(phraseBars, form, phraseBar, letter, local);
-        // Fill on the last bar of each form cell (and the last bar of the phrase).
-        const bool fillBar = (local == sectionBars - 1) || (phraseBar == phraseBars - 1);
-        // Letter B/C get a slightly denser/snappier density bias.
-        const float dens = (float) g.drumDensity + (letter == 1 ? 8.0f : (letter == 2 ? 12.0f : 0.0f));
+        // Fill only on the last bar of a multi-bar section (never when sectionBars==1,
+        // or every bar of a 4-bar loop would become a fill and kill four-on-the-floor).
+        const bool fillBar = (phraseBar == phraseBars - 1)
+            || (sectionBars > 1 && local == sectionBars - 1);
+        // Letter B/C: denser hats / ghosts; skeleton stays solid.
+        const float dens = (float) g.drumDensity + (letter == 1 ? 10.0f : (letter == 2 ? 18.0f : 0.0f));
+        // Salt pattern bank by form letter so ABAB actually swaps motifs.
+        const std::uint32_t motifSeed = seed ^ (std::uint32_t) (letter * 0x9E3779B9u);
 
         for (int step = 0; step < 16; ++step)
         {
-            drumHitsForStep(g.drumStyle(), step, dens, (float) g.drumFill, fillBar, seed ^ (std::uint32_t) letter, hits);
+            drumHitsForStep(g.drumStyle(), step, dens, (float) g.drumFill, fillBar, motifSeed,
+                            letter, hits);
             const double onPpq = absBar * 4.0 + step * 0.25;
             for (const auto& hit : hits)
             {

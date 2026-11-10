@@ -228,7 +228,14 @@ private:
     {
         return juce::jmax(1, (int) std::lround((double) resolved.bars * kStepsPerBar * timeStretch));
     }
-    int numRows() const { return rowsCollapsed() ? juce::jmax(1, (int) foldPitches.size()) : 128; }
+    int numRows() const
+    {
+        if (rowsCollapsed())
+            return juce::jmax(1, (int) foldPitches.size());
+        if (pitchWindowActive)
+            return juce::jmax(1, pitchWindowHi - pitchWindowLo + 1);
+        return 128;
+    }
     int rowForPitch(int pitch) const;
     int pitchForRow(int row) const;
     juce::Rectangle<float> noteRect(const RollNote&, int rowOffset = 0, double stepOffset = 0.0) const;
@@ -277,6 +284,10 @@ private:
     float zoomX = 1.0f;                     // horizontal zoom, 1..6
     int visibleBarsZoom = -1;               // -1 = Clip (fit width + notes); else 2/4/8/16
     float rowH = 13.0f;                     // vertical zoom (px per semitone)
+    /** When true, only pitches [pitchWindowLo, pitchWindowHi] are shown (clip vertical fit). */
+    bool pitchWindowActive = false;
+    int pitchWindowLo = 0;
+    int pitchWindowHi = 127;
     int divisionSteps = 4;                  // grid + snap (1/4 default)
     double playheadStep = 0.0;
     bool playing = false;

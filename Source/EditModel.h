@@ -95,6 +95,13 @@ bool applyFilenameKindTag(StepClip& clip);
 /** True when pitch is in the General MIDI percussion key map (35–81). */
 bool isGmDrumPitch(int midi);
 
+/** True for Ableton/GM kick seats: Acoustic Bass Drum (35) or Bass Drum 1 / C1 (36). */
+bool isKickC1Pitch(int midi);
+
+/** GM kit shape: majority on the drum map, opens on kick at C1, and has
+    at least one other kit voice (snare/hat/perc) so mono C2 basslines don't match. */
+bool fitsGmDrumStructure(const std::vector<RollNote>& notes);
+
 // ── Music theory ─────────────────────────────────────────────────────────────
 
 extern const std::array<const char*, 12> kNoteNames;   // 'C'..'B' (sharps)

@@ -868,6 +868,13 @@ MidiToolkitEditor::MidiToolkitEditor(MidiToolkitProcessor& p)
         }
         if (hasRecording)
         {
+            // Generated clips re-render live when density / intensity / dynamics /
+            // gate / form / length / style change. Recorded takes keep note data.
+            if (lastGeneratedPart >= 0 && recordedClip.filePath.startsWith("generator://"))
+            {
+                regenerateGeneratedClip(k);
+                return;
+            }
             rollEditor.setClip(recordedClip, effectsInspector.getEdit(), k);
             pushPreviewToProcessor();
             updateMiniPreview();
@@ -895,56 +902,8 @@ MidiToolkitEditor::MidiToolkitEditor(MidiToolkitProcessor& p)
     {
         if (recording)
             return;
-        const auto part = (gen::Part) juce::jlimit(0, (int) gen::Part::Count - 1, partIdx);
-        const auto edit = effectsInspector.getEdit();
-        const auto groove = effectsInspector.getGroove();
-        int keyRoot = edit.root >= 0 ? edit.root : 0;
-        if (const auto* clip = selectedClip(); clip != nullptr && clip->root >= 0 && edit.root < 0)
-            keyRoot = clip->root;
-        // Optional single-note latch from Pitch Input / live keyboard.
-        int chordBuf[1] {};
-        int chordCount = 0;
-        const int latch = processorRef.liveFxPitchLatch();
-        if (latch >= 0)
-        {
-            chordBuf[0] = latch;
-            chordCount = 1;
-            if (edit.root < 0)
-                keyRoot = latch % 12;
-        }
-        recordedClip = gen::renderPartClip(part, groove, keyRoot, edit.mode,
-                                           chordCount > 0 ? chordBuf : nullptr, chordCount);
-        const double bpm = processorRef.hostBpm.load();
-        recordedClip.bpm = bpm > 0.0 ? bpm : processorRef.freeBpm.load();
-        hasRecording = true;
-        selectedIdx = -1;
-        fileList.setSelectedIndex(-1, juce::dontSendNotification);
-        // Keep the piano roll closed — the generated clip shows in preview.
-        // Opening the roll still closes preview (mutually exclusive).
-        if (!processorRef.editorOpen)
-        {
-            processorRef.previewOpen = true;
-            transport.setEditorOpen(false);
-        }
-        transport.setClipBpm(recordedClip.bpm);
-        transport.setClipName(recordedClip.name);
-        transport.setHasClip(!recordedClip.notes.empty());
-        rollEditor.setEmptyHint(recordedClip.notes.empty()
-                                    ? "Generator produced no notes — try Generate again."
-                                    : juce::String());
-        rollEditor.setClip(recordedClip, edit, groove);
-        // Keep inspector edits/groove; only refresh clip-derived annotations.
-        effectsInspector.setHasClip(true);
-        effectsInspector.setClipRoot(recordedClip.root);
-        effectsInspector.setClipSourceOctave(clipReferenceOctave(recordedClip));
-        effectsInspector.setClipComplexity(recordedClip.complexity);
-        effectsInspector.setClipScaleAnalysis(analyseClipScale(recordedClip));
-        pushPreviewToProcessor();
-        updateMiniPreview();
-        applyLayoutState();
-        // Layout can resize the roll — re-apply so notes stay painted.
-        if (!recordedClip.notes.empty())
-            rollEditor.setClip(recordedClip, effectsInspector.getEdit(), effectsInspector.getGroove());
+        lastGeneratedPart = juce::jlimit(0, (int) gen::Part::Count - 1, partIdx);
+        regenerateGeneratedClip(effectsInspector.getGroove());
     };
     effectsInspector.onEditChanged = [this](const ClipEdit& e)
     {
@@ -2648,6 +2607,67 @@ GrooveParams MidiToolkitEditor::selectedGroove() const
     return {};
 }
 
+void MidiToolkitEditor::regenerateGeneratedClip(const GrooveParams& groove)
+{
+    if (recording || lastGeneratedPart < 0)
+        return;
+
+    const bool firstGenerate = !hasRecording
+        || !recordedClip.filePath.startsWith("generator://");
+    const auto part = (gen::Part) juce::jlimit(0, (int) gen::Part::Count - 1, lastGeneratedPart);
+    const auto edit = effectsInspector.getEdit();
+    int keyRoot = edit.root >= 0 ? edit.root : 0;
+    if (const auto* clip = selectedClip(); clip != nullptr && clip->root >= 0 && edit.root < 0)
+        keyRoot = clip->root;
+
+    int chordBuf[1] {};
+    int chordCount = 0;
+    const int latch = processorRef.liveFxPitchLatch();
+    if (latch >= 0)
+    {
+        chordBuf[0] = latch;
+        chordCount = 1;
+        if (edit.root < 0)
+            keyRoot = latch % 12;
+    }
+
+    const double prevBpm = recordedClip.bpm;
+    recordedClip = gen::renderPartClip(part, groove, keyRoot, edit.mode,
+                                       chordCount > 0 ? chordBuf : nullptr, chordCount);
+    const double bpm = processorRef.hostBpm.load();
+    recordedClip.bpm = prevBpm > 0.0 ? prevBpm
+                     : (bpm > 0.0 ? bpm : processorRef.freeBpm.load());
+    hasRecording = true;
+    selectedIdx = -1;
+    fileList.setSelectedIndex(-1, juce::dontSendNotification);
+
+    if (!processorRef.editorOpen)
+    {
+        processorRef.previewOpen = true;
+        transport.setEditorOpen(false);
+    }
+    transport.setClipBpm(recordedClip.bpm);
+    transport.setClipName(recordedClip.name);
+    transport.setHasClip(!recordedClip.notes.empty());
+    rollEditor.setEmptyHint(recordedClip.notes.empty()
+                                ? "Generator produced no notes — try Generate again."
+                                : juce::String());
+    // Force a fresh vertical fit even when the generator:// path is unchanged.
+    rollEditor.clearClip();
+    rollEditor.setClip(recordedClip, edit, groove);
+    effectsInspector.setHasClip(true);
+    effectsInspector.setClipRoot(recordedClip.root);
+    effectsInspector.setClipSourceOctave(clipReferenceOctave(recordedClip));
+    effectsInspector.setClipComplexity(recordedClip.complexity);
+    effectsInspector.setClipScaleAnalysis(analyseClipScale(recordedClip));
+    pushPreviewToProcessor();
+    updateMiniPreview();
+    if (firstGenerate)
+        applyLayoutState();
+    if (!recordedClip.notes.empty())
+        rollEditor.setClip(recordedClip, effectsInspector.getEdit(), effectsInspector.getGroove());
+}
+
 void MidiToolkitEditor::selectIndex(int index)
 {
     if (recording)
@@ -2655,6 +2675,7 @@ void MidiToolkitEditor::selectIndex(int index)
     if (!juce::isPositiveAndBelow(index, (int) clips.size()))
         return;
     hasRecording = false;
+    lastGeneratedPart = -1;
 
     const auto locks = processorRef.sectionLocks;
     const int previous = selectedIdx;
@@ -3002,6 +3023,7 @@ void MidiToolkitEditor::toggleRecord()
         }
         recording = true;
         hasRecording = true;
+        lastGeneratedPart = -1;
         processorRef.editorOpen = true;
         transport.setEditorOpen(true);
         processorRef.setRecordMonitorFx(processorRef.effectsOpen);
@@ -3237,7 +3259,8 @@ MidiToolkitEditor::PreviewHeader::PreviewHeader(MidiToolkitEditor& o) : owner(o)
     btnDrag.setTooltip("Drag this clip into your DAW");
     btnDrag.setMouseCursor(juce::MouseCursor::DraggingHandCursor);
     btnDrag.onDragStart = [this] { owner.startDragExport(); };
-    for (auto* b : { (ChipBtn*) &btnVel, (ChipBtn*) &btnTrim, (ChipBtn*) &btnMute, (ChipBtn*) &btnDrag })
+    // The preview roll no longer has a velocity lane, so the Vel chip is not shown.
+    for (auto* b : { (ChipBtn*) &btnTrim, (ChipBtn*) &btnMute, (ChipBtn*) &btnDrag })
         addAndMakeVisible(*b);
 }
 
@@ -3272,7 +3295,7 @@ void MidiToolkitEditor::PreviewHeader::resized()
     auto r = getLocalBounds().reduced(metrics::scaled(8), 0).withTrimmedBottom(1);
     const int h = metrics::scaled(18);
     const int gap = metrics::scaled(4);
-    for (auto* b : { (ChipBtn*) &btnDrag, (ChipBtn*) &btnMute, (ChipBtn*) &btnTrim, (ChipBtn*) &btnVel })
+    for (auto* b : { (ChipBtn*) &btnDrag, (ChipBtn*) &btnMute, (ChipBtn*) &btnTrim })
     {
         const int w = b->idealWidth();
         b->setBounds(r.removeFromRight(w).withSizeKeepingCentre(w, h));
@@ -3288,7 +3311,7 @@ void MidiToolkitEditor::PreviewHeader::paint(juce::Graphics& g)
     g.fillRect(getLocalBounds().removeFromBottom(1));
 
     auto r = getLocalBounds().reduced(metrics::scaled(8), 0);
-    r.setRight(btnVel.getX() - metrics::scaled(6));
+    r.setRight(btnTrim.getX() - metrics::scaled(6));
     const auto nameFont = uiFontFixed(11.0f, true);
     const auto metaFont = monoFontFixed(11.0f);
     if (name.isEmpty())
@@ -3932,7 +3955,7 @@ void MidiToolkitEditor::layoutContent()
         {
             miniRoll.setBounds(left.removeFromBottom(rollH));
             miniRoll.setVisible(true);
-            miniRoll.setShowVelocity(showPreviewVelocity);
+            miniRoll.setShowVelocity(false);   // preview roll has no velocity lane
         }
         else
         {
@@ -3984,7 +4007,7 @@ void MidiToolkitEditor::layoutContent()
         else
             miniRoll.setBounds({});
         miniRoll.setVisible(rollH > 0);
-        miniRoll.setShowVelocity(showPreviewVelocity);
+        miniRoll.setShowVelocity(false);   // preview roll has no velocity lane
         previewHeader.setBounds({});
 
         fileList.setBounds(browserCol);

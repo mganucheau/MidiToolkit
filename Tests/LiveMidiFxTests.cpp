@@ -180,7 +180,7 @@ TEST_CASE("Drums keep written kicks regardless of density", "[Generators]")
 {
     GrooveParams g;
     g.drumsEnabled = true;
-    g.drumStyleIndex = (int) DrumStyle::Straight;
+    g.drumStyleIndex = (int) DrumStyle::House;
     g.drumDensity = 0;
     std::vector<gen::Event> out;
     gen::renderDrums(g, 0.0, 4.0, out);
