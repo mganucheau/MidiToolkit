@@ -399,6 +399,17 @@ MidiToolkitEditor::MidiToolkitEditor(MidiToolkitProcessor& p)
         if (sidebar.isCollapsed())
             sidebar.setCollapsed(false);
     };
+    sidebar.onToggleStarFolder = [this]
+    {
+        juce::File dir = rootDir;
+        if (!dir.isDirectory() && processorRef.lastBrowserDir.isNotEmpty())
+            dir = juce::File(processorRef.lastBrowserDir);
+        if (!dir.isDirectory())
+            return;
+        processorRef.toggleStarredFolder(dir.getFullPathName());
+        sidebar.setCurrentFolderStarred(processorRef.isStarredFolder(dir.getFullPathName()));
+        refreshSidebar();
+    };
     sidebar.onRefreshFolder = [this]
     {
         if (!rootDir.isDirectory() && processorRef.lastBrowserDir.isNotEmpty())
@@ -597,7 +608,6 @@ MidiToolkitEditor::MidiToolkitEditor(MidiToolkitProcessor& p)
     sidebar.onCollapsedChanged = [this]
     {
         processorRef.sidebarCollapsed = sidebar.isCollapsed();
-        leftPaneTabs.setSidebarCollapsed(sidebar.isCollapsed());
         persistBrowserSession();
         applyLayoutState();
     };
@@ -611,7 +621,6 @@ MidiToolkitEditor::MidiToolkitEditor(MidiToolkitProcessor& p)
     if (!processorRef.hasDefaultView && !processorRef.editorOpen)
         processorRef.previewOpen = true;
     sidebar.setCollapsed(processorRef.sidebarCollapsed);
-    leftPaneTabs.setSidebarCollapsed(processorRef.sidebarCollapsed);
     content.addAndMakeVisible(sidebar);
 
     // ── Browser toolbar + filter popover (Groove) ──
@@ -638,6 +647,10 @@ MidiToolkitEditor::MidiToolkitEditor(MidiToolkitProcessor& p)
         layoutContent();
         if (gridView) kindGrid.grabKeyboardFocus();
     };
+    sidebar.onSortChanged = [this](BrowserSortColumn col)
+    {
+        fileList.setSort(col, true);
+    };
     kindGrid.setSource(&fileList);
     kindGrid.setKindMask(sidebar.getCriteria().kindMask);
     kindGrid.onSelect = [this](int idx)
@@ -646,6 +659,11 @@ MidiToolkitEditor::MidiToolkitEditor(MidiToolkitProcessor& p)
         fileList.setSelectedIndex(idx, juce::sendNotification);
         kindGrid.ensureSelectedVisible();
         kindGrid.repaint();
+    };
+    kindGrid.onToggleStar = [this](int idx)
+    {
+        if (fileList.onToggleStar) fileList.onToggleStar(idx);
+        kindGrid.refresh();
     };
     kindGrid.onOpen = [this](int idx) { if (fileList.onOpenInPianoRoll) fileList.onOpenInPianoRoll(idx); };
     kindGrid.onDragFile = [this](const juce::File& f) { if (fileList.onDragFile) fileList.onDragFile(f); };
@@ -664,20 +682,12 @@ MidiToolkitEditor::MidiToolkitEditor(MidiToolkitProcessor& p)
     filterPopover.onReset = [this]
     {
         sidebar.resetFilters();
-        filterPopover.setHideDuplicates(sidebar.getHideDuplicates());
-        refreshBrowserBar();
-    };
-    filterPopover.onToggleHideDuplicates = [this]
-    {
-        sidebar.toggleHideDuplicates();
-        filterPopover.setHideDuplicates(sidebar.getHideDuplicates());
         refreshBrowserBar();
     };
     filterPopover.onSaveSearch = [this] { if (sidebar.onSaveCurrentSearch) sidebar.onSaveCurrentSearch(); };
     content.addChildComponent(filterPopover);
     sidebar.onFilterOpenChanged = [this](bool open)
     {
-        filterPopover.setHideDuplicates(sidebar.getHideDuplicates());
         filterPopover.setVisible(open && leftPaneTab == 0);
         layoutContent();
         if (open)
@@ -729,7 +739,6 @@ MidiToolkitEditor::MidiToolkitEditor(MidiToolkitProcessor& p)
         if (!juce::isPositiveAndBelow(entryIdx, (int) displayRows.size()))
             return;
         const auto& row = displayRows[(size_t) entryIdx];
-        if (row.isDirectory) return;
         const auto path = row.clipIndex >= 0
                               ? clips[(size_t) row.clipIndex].filePath
                               : row.file.getFullPathName();
@@ -917,6 +926,7 @@ MidiToolkitEditor::MidiToolkitEditor(MidiToolkitProcessor& p)
         {
             rollEditor.setClip(recordedClip, e, effectsInspector.getGroove());
             pushPreviewToProcessor();
+            updateMiniPreview();
             return;
         }
         if (const auto* clip = selectedClip())
@@ -1049,7 +1059,6 @@ MidiToolkitEditor::MidiToolkitEditor(MidiToolkitProcessor& p)
     content.addAndMakeVisible(effectsInspector);
 
     leftPaneTabs.onTab = [this](int tab) { setLeftPaneTab(tab); };
-    leftPaneTabs.onToggleSidebar = [this] { sidebar.setCollapsed(!sidebar.isCollapsed()); };
     leftPaneTabs.onTogglePreview = [this]
     {
         // Preview and piano roll stay mutually exclusive.
@@ -1073,17 +1082,6 @@ MidiToolkitEditor::MidiToolkitEditor(MidiToolkitProcessor& p)
         applyLayoutState();
         layoutContent();
         if (gridView) kindGrid.grabKeyboardFocus();
-    };
-    leftPaneTabs.onToggleSubfolders = [this]
-    {
-        const bool on = !sidebar.getIncludeSubdirs();
-        sidebar.setIncludeSubdirs(on);
-        leftPaneTabs.setSubfolders(on);
-        browserBar.setSubfolders(on);
-        if (sidebar.onScanSubdirs)
-            sidebar.onScanSubdirs();
-        else
-            refreshBrowserBar();
     };
     content.addAndMakeVisible(leftPaneTabs);
     generatorViewport.setViewedComponent(&generatorBody, false);
@@ -1544,7 +1542,7 @@ void MidiToolkitEditor::restoreBrowserSession()
 
     rootDir = juce::File();
 
-    browseMode = juce::jlimit(0, 2, processorRef.browseMode);
+    browseMode = juce::jlimit(0, 3, processorRef.browseMode);
     starredFilter = processorRef.starredFilter;
     activeSavedSearchIdx = processorRef.activeSavedSearchIdx;
     activeSearch = processorRef.browserSessionSearch;
@@ -1590,6 +1588,11 @@ void MidiToolkitEditor::restoreBrowserSession()
         {
             runSearchAsync(activeSearch, activeSavedSearchIdx);
         }
+        fileList.grabBrowseFocus();
+    }
+    else if (browseMode == 3)
+    {
+        loadStarredFolders();
         fileList.grabBrowseFocus();
     }
     else
@@ -1654,7 +1657,7 @@ void MidiToolkitEditor::rescanFolder(bool keepSelection, const juce::String& pre
     auto name = dir.getFileName();
     if (name.isEmpty()) name = dir.getFullPathName();
     fileList.setFolderName(name);
-    fileList.setEmptyHint("Scanning…");
+    fileList.setEmptyHint("Scanning...");
 
     // Drop the previous folder's rows. A stale subdirectory cache used to skip
     // the listing, so the folder you just entered showed no MIDI files.
@@ -1847,7 +1850,8 @@ void MidiToolkitEditor::applyBrowserFilter()
 
 void MidiToolkitEditor::setBrowseMode(int mode)
 {
-    browseMode = juce::jlimit(0, 2, mode);
+    // 0 = folder, 1 = starred files, 2 = search, 3 = starred folders.
+    browseMode = juce::jlimit(0, 3, mode);
     sidebar.setBrowseMode(browseMode);
     persistBrowserSession();
 }
@@ -2397,7 +2401,8 @@ void MidiToolkitEditor::rebuildEntries()
         // Starred library mode already lists only favourites — don't re-filter stars.
         if (starredFilter && browseMode != 1 && !starred)
             continue;
-        if (!clipMatchesFilter(clip, filter))
+        // Favorites views keep every starred path; FILTER chips don't hide them.
+        if (browseMode != 1 && !clipMatchesFilter(clip, filter))
             continue;
         passing.push_back(i);
     }
@@ -2556,7 +2561,9 @@ void MidiToolkitEditor::applyTimeStretchFromMultiplier()
 
 void MidiToolkitEditor::syncEffectsInspector()
 {
-    const auto* clip = selectedClip();
+    // Form + pitch context: any loaded library clip or an active recording/generator clip.
+    const auto* clip = hasRecording ? &recordedClip : selectedClip();
+    // Keep Form rows available as soon as a clip is on the roll / selected.
     effectsInspector.setHasClip(clip != nullptr);
     effectsInspector.setClipRoot(clip != nullptr ? clip->root : -1);
     effectsInspector.setClipSourceOctave(clip != nullptr ? clipReferenceOctave(*clip) : 4);
@@ -2565,8 +2572,12 @@ void MidiToolkitEditor::syncEffectsInspector()
         effectsInspector.setClipScaleAnalysis(analyseClipScale(*clip));
     else
         effectsInspector.setClipScaleAnalysis({});
-    effectsInspector.setEdit(selectedEdit(), juce::dontSendNotification);
-    effectsInspector.setGroove(selectedGroove(), juce::dontSendNotification);
+    // Keep generator/recording Form edits; only reload library-clip edit/groove maps.
+    if (!hasRecording)
+    {
+        effectsInspector.setEdit(selectedEdit(), juce::dontSendNotification);
+        effectsInspector.setGroove(selectedGroove(), juce::dontSendNotification);
+    }
     effectsInspector.setBpmMultiplier(processorRef.bpmMultiplier.load(), juce::dontSendNotification);
     effectsInspector.setSectionLocks(processorRef.sectionLocks);
     updateMiniPreview();
@@ -2771,7 +2782,7 @@ void MidiToolkitEditor::finishClipSelection()
 
     const auto edit = selectedEdit();
     const auto groove = selectedGroove();
-    const auto resolved = resolveClip(clip, edit);
+    const auto resolved = resolveClip(clip, edit, formSelectionIds());
 
     // Keep freerun phase continuous across clip changes so browsing mid-playback
     // feels seamless. Wrap into the new clip length; synced mode already follows
@@ -2879,6 +2890,14 @@ void MidiToolkitEditor::refreshEntryMeta(int index)
                                       processorRef.isStarred(clip.filePath)));
 }
 
+const std::set<int>* MidiToolkitEditor::formSelectionIds() const
+{
+    const auto& e = effectsInspector.getEdit();
+    if (!e.selectedNotesOnly || !rollEditor.hasSelection())
+        return nullptr;
+    return &rollEditor.selectedNoteIds();
+}
+
 MidiClip MidiToolkitEditor::buildRenderedClip() const
 {
     // Non-destructive pipeline: resolveClip → applyGroove → velocities.
@@ -2890,7 +2909,7 @@ MidiClip MidiToolkitEditor::buildRenderedClip() const
 
     const auto edit = hasRecording ? effectsInspector.getEdit() : selectedEdit();
     const auto groove = hasRecording ? effectsInspector.getGroove() : selectedGroove();
-    const auto resolved = resolveClip(*clip, edit);
+    const auto resolved = resolveClip(*clip, edit, formSelectionIds());
     auto notes = applyGroove(resolved.notes, groove, clip->complexity,
                              clip->kind, clip->root, edit.mode);
     // Complexity morph can invent ±1/±2 ornaments — keep Fit to Scale honest.
@@ -3191,13 +3210,14 @@ void MidiToolkitEditor::updateMiniPreview()
     {
         const auto edit = effectsInspector.getEdit();
         const auto groove = effectsInspector.getGroove();
-        const auto resolved = resolveClip(recordedClip, edit);
+        const auto resolved = resolveClip(recordedClip, edit, formSelectionIds());
         const int rootPc = edit.root >= 0 ? edit.root : 0;
         auto grooved = applyGroove(resolved.notes, groove, recordedClip.complexity,
                                    recordedClip.kind, recordedClip.root, edit.mode);
         if (edit.fitScale && edit.root >= 0)
             refitNotesToScale(grooved, edit.root, edit.mode);
-        miniRoll.setNotes(grooved, resolved.bars, groove, rootPc, recordedClip.notes,
+        // Frame on resolved notes so invert / octave / delete refit the strip.
+        miniRoll.setNotes(grooved, resolved.bars, groove, rootPc, grooved,
                           edit.mode, 4, edit.noteFilterMask);
         previewHeader.repaint();
         transport.setHasClip(!recordedClip.notes.empty());
@@ -3219,17 +3239,16 @@ void MidiToolkitEditor::updateMiniPreview()
     transport.setClipName(clip->name);
     const auto edit = selectedEdit();
     const auto groove = selectedGroove();
-    const auto resolved = resolveClip(*clip, edit);
-    // Frame from source notes so pitch/octave edits stay visible in the strip
-    // (fitting to resolved notes would re-center and hide transposition).
+    const auto resolved = resolveClip(*clip, edit, formSelectionIds());
     const int rootPc = edit.root >= 0 ? edit.root : (clip->root >= 0 ? clip->root : 0);
     miniRoll.setNoteColour(kindClipColour(clip->kind));
     auto grooved = applyGroove(resolved.notes, groove, clip->complexity,
                                clip->kind, clip->root, edit.mode);
     if (edit.fitScale && edit.root >= 0)
         refitNotesToScale(grooved, edit.root, edit.mode);
+    // Fit vertical zoom to the audible notes (±1), not the raw source pitches.
     miniRoll.setNotes(grooved, resolved.bars, groove,
-                      rootPc, clip->notes, edit.mode, 4, edit.noteFilterMask);
+                      rootPc, grooved, edit.mode, 4, edit.noteFilterMask);
     const double stretch = 1.0 / juce::jlimit(0.25, 4.0, processorRef.bpmMultiplier.load());
     miniRoll.setTimeStretch(stretch);
     previewHeader.repaint();
@@ -3465,32 +3484,32 @@ int MidiToolkitEditor::passthroughWindowWidth() const
 
 MidiToolkitEditor::LeftPaneTabs::LeftPaneTabs()
 {
-    btnSidebar.setComponentID("btnSidebarFold");
-    btnSidebar.ghost = false;
-    btnSidebar.setWantsKeyboardFocus(true);
-    btnSidebar.onClick = [this] { if (onToggleSidebar) onToggleSidebar(); };
-    addAndMakeVisible(btnSidebar);
+    auto prep = [](IconBtn& b)
+    {
+        b.ghost = false;
+        b.iconScale = 1.0f;
+        b.setWantsKeyboardFocus(true);
+    };
 
+    prep(btnFiles);
     btnFiles.setComponentID("btnFilesTab");
     btnFiles.setTooltip("Browse MIDI files");
     btnFiles.onClick = [this] { if (onTab) onTab(0); };
     addAndMakeVisible(btnFiles);
 
+    prep(btnGenerator);
     btnGenerator.setComponentID("btnGeneratorTab");
     btnGenerator.setTooltip("Generators");
     btnGenerator.onClick = [this] { if (onTab) onTab(1); };
     addAndMakeVisible(btnGenerator);
 
-    btnSubfolders.setComponentID("btnIncludeSubdirs");
-    btnSubfolders.setTooltip("Include files in subfolders");
-    btnSubfolders.onClick = [this] { if (onToggleSubfolders) onToggleSubfolders(); };
-    addAndMakeVisible(btnSubfolders);
-
+    prep(btnGrid);
     btnGrid.setComponentID("btnGridView");
     btnGrid.setTooltip("Grid: files as clips in columns by kind");
     btnGrid.onClick = [this] { if (onToggleGrid) onToggleGrid(); };
     addAndMakeVisible(btnGrid);
 
+    prep(btnPreview);
     btnPreview.setComponentID("btnPreview");
     btnPreview.setTooltip("Show preview under the browser or generator");
     btnPreview.onClick = [this] { if (onTogglePreview) onTogglePreview(); };
@@ -3504,22 +3523,11 @@ void MidiToolkitEditor::LeftPaneTabs::setTab(int t)
     tab = juce::jlimit(0, 1, t);
     btnFiles.active = tab == 0;
     btnGenerator.active = tab == 1;
-    btnSidebar.setVisible(tab == 0);
-    const bool filesChrome = tab == 0;
-    btnSubfolders.setVisible(filesChrome);
-    btnGrid.setVisible(filesChrome);
+    btnGrid.setVisible(tab == 0);
     // Preview stays available in Generator-only mode.
     btnPreview.setVisible(true);
     resized();
     repaint();
-}
-
-void MidiToolkitEditor::LeftPaneTabs::setSidebarCollapsed(bool on)
-{
-    btnSidebar.active = on;
-    btnSidebar.icon = on ? icons::sidebarRight : icons::sidebar;
-    btnSidebar.setTooltip(on ? "Expand sidebar" : "Collapse sidebar");
-    btnSidebar.repaint();
 }
 
 void MidiToolkitEditor::LeftPaneTabs::setPreviewOpen(bool on)
@@ -3534,49 +3542,22 @@ void MidiToolkitEditor::LeftPaneTabs::setGrid(bool on)
     btnGrid.repaint();
 }
 
-void MidiToolkitEditor::LeftPaneTabs::setSubfolders(bool on)
-{
-    btnSubfolders.active = on;
-    btnSubfolders.repaint();
-}
-
 void MidiToolkitEditor::LeftPaneTabs::resized()
 {
     auto row = getLocalBounds().reduced(metrics::scaled(8), 0);
     const int ctl = metrics::chromeIconButton();
     const int gap = metrics::scaled(4);
-    if (btnSidebar.isVisible())
-    {
-        btnSidebar.setBounds(row.removeFromLeft(ctl).withSizeKeepingCentre(ctl, ctl));
-        row.removeFromLeft(gap);
-    }
-    else
-    {
-        btnSidebar.setBounds({});
-    }
-    const int filesW = juce::jmax(ctl, btnFiles.idealWidth());
-    const int genW = juce::jmax(ctl, btnGenerator.idealWidth());
-    btnFiles.setBounds(row.removeFromLeft(filesW).withSizeKeepingCentre(filesW, ctl));
+    btnFiles.setBounds(row.removeFromLeft(ctl).withSizeKeepingCentre(ctl, ctl));
     row.removeFromLeft(gap);
-    btnGenerator.setBounds(row.removeFromLeft(genW).withSizeKeepingCentre(genW, ctl));
+    btnGenerator.setBounds(row.removeFromLeft(ctl).withSizeKeepingCentre(ctl, ctl));
 
-    const int previewW = juce::jmax(ctl, btnPreview.idealWidth());
-    btnPreview.setBounds(row.removeFromRight(previewW).withSizeKeepingCentre(previewW, ctl));
+    btnPreview.setBounds(row.removeFromRight(ctl).withSizeKeepingCentre(ctl, ctl));
     row.removeFromRight(gap);
 
     if (btnGrid.isVisible())
-    {
-        const int gridW = juce::jmax(ctl, btnGrid.idealWidth());
-        const int subW = juce::jmax(ctl, btnSubfolders.idealWidth());
-        btnGrid.setBounds(row.removeFromRight(gridW).withSizeKeepingCentre(gridW, ctl));
-        row.removeFromRight(gap);
-        btnSubfolders.setBounds(row.removeFromRight(subW).withSizeKeepingCentre(subW, ctl));
-    }
+        btnGrid.setBounds(row.removeFromRight(ctl).withSizeKeepingCentre(ctl, ctl));
     else
-    {
         btnGrid.setBounds({});
-        btnSubfolders.setBounds({});
-    }
 }
 
 void MidiToolkitEditor::LeftPaneTabs::paint(juce::Graphics& g)
@@ -3790,9 +3771,7 @@ void MidiToolkitEditor::refreshBrowserBar()
 {
     browserBar.setGrid(gridView);
     browserBar.setSubfolders(sidebar.getIncludeSubdirs());
-    leftPaneTabs.setSidebarCollapsed(sidebar.isCollapsed());
     leftPaneTabs.setGrid(gridView);
-    leftPaneTabs.setSubfolders(sidebar.getIncludeSubdirs());
     leftPaneTabs.setPreviewOpen(processorRef.previewOpen && !processorRef.editorOpen);
     kindGrid.setKindMask(sidebar.getCriteria().kindMask);
     previewHeader.refresh();
@@ -3800,7 +3779,8 @@ void MidiToolkitEditor::refreshBrowserBar()
     for (int i = 0; i < fileList.getNumEntries(); ++i)
         if (const auto* e = fileList.entryAt(i); e != nullptr && !e->isDirectory)
             ++files;
-    browserBar.setFiltersActive(sidebar.isFilterOpen(), sidebar.activeFilterCount());
+    browserBar.setFiltersActive(sidebar.isFilterOpen(), sidebar.activeFilterCount(),
+                                sidebar.describeActiveFilters());
     filterPopover.setCountText(juce::String(files) + (files == 1 ? " file" : " files"));
 }
 
@@ -4077,12 +4057,10 @@ public:
     {
         appearancePopup.setItems({ "Auto", "Light", "Dark" },
                                  juce::jlimit(0, 2, tweaks().appearance.load()));
+        refreshThemePopup();
         sizePopup.setItems({ "Small", "Medium", "Large" }, tweaks().size.load());
-        spacingPopup.setItems({ "Compact", "Comfortable" }, tweaks().density.load());
         fontPopup.setItems({ "Archivo", "System", "Helvetica Neue", "Avenir Next" },
                            juce::jlimit(0, (int) FontFamily::Count - 1, tweaks().fontFamily.load()));
-        surfacePopup.setItems({ "Flat", "Depth", "Liquid" },
-                              juce::jlimit(0, (int) SurfaceStyle::Count - 1, tweaks().surfaceStyle.load()));
 
         juce::StringArray pctLabels;
         int pctIdx = 2;
@@ -4109,16 +4087,26 @@ public:
             };
             addAndMakeVisible(p);
         };
-        wire(appearancePopup, [](int i) { tweaks().appearance.store(juce::jlimit(0, 2, i)); });
+        wire(appearancePopup, [this](int i)
+        {
+            tweaks().appearance.store(juce::jlimit(0, 2, i));
+            refreshThemePopup();
+        });
+        wire(themePopup, [this](int i)
+        {
+            const int idx = juce::jlimit(0, kNumThemesPerFamily - 1, i);
+            if (settingsThemeFamilyIsDark())
+                tweaks().darkTheme.store(idx);
+            else
+                tweaks().lightTheme.store(idx);
+        });
         wire(sizePopup, [](int i) { tweaks().size.store(i); });
         wire(textPopup, [](int i)
         {
             const int n = (int) (sizeof(kTextPctChoices) / sizeof(kTextPctChoices[0]));
             tweaks().textScalePct.store(kTextPctChoices[juce::jlimit(0, n - 1, i)]);
         });
-        wire(spacingPopup, [](int i) { tweaks().density.store(i); });
         wire(fontPopup, [](int i) { tweaks().fontFamily.store(i); });
-        wire(surfacePopup, [](int i) { tweaks().surfaceStyle.store(i); });
 
         tooltipsSwitch.onClick = [this]
         {
@@ -4148,12 +4136,23 @@ public:
         setSize(kPanelW, contentHeightForTab(tab));
     }
 
+    void refreshThemePopup()
+    {
+        juce::StringArray names;
+        const bool dark = settingsThemeFamilyIsDark();
+        const int base = dark ? kNumThemesPerFamily : 0;
+        for (int i = 0; i < kNumThemesPerFamily; ++i)
+            names.add(kThemes[(size_t) (base + i)].name);
+        const int sel = dark ? tweaks().darkTheme.load() : tweaks().lightTheme.load();
+        themePopup.setItems(names, juce::jlimit(0, kNumThemesPerFamily - 1, sel));
+    }
+
     static int contentHeightForTab(int t)
     {
         const int header = kHeaderH + kTabH + 8 + kFooterH + 20;
         const int rowH = 40 + 6;
         if (t == 0) return header + rowH + 8;
-        if (t == 1) return header + rowH * 8 + 8; // theme..tooltips + alternate rows
+        if (t == 1) return header + rowH * 7 + 8; // appearance + theme + size..alt
         return header + 56;
     }
 
@@ -4163,11 +4162,10 @@ public:
         const bool design = tab == 1;
         const bool output = tab == 0;
         appearancePopup.setVisible(design);
+        themePopup.setVisible(design);
         sizePopup.setVisible(design);
         textPopup.setVisible(design);
-        spacingPopup.setVisible(design);
         fontPopup.setVisible(design);
-        surfacePopup.setVisible(design);
         tooltipsSwitch.setVisible(design);
         alternateRowsSwitch.setVisible(design);
         saveDefaultBtn.setVisible(output);
@@ -4244,12 +4242,11 @@ public:
         }
         else if (tab == 1)
         {
-            paintRow("Appearance", "Auto follows the system; Light is Pearl, Dark is Ink");
+            paintRow("Appearance", "Auto follows the system light/dark setting");
+            paintRow("Theme", "Ten light and ten dark colour pairs");
             paintRow("UI size", "Scales spacing, panels, and controls");
             paintRow("Text size", "Scales type and icons only");
             paintRow("Font", "Interface typeface; values stay mono");
-            paintRow("Surface", "Flat, drop shadows, or frosted");
-            paintRow("Row spacing", "Tighter or roomier list rows");
             paintRow("Show tooltips", "");
             paintRow("Alternate rows", "Shade every other file-list row");
         }
@@ -4302,11 +4299,10 @@ public:
         };
 
         appearancePopup.setBounds({});
+        themePopup.setBounds({});
         sizePopup.setBounds({});
         textPopup.setBounds({});
-        spacingPopup.setBounds({});
         fontPopup.setBounds({});
-        surfacePopup.setBounds({});
         tooltipsSwitch.setBounds({});
         alternateRowsSwitch.setBounds({});
         saveDefaultBtn.setBounds({});
@@ -4323,11 +4319,10 @@ public:
         else if (tab == 1)
         {
             placePopup(appearancePopup);
+            placePopup(themePopup);
             placePopup(sizePopup);
             placePopup(textPopup);
             placePopup(fontPopup);
-            placePopup(surfacePopup);
-            placePopup(spacingPopup);
             auto tipRow = body.removeFromTop(rowH);
             const int sw = tooltipsSwitch.idealWidth();
             if (narrow)
@@ -4346,7 +4341,7 @@ public:
 private:
     int tab = 1;
     juce::Rectangle<int> tabBounds[3];
-    fx::FlatPopup appearancePopup, sizePopup, textPopup, spacingPopup, fontPopup, surfacePopup;
+    fx::FlatPopup appearancePopup, themePopup, sizePopup, textPopup, fontPopup;
     fx::FlatSwitch tooltipsSwitch;
     fx::FlatSwitch alternateRowsSwitch;
     IconBtn closeBtn { icons::x, "Close" };
@@ -4433,14 +4428,16 @@ void MidiToolkitEditor::showTweaksMenu()
 
 void MidiToolkitEditor::refreshSidebar()
 {
-    sidebar.setSavedDirs(processorRef.savedBrowserDirs,
-                         rootDir.isDirectory() ? rootDir.getFullPathName() : juce::String());
+    const auto activePath = rootDir.isDirectory() ? rootDir.getFullPathName() : juce::String();
+    sidebar.setSavedDirs(processorRef.savedBrowserDirs, activePath);
     sidebar.setSavedSearches(processorRef.savedSearches, activeSavedSearchIdx);
     sidebar.setBrowseMode(browseMode);
     sidebar.setStarredFilter(starredFilter);
     if (browseMode != 0)
         sidebar.setCurrentClipCount(0);
     sidebar.setStarredCount(processorRef.starredFiles.size());
+    sidebar.setCurrentFolderStarred(activePath.isNotEmpty()
+                                    && processorRef.isStarredFolder(activePath));
 }
 
 // ── ticking ──────────────────────────────────────────────────────────────────
@@ -4622,7 +4619,9 @@ void MidiToolkitEditor::timerCallback()
     }
     else if (const auto* clip = hasRecording ? &recordedClip : selectedClip())
     {
-        const auto resolved = resolveClip(*clip, hasRecording ? effectsInspector.getEdit() : selectedEdit());
+        const auto resolved = resolveClip(*clip,
+                                          hasRecording ? effectsInspector.getEdit() : selectedEdit(),
+                                          formSelectionIds());
         const double stretch = 1.0 / juce::jlimit(0.25, 4.0, processorRef.bpmMultiplier.load());
         const double lenBeats = juce::jmax(0.25, (double) (resolved.bars * kStepsPerBar) / 4.0 * stretch);
         const double mult = juce::jlimit(0.25, 4.0, processorRef.bpmMultiplier.load());

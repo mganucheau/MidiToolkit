@@ -214,6 +214,8 @@ struct ClipEdit
     bool reverse = false;
     /** Mirror pitches around the midpoint of the current note range. */
     bool invert = false;
+    /** When true, Invert / Reverse only touch notes listed in resolveClip's selection. */
+    bool selectedNotesOnly = false;
     bool fitScale  = false;
     bool mapToRoot = false;
     int  root      = -1;            // target root pitch-class, -1 = unset
@@ -298,7 +300,8 @@ struct ResolvedClip
 /** Effective notes + bar count for display and playback. Order:
     per-note move + octave → map-to-root → fit-to-scale → octave-range
     → pitch-range fold → step move → trim. */
-ResolvedClip resolveClip(const StepClip& clip, const ClipEdit& edit);
+ResolvedClip resolveClip(const StepClip& clip, const ClipEdit& edit,
+                         const std::set<int>* selectedNoteIds = nullptr);
 
 struct EdgeBars { int lead = 0; int tail = 0; };
 

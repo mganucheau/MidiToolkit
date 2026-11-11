@@ -165,9 +165,9 @@ namespace region {
     constexpr int rollMinW     = 320;
     constexpr int velocityH    = 100;
     constexpr int previewH     = 134;  // 14 ruler + 120 notes
-    constexpr int listRowH     = 20;
-    constexpr int listHeaderH  = 20;
-    constexpr int sidebarRowH  = 22;
+    constexpr int listRowH     = 26;
+    constexpr int listHeaderH  = 24;
+    constexpr int sidebarRowH  = 26;
 }
 
 } // namespace ds

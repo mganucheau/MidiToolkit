@@ -3,6 +3,7 @@
 #include <functional>
 #include <memory>
 #include <map>
+#include <set>
 #include <vector>
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_gui_extra/juce_gui_extra.h>
@@ -190,6 +191,8 @@ private:
     const StepClip* selectedClip() const;
     ClipEdit selectedEdit() const;
     GrooveParams selectedGroove() const;
+    /** Note ids for Form → Selected notes only; nullptr when the option is off / empty. */
+    const std::set<int>* formSelectionIds() const;
 
     MidiToolkitProcessor& processorRef;
     PatternFlowLookAndFeel lnf;
@@ -222,31 +225,25 @@ private:
 
     TransportBar transport;
 
-    /** Sidebar fold + Files | Generator toggles for the left column. */
+    /** Files | Generator toggles for the left column (fold lives in the sidebar). */
     class LeftPaneTabs : public juce::Component
     {
     public:
         LeftPaneTabs();
         std::function<void(int)> onTab;
-        std::function<void()> onToggleSidebar;
         std::function<void()> onTogglePreview;
         std::function<void()> onToggleGrid;
-        std::function<void()> onToggleSubfolders;
         void setTab(int t);
-        void setSidebarCollapsed(bool on);
         void setPreviewOpen(bool on);
         void setGrid(bool on);
-        void setSubfolders(bool on);
         void resized() override;
         void paint(juce::Graphics&) override;
     private:
         int tab = 0;
-        IconBtn btnSidebar { icons::sidebar, "Collapse sidebar" };
-        ChipBtn btnFiles { "Files" };
-        ChipBtn btnGenerator { "Generator" };
-        ChipBtn btnSubfolders { "Subdirectories" };
-        ChipBtn btnGrid { "Grid" };
-        ChipBtn btnPreview { "Preview" };
+        IconBtn btnFiles { icons::midi, "Files" };
+        IconBtn btnGenerator { icons::infinity, "Generator" };
+        IconBtn btnGrid { icons::grid, "Grid" };
+        IconBtn btnPreview { icons::noteKeys, "Preview" };
     };
 
     FavoritesSidebar sidebar;

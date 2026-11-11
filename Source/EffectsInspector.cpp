@@ -9,6 +9,7 @@ EffectsInspector::EffectsInspector()
     , extendRow("Extend", extendPopup)
     , reverseRow("Reverse", reverseSwitch)
     , invertRow("Invert", invertSwitch)
+    , selectedNotesRow("Selected notes only", selectedNotesSwitch)
     , quantizeStrengthSl("Strength", 0, 100, 0, false)
     , swing("Amount", 0, 100, 0, false)
     , pocket("Pocket", -100, 100, 0, true)
@@ -21,6 +22,7 @@ EffectsInspector::EffectsInspector()
     , velocityRangeSl("Velocity", 1, 127, 1, 127)
     , sustainRow("Sustain Pedal", sustainPopup)
     , complexitySl("Complexity", 0, 100, 50, true)
+    , syncopationSl("Syncopation", 0, 100, 0, false)
     , variationsSl("Variations", 0, 16, 0, false)
     , delayAmountSl("Amount", 0, 100, 0, false)
     , delayFeedbackSl("Feedback", 0, 100, 40, false)
@@ -121,6 +123,15 @@ EffectsInspector::EffectsInspector()
         refreshDirtySections();
     };
 
+    selectedNotesSwitch.setComponentID("btnSelectedNotesOnly");
+    selectedNotesSwitch.setTooltip("Apply Invert / Reverse only to notes selected in the piano roll");
+    selectedNotesSwitch.onClick = [this]
+    {
+        edit.selectedNotesOnly = selectedNotesSwitch.getToggleState();
+        notifyEdit();
+        refreshDirtySections();
+    };
+
     // Hover tips for inspector controls (shown when Settings → Show Tooltips is on).
     swing.setTooltip("Delay offbeat notes for a swung feel");
     pocket.setTooltip("Push or lay back timing (strong beats move less)");
@@ -135,6 +146,7 @@ EffectsInspector::EffectsInspector()
     velocityRangeSl.setTooltip("Compress clip velocities into this MIDI range");
     sustainPopup.setTooltip("Generate sustain-pedal automation for preview and export");
     complexitySl.setTooltip("Simplify or enrich the clip relative to its baseline complexity");
+    syncopationSl.setTooltip("Pull offbeat attacks earlier for a more syncopated feel");
     variationsSl.setTooltip("Cycle alternate slight takes of the clip");
     delayTimePopup.setTooltip("Delay tap spacing");
     delayAmountSl.setTooltip("How loud delayed repeats are");
@@ -193,6 +205,12 @@ EffectsInspector::EffectsInspector()
     {
         groove.variationIndex = v;
         variationsSl.valueText = v <= 0 ? "Off" : ("#" + juce::String(v));
+        notifyGroove();
+    };
+
+    syncopationSl.onChange = [this](int v)
+    {
+        groove.syncopation = juce::jlimit(0, 100, v);
         notifyGroove();
     };
 
@@ -410,8 +428,6 @@ EffectsInspector::EffectsInspector()
 
     // Dirty predicates — when a section is folded, only dirty rows stay visible.
     playback.addRow(&trimRow, kRowMinH, [this] { return trimSwitch.getToggleState(); });
-    playback.addRow(&reverseRow, kRowMinH, [this] { return edit.reverse; });
-    playback.addRow(&invertRow, kRowMinH, [this] { return edit.invert; });
     playback.addRow(&tempoRow, kRowMinH, [this] { return std::abs(bpmMultiplier - 1.0) > 1.0e-6; });
     playback.addRow(&extendRow, kRowMinH, [this] { return edit.extendMult > 1; });
 
@@ -467,9 +483,13 @@ EffectsInspector::EffectsInspector()
                     [this] { return edit.hasPitchRange(); });
     pitchSec.addRow(&filterTypeRow, kRowMinH, [this] { return edit.hasNoteFilter(); });
 
-    effectsSec.addRow(&complexitySl, kSliderRowH, [this] { return groove.complexityTarget >= 0; });
-    effectsSec.addRow(&variationsSl, kSliderRowH, [this] { return groove.variationIndex > 0; });
-    effectsSec.addRow(&effectsDivider, [this] { return effectsDivider.idealHeight(); });
+    formSec.addRow(&complexitySl, kSliderRowH, [this] { return groove.complexityTarget >= 0; });
+    formSec.addRow(&syncopationSl, kSliderRowH, [this] { return groove.syncopation > 0; });
+    formSec.addRow(&variationsSl, kSliderRowH, [this] { return groove.variationIndex > 0; });
+    formSec.addRow(&reverseRow, kRowMinH, [this] { return edit.reverse; });
+    formSec.addRow(&invertRow, kRowMinH, [this] { return edit.invert; });
+    formSec.addRow(&selectedNotesRow, kRowMinH, [this] { return edit.selectedNotesOnly; });
+
     effectsSec.addRow(&delayBlock, [this] { return delayBlock.idealHeight(); }, [this] {
         return groove.delayAmount > 0;
     });
@@ -878,6 +898,9 @@ EffectsInspector::EffectsInspector()
     };
     pitchSec.onLockToggle = [this] { toggleSectionLock(toolkitLock::Pitch); };
 
+    formSec.onReset = [this] { resetFormSection(); };
+    formSec.onLockToggle = [this] { toggleSectionLock(toolkitLock::Effects); };
+
     effectsSec.onReset = [this] { resetEffectsSection(); };
     effectsSec.onLockToggle = [this] { toggleSectionLock(toolkitLock::Effects); };
 
@@ -885,30 +908,34 @@ EffectsInspector::EffectsInspector()
     timing.sectionId = "timing";
     performance.sectionId = "performance";
     pitchSec.sectionId = "pitch";
+    formSec.sectionId = "form";
     effectsSec.sectionId = "effects";
     arpSec.sectionId = "arp";
     melodySec.sectionId = "melody";
     chordsSec.sectionId = "chords";
     bassSec.sectionId = "bass";
     drumSec.sectionId = "drums";
-    sectionOrder = { &playback, &timing, &performance, &pitchSec, &effectsSec };
+    sectionOrder = { &playback, &formSec, &timing, &performance, &pitchSec, &effectsSec };
     for (auto* sec : { &arpSec, &melodySec, &chordsSec, &bassSec, &drumSec,
-                       &playback, &timing, &performance, &pitchSec, &effectsSec })
+                       &playback, &timing, &performance, &pitchSec, &formSec, &effectsSec })
     {
         body.addAndMakeVisible(*sec);
         sec->onDragStart = [this, sec] { beginSectionDrag(sec); };
         sec->onDragMove = [this](int screenY) { moveSectionDrag(screenY); };
         sec->onDragEnd = [this] { endSectionDrag(); };
     }
-    // Default fold: Playback + Timing + Performance open so Trim/Reverse/Invert are findable.
+    // Default fold: Playback + Timing + Performance + Form open so Transform controls are findable.
     playback.setOpen(true);
     timing.setOpen(true);
     performance.setOpen(true);
+    formSec.setOpen(true);
     arpSec.setOpen(true);
 
     // "Hide Unused": fold every section down to its changed rows (the default way of working).
     btnChanged.setComponentID("btnToolkitChanged");
     btnChanged.setWantsKeyboardFocus(false);
+    btnChanged.ghost = false;
+    btnChanged.iconScale = 1.0f;
     btnChanged.setTooltip("Hide unused controls — show only what you have changed");
     btnChanged.onClick = [this]
     {
@@ -946,8 +973,6 @@ void EffectsInspector::resetPlaybackSection()
 {
     setBpmMultiplier(1.0, juce::dontSendNotification);
     edit.extendMult = 1;
-    edit.reverse = false;
-    edit.invert = false;
     setEdit(edit, juce::dontSendNotification);
     if (onBpmMultiplierChanged) onBpmMultiplierChanged(bpmMultiplier);
     notifyEdit();
@@ -981,15 +1006,27 @@ void EffectsInspector::resetPerformanceSection()
     notifyGroove();
 }
 
-void EffectsInspector::resetEffectsSection()
+void EffectsInspector::resetFormSection()
 {
     groove.complexityTarget = -1;
+    groove.syncopation = 0;
     groove.variationIndex = 0;
+    edit.reverse = false;
+    edit.invert = false;
+    edit.selectedNotesOnly = false;
+    setGroove(groove, juce::dontSendNotification);
+    setEdit(edit, juce::dontSendNotification);
+    refreshComplexitySlider();
+    notifyGroove();
+    notifyEdit();
+}
+
+void EffectsInspector::resetEffectsSection()
+{
     groove.delayAmount = 0;
     groove.delayFeedback = 40;
     groove.delayTimeIndex = (int) DelayTime::Eighth;
     setGroove(groove, juce::dontSendNotification);
-    refreshComplexitySlider();
     notifyGroove();
 }
 
@@ -1010,6 +1047,7 @@ void EffectsInspector::setSectionLocks(uint32_t locks)
     timing.setLocked((sectionLocks & toolkitLock::Timing) != 0);
     performance.setLocked((sectionLocks & toolkitLock::Performance) != 0);
     pitchSec.setLocked((sectionLocks & toolkitLock::Pitch) != 0);
+    formSec.setLocked((sectionLocks & toolkitLock::Effects) != 0);
     effectsSec.setLocked((sectionLocks & toolkitLock::Effects) != 0);
     refreshHeaderLockButton();
     repaint();
@@ -1049,7 +1087,10 @@ void EffectsInspector::resetUnlockedSections()
         notifyEdit();
     }
     if ((sectionLocks & toolkitLock::Effects) == 0)
+    {
+        resetFormSection();
         resetEffectsSection();
+    }
     if (onResetUnlocked) onResetUnlocked();
 }
 
@@ -1146,7 +1187,7 @@ void EffectsInspector::refreshComplexitySlider()
 
 void EffectsInspector::refreshDirtySections()
 {
-    for (auto* sec : { &playback, &timing, &performance, &pitchSec, &effectsSec })
+    for (auto* sec : { &playback, &timing, &performance, &pitchSec, &formSec, &effectsSec })
         sec->refreshDirtyRows();
     refreshDependentEnables();
     layoutSections();
@@ -1154,7 +1195,13 @@ void EffectsInspector::refreshDirtySections()
 
 void EffectsInspector::setHasClip(bool has)
 {
+    if (hasClip == has)
+    {
+        refreshFormClipGating();
+        return;
+    }
     hasClip = has;
+    refreshFormClipGating();
     repaint();
 }
 
@@ -1192,15 +1239,31 @@ void EffectsInspector::setClipComplexity(int complexity)
     refreshComplexitySlider();
 }
 
+void EffectsInspector::refreshFormClipGating()
+{
+    // Always show Form controls. Hiding them when passthrough had no clip left an
+    // empty open section even with a browser clip on the roll (hasClip could lag
+    // or stay false). Transforms simply no-op until a clip is present.
+    juce::ignoreUnused(hasClip, liveStream);
+    for (auto* c : { (juce::Component*) &complexitySl,
+                     (juce::Component*) &syncopationSl,
+                     (juce::Component*) &variationsSl,
+                     (juce::Component*) &reverseRow,
+                     (juce::Component*) &invertRow,
+                     (juce::Component*) &selectedNotesRow })
+        formSec.setRowForcedHidden(c, false);
+    layoutSections();
+}
+
 void EffectsInspector::setLiveStreamMode(bool on)
 {
-    if (liveStream == on) return;
+    if (liveStream == on)
+    {
+        refreshFormClipGating();
+        return;
+    }
     liveStream = on;
-    // Complexity, variations, and the whole Playback section need a clip.
-    effectsSec.setRowForcedHidden(&complexitySl, on);
-    effectsSec.setRowForcedHidden(&variationsSl, on);
-    effectsSec.setRowForcedHidden(&effectsDivider, on);
-    layoutSections();
+    refreshFormClipGating();
 }
 
 void EffectsInspector::setTrimState(bool active, bool enabled, const juce::String&)
@@ -1232,6 +1295,7 @@ void EffectsInspector::setGroove(const GrooveParams& g, juce::NotificationType)
     delayAmountSl.setValue(g.delayAmount, juce::dontSendNotification);
     delayFeedbackSl.setValue(g.delayFeedback, juce::dontSendNotification);
     velocityRangeSl.setRange(g.velocityRangeLo, g.velocityRangeHi, juce::dontSendNotification);
+    syncopationSl.setValue(g.syncopation, juce::dontSendNotification);
     variationsSl.setValue(g.variationIndex, juce::dontSendNotification);
 
     swingTimePopup.setIndex(juce::jlimit(0, 5, g.swingGridIndex), juce::dontSendNotification);
@@ -1312,6 +1376,7 @@ void EffectsInspector::setGroove(const GrooveParams& g, juce::NotificationType)
     delayAmountSl.valueText = juce::String(g.delayAmount) + "%";
     delayFeedbackSl.valueText = juce::String(g.delayFeedback) + "%";
     velocityRangeSl.valueText = juce::String(g.velocityRangeLo) + "-" + juce::String(g.velocityRangeHi);
+    syncopationSl.valueText = juce::String(g.syncopation);
     variationsSl.valueText = g.variationIndex <= 0 ? "Off" : ("#" + juce::String(g.variationIndex));
     refreshComplexitySlider();
     refreshDirtySections();
@@ -1338,6 +1403,7 @@ void EffectsInspector::setEdit(const ClipEdit& e, juce::NotificationType)
     }
     reverseSwitch.setToggleState(e.reverse, juce::dontSendNotification);
     invertSwitch.setToggleState(e.invert, juce::dontSendNotification);
+    selectedNotesSwitch.setToggleState(e.selectedNotesOnly, juce::dontSendNotification);
     keyGrid.setCandidateMask(candidateKeyMask);
     keyGrid.setSelectedIndex(e.root >= 0 ? e.root : 0, juce::dontSendNotification);
     modePopup.setIndex((int) e.mode, juce::dontSendNotification);
@@ -1448,7 +1514,7 @@ void EffectsInspector::refreshChangedButton()
 
 void EffectsInspector::setSectionOrder(const juce::String& ids)
 {
-    std::vector<fx::Section*> all { &playback, &timing, &performance, &pitchSec, &effectsSec };
+    std::vector<fx::Section*> all { &playback, &timing, &performance, &pitchSec, &formSec, &effectsSec };
     std::vector<fx::Section*> next;
     for (const auto& id : juce::StringArray::fromTokens(ids, ",", {}))
         for (auto* sec : all)
@@ -1622,7 +1688,7 @@ bool EffectsInspector::anySectionOpen() const
     if (paneTab == 0)
         return arpSec.open || melodySec.open || chordsSec.open || bassSec.open || drumSec.open;
     if (playback.open) return true;
-    return timing.open || performance.open || pitchSec.open || effectsSec.open;
+    return timing.open || performance.open || pitchSec.open || formSec.open || effectsSec.open;
 }
 
 void EffectsInspector::foldAllSections()
@@ -1656,17 +1722,16 @@ void EffectsInspector::resized()
     const int headerH = metrics::paneHeaderH();
     auto header = r.removeFromTop(headerH).reduced(metrics::scaled(8), 0).withTrimmedBottom(1);
     const int ctl = metrics::chromeIconButton();
-    // Right → left: Reset · Lock. Hide Unused sits on the left (replaces Effects title).
+    // Right → left: Reset · Lock. Hide Unused (icon) sits on the left (replaces Effects title).
     btnEffectsLock.setBounds(header.removeFromRight(ctl).withSizeKeepingCentre(ctl, ctl));
     header.removeFromRight(metrics::scaled(4));
     btnReset.setBounds(header.removeFromRight(ctl).withSizeKeepingCentre(ctl, ctl));
     header.removeFromRight(metrics::scaled(8));
-    const int cw = btnChanged.idealWidth();
     if (externalGeneratorHost != nullptr)
     {
         generatorsTabBounds = {};
         effectsTabBounds = {};
-        btnChanged.setBounds(header.removeFromLeft(cw).withSizeKeepingCentre(cw, ctl));
+        btnChanged.setBounds(header.removeFromLeft(ctl).withSizeKeepingCentre(ctl, ctl));
     }
     else
     {
@@ -1674,7 +1739,7 @@ void EffectsInspector::resized()
         generatorsTabBounds = header.removeFromLeft(genW).withSizeKeepingCentre(genW, ctl);
         header.removeFromLeft(metrics::scaled(10));
         effectsTabBounds = {};
-        btnChanged.setBounds(header.removeFromLeft(cw).withSizeKeepingCentre(cw, ctl));
+        btnChanged.setBounds(header.removeFromLeft(ctl).withSizeKeepingCentre(ctl, ctl));
     }
     updateToolkitFoldBounds();
 

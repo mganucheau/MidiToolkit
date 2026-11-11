@@ -341,25 +341,30 @@ TEST_CASE("Locked trim stays on for a clip with no empty bars", "[editorui]")
     dir.deleteRecursively();
 }
 
-TEST_CASE("Passthrough keeps Playback and hides clip-only rows", "[editorui]")
+TEST_CASE("Passthrough keeps Playback and Form controls visible", "[editorui]")
 {
     juce::ScopedJuceInitialiser_GUI gui;
     EffectsInspector fx;
     fx.setSize(320, 800);
     fx.playbackSection().setOpen(true);
+    fx.formSection().setOpen(true);
     fx.effectsSection().setOpen(true);
-    const int effectsH = fx.effectsSection().idealHeight();
+    const int formH = fx.formSection().idealHeight();
     REQUIRE(fx.playbackSection().isVisible());
+    REQUIRE(formH > 0);
 
     fx.setLiveStreamMode(true);
-    // Trim / Reverse / Invert stay available; complexity & variations need a clip.
+    // Form stays open with its controls even before a clip is loaded.
     CHECK(fx.playbackSection().isVisible());
-    CHECK(fx.effectsSection().idealHeight() < effectsH);
+    CHECK(fx.formSection().idealHeight() == formH);
     CHECK(fx.contentHeight() > 0);
+
+    fx.setHasClip(true);
+    CHECK(fx.formSection().idealHeight() == formH);
 
     fx.setLiveStreamMode(false);
     CHECK(fx.playbackSection().isVisible());
-    CHECK(fx.effectsSection().idealHeight() == effectsH);
+    CHECK(fx.formSection().idealHeight() == formH);
 }
 
 TEST_CASE("File table keyboard nav follows sorted display order", "[editorui]")

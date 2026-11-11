@@ -360,10 +360,12 @@ void PianoRollEditor::setClip(const StepClip& c, const ClipEdit& e, const Groove
     groove = k;
     rebuildResolved();
     refreshControls();
-    // New clip OR length change (extend/trim) → fit the whole content in view.
-    if (!sameClip || resolved.bars != prevBars)
+    // New clip, length change, or clip-fit mode → refit to note range (±1).
+    // Invert / octave / delete keep the same path but move the pitch window.
+    if (!sameClip || resolved.bars != prevBars || visibleBarsZoom < 0)
     {
-        selection.clear();
+        if (!sameClip)
+            selection.clear();
         if (!sameClip)
             resetLoopToClip();
         else
@@ -539,7 +541,11 @@ void PianoRollEditor::applyEdit(std::function<void(ClipEdit&)> mutate)
     rebuildResolved();
     setLoopSteps(loopStartStep, loopEndStep, true);
     refreshControls();
-    updateRollSize();
+    // Refit vertical zoom whenever notes move (octave / delete / nudge).
+    if (visibleBarsZoom < 0)
+        zoomToClip();
+    else
+        updateRollSize();
     repaint();
     if (onEditChanged)
         onEditChanged(edit);

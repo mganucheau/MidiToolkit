@@ -140,12 +140,30 @@ SharedUiSession LibraryStore::uiSessionFromXml(const juce::XmlElement& el)
     s.tweakDensity = juce::jlimit(0, 1, el.getIntAttribute("tweakDensity", 1));
     s.tweakSize = juce::jlimit(0, 2, el.getIntAttribute("tweakSize", 1));
     s.tweakTextScalePct = juce::jlimit(60, 150, el.getIntAttribute("tweakTextScalePct", 100));
-    const bool themeCatalog = el.getIntAttribute("themeCatalog", 0) != 0;
-    s.tweakAppearance = migrateThemeIndex(el.getIntAttribute("tweakAppearance", 0), themeCatalog);
+    const int themeCatalog = el.getIntAttribute("themeCatalog", 0);
+    if (themeCatalog >= 2)
+    {
+        s.tweakAppearance = juce::jlimit(0, 2, el.getIntAttribute("tweakAppearance", 0));
+        s.tweakLightTheme = juce::jlimit(0, 9, el.getIntAttribute("tweakLightTheme", 5));
+        s.tweakDarkTheme = juce::jlimit(0, 9, el.getIntAttribute("tweakDarkTheme", 0));
+    }
+    else if (themeCatalog == 1)
+    {
+        const int named = juce::jlimit(0, 19, el.getIntAttribute("tweakAppearance", 5));
+        s.tweakAppearance = named >= 10 ? (int) Appearance::Dark : (int) Appearance::Light;
+        s.tweakLightTheme = named < 10 ? named : 5;
+        s.tweakDarkTheme = named >= 10 ? named - 10 : 0;
+    }
+    else
+    {
+        s.tweakAppearance = migrateThemeIndex(el.getIntAttribute("tweakAppearance", 0), false);
+        s.tweakLightTheme = 5;
+        s.tweakDarkTheme = 0;
+    }
     s.tweakShowTooltips = el.getIntAttribute("tweakShowTooltips", 1) != 0 ? 1 : 0;
     s.tweakFontFamily = juce::jlimit(0, 3, el.getIntAttribute("tweakFontFamily", 0));
     s.tweakSurfaceStyle = juce::jlimit(0, 2, el.getIntAttribute("tweakSurfaceStyle", 0));
-    s.tweakAlternateRows = el.getIntAttribute("tweakAlternateRows", 0) != 0 ? 1 : 0;
+    s.tweakAlternateRows = el.getIntAttribute("tweakAlternateRows", 1) != 0 ? 1 : 0;
     s.hasDefaultView = el.getIntAttribute("hasDefaultView", 0) != 0;
     s.defEditorOpen = el.getIntAttribute("defEditorOpen", 0) != 0;
     s.defEffectsOpen = el.getIntAttribute("defEffectsOpen", 0) != 0;
@@ -166,7 +184,9 @@ SharedUiSession LibraryStore::uiSessionFromXml(const juce::XmlElement& el)
     s.defTweakSize = juce::jlimit(0, 2, el.getIntAttribute("defTweakSize", 1));
     s.defTweakTextScalePct = juce::jlimit(60, 150, el.getIntAttribute("defTweakText", 100));
     s.defTweakDensity = juce::jlimit(0, 1, el.getIntAttribute("defTweakDensity", 1));
-    s.defTweakAppearance = migrateThemeIndex(el.getIntAttribute("defTweakAppearance", 0), themeCatalog);
+    s.defTweakAppearance = themeCatalog >= 2
+        ? juce::jlimit(0, 2, el.getIntAttribute("defTweakAppearance", 0))
+        : migrateThemeIndex(el.getIntAttribute("defTweakAppearance", 0), themeCatalog != 0);
     s.browserSessionSearch = browserSearchFromXml(el);
 
     for (auto* child : el.getChildIterator())
@@ -216,8 +236,10 @@ void LibraryStore::uiSessionToXml(juce::XmlElement& el, const SharedUiSession& s
     el.setAttribute("tweakDensity", s.tweakDensity);
     el.setAttribute("tweakSize", s.tweakSize);
     el.setAttribute("tweakTextScalePct", s.tweakTextScalePct);
-    el.setAttribute("themeCatalog", 0); // Appearance Auto/Light/Dark (Pearl/Ink)
+    el.setAttribute("themeCatalog", 2); // Appearance mode + light/dark theme pairs
     el.setAttribute("tweakAppearance", s.tweakAppearance);
+    el.setAttribute("tweakLightTheme", s.tweakLightTheme);
+    el.setAttribute("tweakDarkTheme", s.tweakDarkTheme);
     el.setAttribute("tweakShowTooltips", s.tweakShowTooltips);
     el.setAttribute("tweakFontFamily", s.tweakFontFamily);
     el.setAttribute("tweakSurfaceStyle", s.tweakSurfaceStyle);

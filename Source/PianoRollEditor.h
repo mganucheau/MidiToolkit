@@ -101,6 +101,7 @@ public:
     void setTimeStretch(double stretch);   // 1/bpmMultiplier — stretches roll + export view
     void setScalePlacement(ScalePlacement placement);
     bool hasSelection() const { return !selection.empty(); }
+    const std::set<int>& selectedNoteIds() const { return selection; }
     void deleteSelectedNotes();   // non-destructive (edit.deleted)
     void toggleTrim();
 

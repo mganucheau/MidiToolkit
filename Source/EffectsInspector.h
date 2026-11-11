@@ -80,6 +80,7 @@ public:
     fx::Section& timingSection() { return timing; }
     fx::Section& performanceSection() { return performance; }
     fx::Section& pitchSection() { return pitchSec; }
+    fx::Section& formSection() { return formSec; }
     fx::Section& effectsSection() { return effectsSec; }
     fx::Section& arpSection() { return arpSec; }
     fx::Section& melodySection() { return melodySec; }
@@ -109,7 +110,9 @@ private:
     void resetPlaybackSection();
     void resetTimingSection();
     void resetPerformanceSection();
+    void resetFormSection();
     void resetEffectsSection();
+    void refreshFormClipGating();
     void toggleSectionLock(uint32_t bit);
     void setAllSectionsLocked(bool locked);
     void refreshHeaderLockButton();
@@ -144,7 +147,7 @@ private:
     IconBtn btnEffectsLock { icons::lockOpen, "Lock effects while browsing" };
     juce::Rectangle<int> toolkitFoldBounds;
     juce::Rectangle<int> generatorsTabBounds, effectsTabBounds;
-    ChipBtn btnChanged { "Hide Unused" };
+    IconBtn btnChanged { icons::foldRows, "Hide Unused" };
     std::vector<fx::Section*> sectionOrder;
     fx::Section* draggedSection = nullptr;
     double jiggleStartMs = 0.0;
@@ -158,6 +161,7 @@ private:
     fx::Section timing { "Timing" };
     fx::Section performance { "Performance" };
     fx::Section pitchSec { "Pitch & Scale" };
+    fx::Section formSec { "Form" };
     fx::Section effectsSec { "Delay" };
 
     fx::TempoToggle tempoToggle;
@@ -165,10 +169,12 @@ private:
     fx::FlatSwitch trimSwitch;
     fx::FlatSwitch reverseSwitch;
     fx::FlatSwitch invertSwitch;
+    fx::FlatSwitch selectedNotesSwitch;
     fx::FlatPopup extendPopup;
     fx::InlineRow extendRow;
     fx::InlineRow reverseRow;
     fx::InlineRow invertRow;
+    fx::InlineRow selectedNotesRow;
 
     fx::FlatPopup swingTimePopup;
     fx::FlatPopup quantizeTimePopup;
@@ -190,6 +196,7 @@ private:
     fx::InlineRow sustainRow;
 
     fx::FlatSliderRow complexitySl;
+    fx::FlatSliderRow syncopationSl;
     fx::FlatSliderRow variationsSl;
     fx::FlatPopup delayTimePopup;
     fx::FlatSliderRow delayAmountSl;
@@ -291,7 +298,6 @@ private:
     fx::Divider performanceDivider;
     fx::Divider pitchDividerA;
     fx::Divider pitchDividerB;
-    fx::Divider effectsDivider;
 
     juce::Viewport viewport;
     juce::Component body;

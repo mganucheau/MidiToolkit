@@ -517,6 +517,7 @@ void applyPlaybackLock(const ClipEdit& locked, ClipEdit& target, bool autoTrim, 
     target.extendMult = locked.extendMult;
     target.reverse = locked.reverse;
     target.invert = locked.invert;
+    target.selectedNotesOnly = locked.selectedNotesOnly;
     if (!autoTrim)
     {
         target.clearTrim();
@@ -533,7 +534,7 @@ void applyPlaybackLock(const ClipEdit& locked, ClipEdit& target, bool autoTrim, 
 bool editIsClean(const ClipEdit& e)
 {
     if (e.octave >= 0 || e.pitchShift != 0 || e.octaveRange != 0 || e.hasPitchRange()
-        || e.extendMult > 1 || e.reverse || e.invert
+        || e.extendMult > 1 || e.reverse || e.invert || e.selectedNotesOnly
         || e.fitScale || e.mapToRoot || e.hasNoteFilter() || e.hasTrim()
         || e.legacyTrimLead != 0 || e.legacyTrimTail != 0)
         return false;
@@ -562,7 +563,8 @@ static std::vector<int> effectiveRemovedBars(const StepClip& clip, const ClipEdi
     return removed;
 }
 
-ResolvedClip resolveClip(const StepClip& clip, const ClipEdit& e)
+ResolvedClip resolveClip(const StepClip& clip, const ClipEdit& e,
+                         const std::set<int>* selectedNoteIds)
 {
     ResolvedClip out;
     out.notes.reserve(clip.notes.size());
@@ -685,20 +687,34 @@ ResolvedClip resolveClip(const StepClip& clip, const ClipEdit& e)
     }
     out.bars = std::max(1, bars);
 
-    // Invert: mirror pitches around the midpoint of the current range.
+    auto formTargets = [&](const RollNote& n) -> bool
+    {
+        if (!e.selectedNotesOnly || selectedNoteIds == nullptr || selectedNoteIds->empty())
+            return true;
+        return selectedNoteIds->count(n.id) > 0;
+    };
+
+    // Invert: mirror pitches around the midpoint of the (targeted) range.
     if (e.invert && !out.notes.empty())
     {
-        int lo = out.notes.front().pitch, hi = lo;
+        int lo = 127, hi = 0;
+        int count = 0;
         for (const auto& n : out.notes)
         {
+            if (!formTargets(n)) continue;
             lo = std::min(lo, n.pitch);
             hi = std::max(hi, n.pitch);
+            ++count;
         }
-        const int pivot = lo + hi;
-        for (auto& n : out.notes)
+        if (count > 0)
         {
-            n.pitch = juce::jlimit(0, 127, pivot - n.pitch);
-            n.moved = true;
+            const int pivot = lo + hi;
+            for (auto& n : out.notes)
+            {
+                if (!formTargets(n)) continue;
+                n.pitch = juce::jlimit(0, 127, pivot - n.pitch);
+                n.moved = true;
+            }
         }
     }
 
@@ -708,6 +724,7 @@ ResolvedClip resolveClip(const StepClip& clip, const ClipEdit& e)
         const double total = (double) out.bars * (double) kStepsPerBar;
         for (auto& n : out.notes)
         {
+            if (!formTargets(n)) continue;
             n.start = juce::jmax(0.0, total - n.start - n.len);
             n.moved = true;
         }

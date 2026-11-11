@@ -10,11 +10,10 @@ namespace pflow {
 
 enum class Density { Compact, Comfortable };
 enum class ContentSize { Small, Medium, Large };
-/** Settings → Appearance: Auto follows the OS; Light/Dark resolve to Pearl/Ink. */
+/** Settings → Appearance: Auto follows the OS; Light/Dark pick a family. */
 enum class Appearance { System = 0, Light = 1, Dark = 2 };
 
-/** Named themes. Indexes 0–9 are light, 10–19 are dark.
-    Appearance Auto/Light/Dark maps onto Pearl (5) and Ink (10). */
+/** Named themes. Indexes 0–9 are light, 10–19 are dark. */
 struct ThemeSpec
 {
     const char* name;
@@ -48,6 +47,7 @@ inline constexpr ThemeSpec kThemes[] = {
 };
 
 inline constexpr int kNumThemes = (int) (sizeof(kThemes) / sizeof(kThemes[0]));
+inline constexpr int kNumThemesPerFamily = 10;
 inline constexpr int kPearlTheme = 5;
 inline constexpr int kInkTheme = 10;
 
@@ -56,16 +56,17 @@ inline const ThemeSpec& themeAt(int index)
     return kThemes[(size_t) juce::jlimit(0, kNumThemes - 1, index)];
 }
 
-/** Map stored ids → Appearance Auto/Light/Dark.
-    themeCatalog builds stored a named-theme index (0–19); mode builds store 0/1/2. */
+/** Map legacy stored ids → Appearance Auto/Light/Dark. */
 inline int migrateThemeIndex(int stored, bool themeCatalog)
 {
     if (!themeCatalog)
         return juce::jlimit(0, 2, stored);
-    // Legacy named themes: dark family → Dark, everything else → Light (Pearl defaults).
     if (stored >= 10) return (int) Appearance::Dark;
     return (int) Appearance::Light;
 }
+
+/** Favorite / starred glyph — solid gold, independent of accent tint. */
+inline juce::Colour favoriteGold() { return juce::Colour(0xffe8b84a); }
 enum class ScalePlacement { Top, Bottom };   // legacy; Pitch & Scale lives in inspector
 
 constexpr int kNumContentSizes = 3;
@@ -146,11 +147,15 @@ struct Tweaks
     /** Type + icon glyph scale as percent; 100% = former 115% size. Independent of UI size. */
     std::atomic<int> textScalePct { 100 };
     std::atomic<int> appearance { (int) Appearance::System };
+    /** Light-family theme index 0–9 (Paper…Blush). */
+    std::atomic<int> lightTheme { kPearlTheme };
+    /** Dark-family theme index 0–9 (Ink…Cocoa) → absolute 10–19. */
+    std::atomic<int> darkTheme { 0 };
     std::atomic<int> showTooltips { 1 }; // 1 = on
     std::atomic<int> fontFamily { (int) FontFamily::Archivo };
     std::atomic<int> surfaceStyle { (int) SurfaceStyle::Flat };
     /** Shade every other file-list row for readability. */
-    std::atomic<int> alternateRows { 0 }; // 1 = on
+    std::atomic<int> alternateRows { 1 }; // 1 = on (default)
 };
 
 /** Standout amber used for tip bubbles and the control highlight under them. */
@@ -178,17 +183,48 @@ inline Appearance currentAppearance()
     return (Appearance) juce::jlimit(0, 2, tweaks().appearance.load());
 }
 
-/** Resolve Appearance Auto/Light/Dark to Pearl (light) or Ink (dark). */
+inline int lightThemeIndex()
+{
+    return juce::jlimit(0, kNumThemesPerFamily - 1, tweaks().lightTheme.load());
+}
+
+inline int darkThemeIndex()
+{
+    return kNumThemesPerFamily
+         + juce::jlimit(0, kNumThemesPerFamily - 1, tweaks().darkTheme.load());
+}
+
+/** Resolve Appearance + light/dark theme prefs (Auto follows the OS). */
 inline int themeIndex()
 {
     switch (currentAppearance())
     {
-        case Appearance::Light: return kPearlTheme;
-        case Appearance::Dark:  return kInkTheme;
+        case Appearance::Light: return lightThemeIndex();
+        case Appearance::Dark:  return darkThemeIndex();
         case Appearance::System:
         default:
-            return juce::Desktop::getInstance().isDarkModeActive() ? kInkTheme : kPearlTheme;
+            return juce::Desktop::getInstance().isDarkModeActive()
+                       ? darkThemeIndex() : lightThemeIndex();
     }
+}
+
+/** Absolute theme index for the family currently shown in Settings. */
+inline int settingsThemeFamilyIndex()
+{
+    switch (currentAppearance())
+    {
+        case Appearance::Light: return lightThemeIndex();
+        case Appearance::Dark:  return darkThemeIndex();
+        case Appearance::System:
+        default:
+            return juce::Desktop::getInstance().isDarkModeActive()
+                       ? darkThemeIndex() : lightThemeIndex();
+    }
+}
+
+inline bool settingsThemeFamilyIsDark()
+{
+    return themeAt(settingsThemeFamilyIndex()).dark;
 }
 
 /** UI scale for the Small / Medium / Large content-size tweak (layout / chrome). */
@@ -361,8 +397,8 @@ namespace metrics {
     constexpr int openWindowW       = sidebarExpandedW + fileTableW + editorPaneW;
     /** Header chrome icon button (play / effects / etc.). */
     constexpr int chromeIconBtn     = 24;   // control-lg
-    /** Drawn glyph size inside a chromeIconBtn with iconScale 1. */
-    constexpr int chromeIconGlyph   = 12;
+    /** Drawn glyph size inside a chromeIconBtn with iconScale 1 (box stays 24). */
+    constexpr int chromeIconGlyph   = 15;
 
     inline int transportH()       { return scaled(toolbarH); }
     inline int listRowH()         { return scaled(ds::region::listRowH); }

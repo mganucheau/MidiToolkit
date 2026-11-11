@@ -150,8 +150,8 @@ private:
     IconBtn btnRecord { icons::record, "Record" };
     StatusPill statusPill;
     IconBtn btnSync { icons::sync, "Sync to host tempo" };
+    IconBtn btnPassthrough { icons::arrowsIn, "Passthrough" };
     DragChip btnDragToDaw { "Drag Me" };
-    ChipBtn btnPassthrough { "Passthrough" };
     IconBtn btnEditor { icons::noteKeys, "Piano Roll" };
     IconBtn btnEffects { icons::sliders, "Effects" };
     IconBtn btnSettings { icons::gear, "Settings" };

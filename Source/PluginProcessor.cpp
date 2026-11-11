@@ -66,7 +66,7 @@ void MidiToolkitProcessor::applySharedUiSessionFromLibrary()
             if (folder.path.isNotEmpty())
                 savedBrowserDirs.add(folder.path);
     }
-    browseMode = juce::jlimit(0, 2, s.browseMode);
+    browseMode = juce::jlimit(0, 3, s.browseMode);
     starredFilter = s.starredFilter;
     includeSubdirs = s.includeSubdirs;
     browserSessionSearch = s.browserSessionSearch;
@@ -88,6 +88,8 @@ void MidiToolkitProcessor::applySharedUiSessionFromLibrary()
     tweaks().size.store(juce::jlimit(0, kNumContentSizes - 1, s.tweakSize));
     tweaks().textScalePct.store(juce::jlimit(60, 150, s.tweakTextScalePct));
     tweaks().appearance.store(juce::jlimit(0, 2, s.tweakAppearance));
+    tweaks().lightTheme.store(juce::jlimit(0, 9, s.tweakLightTheme));
+    tweaks().darkTheme.store(juce::jlimit(0, 9, s.tweakDarkTheme));
     tweaks().showTooltips.store(s.tweakShowTooltips != 0 ? 1 : 0);
     tweaks().fontFamily.store(juce::jlimit(0, (int) FontFamily::Count - 1, s.tweakFontFamily));
     tweaks().surfaceStyle.store(juce::jlimit(0, (int) SurfaceStyle::Count - 1, s.tweakSurfaceStyle));
@@ -126,7 +128,7 @@ void MidiToolkitProcessor::persistSharedUiSession()
     s.lastBrowserDir = lastBrowserDir;
     s.savedBrowserDirs = savedBrowserDirs;
     s.savedLibraries = savedLibraries;
-    s.browseMode = juce::jlimit(0, 2, browseMode);
+    s.browseMode = juce::jlimit(0, 3, browseMode);
     s.starredFilter = starredFilter;
     s.includeSubdirs = includeSubdirs;
     s.browserSessionSearch = browserSessionSearch;
@@ -145,6 +147,8 @@ void MidiToolkitProcessor::persistSharedUiSession()
     s.tweakSize = tweaks().size.load();
     s.tweakTextScalePct = tweaks().textScalePct.load();
     s.tweakAppearance = tweaks().appearance.load();
+    s.tweakLightTheme = tweaks().lightTheme.load();
+    s.tweakDarkTheme = tweaks().darkTheme.load();
     s.tweakShowTooltips = tweaks().showTooltips.load();
     s.tweakFontFamily = tweaks().fontFamily.load();
     s.tweakSurfaceStyle = tweaks().surfaceStyle.load();
@@ -183,7 +187,7 @@ void MidiToolkitProcessor::syncLibraryFromMemory()
         s.lastBrowserDir = lastBrowserDir;
         s.savedBrowserDirs = savedBrowserDirs;
         s.savedLibraries = savedLibraries;
-        s.browseMode = juce::jlimit(0, 2, browseMode);
+        s.browseMode = juce::jlimit(0, 3, browseMode);
         s.starredFilter = starredFilter;
         s.includeSubdirs = includeSubdirs;
         s.browserSessionSearch = browserSessionSearch;
@@ -202,6 +206,8 @@ void MidiToolkitProcessor::syncLibraryFromMemory()
         s.tweakSize = tweaks().size.load();
         s.tweakTextScalePct = tweaks().textScalePct.load();
         s.tweakAppearance = tweaks().appearance.load();
+        s.tweakLightTheme = tweaks().lightTheme.load();
+        s.tweakDarkTheme = tweaks().darkTheme.load();
         s.tweakShowTooltips = tweaks().showTooltips.load();
         s.tweakFontFamily = tweaks().fontFamily.load();
         s.tweakSurfaceStyle = tweaks().surfaceStyle.load();
@@ -802,8 +808,10 @@ void MidiToolkitProcessor::getStateInformation(juce::MemoryBlock& dest)
     xml.setAttribute("tweakSize", tweaks().size.load());
     xml.setAttribute("tweakTextScalePct", tweaks().textScalePct.load());
     xml.setAttribute("tweakTextScaleV2", 1);
-    xml.setAttribute("themeCatalog", 0); // Appearance Auto/Light/Dark (Pearl/Ink)
+    xml.setAttribute("themeCatalog", 2);
     xml.setAttribute("tweakAppearance", tweaks().appearance.load());
+    xml.setAttribute("tweakLightTheme", tweaks().lightTheme.load());
+    xml.setAttribute("tweakDarkTheme", tweaks().darkTheme.load());
     xml.setAttribute("tweakShowTooltips", tweaks().showTooltips.load());
     xml.setAttribute("tweakFontFamily", tweaks().fontFamily.load());
     xml.setAttribute("tweakSurfaceStyle", tweaks().surfaceStyle.load());
@@ -860,6 +868,7 @@ void MidiToolkitProcessor::getStateInformation(juce::MemoryBlock& dest)
     xml.setAttribute("lockExtendMult", lockedEdit.extendMult);
     xml.setAttribute("lockReverse", lockedEdit.reverse ? 1 : 0);
     xml.setAttribute("lockInvert", lockedEdit.invert ? 1 : 0);
+    xml.setAttribute("lockSelectedNotesOnly", lockedEdit.selectedNotesOnly ? 1 : 0);
     xml.setAttribute("lockFitScale", lockedEdit.fitScale ? 1 : 0);
     xml.setAttribute("lockMapToRoot", lockedEdit.mapToRoot ? 1 : 0);
     xml.setAttribute("lockRoot", lockedEdit.root);
@@ -998,6 +1007,7 @@ void MidiToolkitProcessor::getStateInformation(juce::MemoryBlock& dest)
         e->setAttribute("extendMult", edit.extendMult);
         e->setAttribute("reverse", edit.reverse ? 1 : 0);
         e->setAttribute("invert", edit.invert ? 1 : 0);
+        e->setAttribute("selectedNotesOnly", edit.selectedNotesOnly ? 1 : 0);
         e->setAttribute("fitScale", edit.fitScale ? 1 : 0);
         e->setAttribute("mapToRoot", edit.mapToRoot ? 1 : 0);
         e->setAttribute("root", edit.root);
@@ -1162,15 +1172,34 @@ void MidiToolkitProcessor::setStateInformation(const void* data, int sizeInBytes
                     : juce::roundToInt((double) raw * 100.0 / 115.0);
                 tweaks().textScalePct.store(juce::jlimit(60, 150, pct));
             }
-            tweaks().appearance.store(migrateThemeIndex(
-                xml->getIntAttribute("tweakAppearance", 0),
-                xml->getIntAttribute("themeCatalog", 0) != 0));
+            {
+                const int catalog = xml->getIntAttribute("themeCatalog", 0);
+                if (catalog >= 2)
+                {
+                    tweaks().appearance.store(juce::jlimit(0, 2, xml->getIntAttribute("tweakAppearance", 0)));
+                    tweaks().lightTheme.store(juce::jlimit(0, 9, xml->getIntAttribute("tweakLightTheme", 5)));
+                    tweaks().darkTheme.store(juce::jlimit(0, 9, xml->getIntAttribute("tweakDarkTheme", 0)));
+                }
+                else if (catalog == 1)
+                {
+                    const int named = juce::jlimit(0, 19, xml->getIntAttribute("tweakAppearance", 5));
+                    tweaks().appearance.store(named >= 10 ? (int) Appearance::Dark : (int) Appearance::Light);
+                    tweaks().lightTheme.store(named < 10 ? named : 5);
+                    tweaks().darkTheme.store(named >= 10 ? named - 10 : 0);
+                }
+                else
+                {
+                    tweaks().appearance.store(migrateThemeIndex(xml->getIntAttribute("tweakAppearance", 0), false));
+                    tweaks().lightTheme.store(5);
+                    tweaks().darkTheme.store(0);
+                }
+            }
             tweaks().showTooltips.store(xml->getIntAttribute("tweakShowTooltips", 1) != 0 ? 1 : 0);
             tweaks().fontFamily.store(juce::jlimit(0, (int) FontFamily::Count - 1,
                 xml->getIntAttribute("tweakFontFamily", tweaks().fontFamily.load())));
             tweaks().surfaceStyle.store(juce::jlimit(0, (int) SurfaceStyle::Count - 1,
                 xml->getIntAttribute("tweakSurfaceStyle", tweaks().surfaceStyle.load())));
-            tweaks().alternateRows.store(xml->getIntAttribute("tweakAlternateRows", 0) != 0 ? 1 : 0);
+            tweaks().alternateRows.store(xml->getIntAttribute("tweakAlternateRows", 1) != 0 ? 1 : 0);
             syncSessionBars.store(juce::jlimit(1, 256, xml->getIntAttribute("syncSessionBars",
                 xml->getIntAttribute("arrangementBars", syncSessionBars.load()))));
             lastBrowserDir = xml->getStringAttribute("lastBrowserDir");
@@ -1184,7 +1213,7 @@ void MidiToolkitProcessor::setStateInformation(const void* data, int sizeInBytes
             sidebarCollapsed = xml->getIntAttribute("sidebarCollapsed", 0) != 0;
             passthrough = xml->getIntAttribute("passthrough", 0) != 0;
             passthroughActive.store(passthrough);
-            browseMode = juce::jlimit(0, 2, xml->getIntAttribute("browseMode", 0));
+            browseMode = juce::jlimit(0, 3, xml->getIntAttribute("browseMode", 0));
             starredFilter = xml->getIntAttribute("starredFilter", 0) != 0;
             includeSubdirs = xml->getIntAttribute("includeSubdirs", 0) != 0;
             selectedClipPath = xml->getStringAttribute("selectedClipPath");
@@ -1249,6 +1278,7 @@ void MidiToolkitProcessor::setStateInformation(const void* data, int sizeInBytes
                 lockedEdit.extendMult = (em == 2 || em == 4 || em == 8) ? em : 1;
                 lockedEdit.reverse = xml->getIntAttribute("lockReverse", 0) != 0;
                 lockedEdit.invert = xml->getIntAttribute("lockInvert", 0) != 0;
+                lockedEdit.selectedNotesOnly = xml->getIntAttribute("lockSelectedNotesOnly", 0) != 0;
             }
             lockedEdit.fitScale = xml->getIntAttribute("lockFitScale", 0) != 0;
             lockedEdit.mapToRoot = xml->getIntAttribute("lockMapToRoot", 0) != 0;
@@ -1438,6 +1468,7 @@ void MidiToolkitProcessor::setStateInformation(const void* data, int sizeInBytes
                     }
                     e.reverse = child->getIntAttribute("reverse", 0) != 0;
                     e.invert = child->getIntAttribute("invert", 0) != 0;
+                    e.selectedNotesOnly = child->getIntAttribute("selectedNotesOnly", 0) != 0;
                     e.fitScale = child->getIntAttribute("fitScale", 0) != 0;
                     e.mapToRoot = child->getIntAttribute("mapToRoot", 0) != 0;
                     e.root = juce::jlimit(-1, 11, child->getIntAttribute("root", -1));

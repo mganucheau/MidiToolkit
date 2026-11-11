@@ -179,7 +179,7 @@ public:
 
     /** Browser UI session mirrored from the editor so it survives UI teardown
         (hosts destroy the editor when you click another plugin) and host save. */
-    int browseMode = 0;                 // 0 folder, 1 starred, 2 search
+    int browseMode = 0;                 // 0 folder, 1 starred files, 2 search, 3 starred folders
     bool starredFilter = false;
     bool includeSubdirs = false;
     BrowserSearch browserSessionSearch;

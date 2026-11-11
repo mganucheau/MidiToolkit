@@ -489,6 +489,8 @@ struct GrooveParams
 
     /** -1 = follow clip baseline (no morph). Else 0..100 target complexity. */
     int complexityTarget = -1;
+    /** 0..100 — pull offbeat attacks earlier for a more syncopated feel. */
+    int syncopation = 0;
 
     int delayTimeIndex = (int) DelayTime::Eighth;
     int delayAmount = 0;            // 0..100

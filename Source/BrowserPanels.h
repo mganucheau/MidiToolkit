@@ -71,6 +71,12 @@ struct SavedSearchEntry
     juce::StringArray resultPaths;
 };
 
+/** Shared browser sort keys (Kind omitted from Filters — grid already splits by kind). */
+enum class BrowserSortColumn
+{
+    Name, Key, Tempo, Bars, Kind, Complexity, DifNotes, TimeSig, Notes
+};
+
 // Sidebar: LIBRARY (+ opens a folder) → joined search → foldable filters.
 
 class FavoritesSidebar : public juce::Component,
@@ -93,7 +99,7 @@ public:
 
     void setSavedDirs(const juce::StringArray& paths, const juce::String& activePath);
     void setSavedSearches(const std::vector<SavedSearchEntry>& searches, int activeSearchIdx);
-    void setBrowseMode(int mode); // 0 folder, 1 starred, 2 search
+    void setBrowseMode(int mode); // 0 folder, 1 starred files, 2 search, 3 starred folders
     void setStarredFilter(bool on);
     bool isStarredFilter() const { return starredFilter; }
     bool isCollapsed() const { return collapsed; }
@@ -114,6 +120,10 @@ public:
     std::function<void(const juce::String&)> onRemoveDir;
     /** Keep / un-keep current folder in Library. */
     std::function<void()> onAddCurrent;
+    /** Star / unstar the open folder into Favorites → Folders. */
+    std::function<void()> onToggleStarFolder;
+    /** Gold star state for the current-folder row. */
+    void setCurrentFolderStarred(bool on);
     /** Rescan the current folder without changing subdirectory scope. */
     std::function<void()> onRefreshFolder;
     /** Scan this folder and its subdirectories (flat list, no folder rows). */
@@ -156,12 +166,15 @@ public:
     bool isFilterOpen() const { return filterOpen; }
     void setFilterOpen(bool open);
     int activeFilterCount() const;
+    juce::String describeActiveFilters() const;
     void resetFilters();
     bool getHideDuplicates() const;
     void toggleHideDuplicates();
     bool isCurrentFolderSaved() const { return isCurrentFolderFavorited(); }
     std::function<void(bool)> onFilterOpenChanged;
     std::function<void()> onFilterLayoutChanged;
+    std::function<void(BrowserSortColumn)> onSortChanged;
+    void setSortColumn(BrowserSortColumn col);
 
     /** Open/focus the SEARCH field (legacy name kept for editor wiring). */
     void setSearchFormOpen(bool open);
@@ -205,6 +218,7 @@ private:
     int footerPad() const;
     int footerHeight() const;
     bool isCurrentFolderFavorited() const;
+    bool isCurrentFolderStarred() const { return currentFolderStarred; }
     int activeFilterGroupCount() const;
     void toggleFilterPanel();
     int folderCardHeight() const;
@@ -225,7 +239,7 @@ private:
     void updateTooltipForPos(juce::Point<int> pos);
     juce::Rectangle<int> navItemBounds(const NavItem&) const;
 
-    enum class LayoutKind { OpenBtn, FolderCard, Section, Row, Query, Filter, End };
+    enum class LayoutKind { OpenBtn, FolderCard, FoldBtn, Section, Row, Query, Filter, End };
     struct LayoutItem
     {
         LayoutKind kind = LayoutKind::End;
@@ -267,6 +281,7 @@ private:
     float scanAngle = 0.0f;
     int currentClipCount = 0;
     int starredCount = 0;
+    bool currentFolderStarred = false;
 
     juce::Rectangle<int> settingsRowBounds;
     juce::Rectangle<int> openFolderBounds, folderCardBounds;
@@ -289,14 +304,18 @@ private:
         void setHistograms(const std::vector<StepClip>& clips);
         int idealHeight() const;
         int activeGroupCount() const;
+        juce::String describeActiveFilters() const;
         void setIncludeSubdirs(bool on);
         void setScanning(bool on);
         bool getHideDuplicates() const { return hideDuplicates; }
         void setHideDuplicates(bool on);
         void toggleHideDuplicates();
+        void setSortColumn(BrowserSortColumn col);
+        BrowserSortColumn getSortColumn() const { return sortColumn; }
         std::function<void()> onCriteriaChanged;
         std::function<void(bool)> onSubdirsChanged;
         std::function<void()> onLayoutChanged;
+        std::function<void(BrowserSortColumn)> onSortChanged;
     private:
         void mouseDown(const juce::MouseEvent&) override;
         bool hideDuplicates = true;
@@ -304,6 +323,9 @@ private:
         bool scanning = false;
         juce::Rectangle<int> hideDupesBounds, resetBounds;
         juce::Rectangle<int> subdirRowBounds, subdirSwitchBounds;
+        juce::Rectangle<int> sortRowBounds;
+        BrowserSortColumn sortColumn = BrowserSortColumn::Name;
+        fx::FlatPopup sortPopup;
         fx::ChipGrid keyGrid;
         fx::ChipGrid kindGrid;
         fx::ChipGrid tagGrid;
@@ -420,10 +442,7 @@ class FileListPanel : public juce::Component,
                       private juce::ScrollBar::Listener
 {
 public:
-    enum class SortColumn
-    {
-        Name, Key, Tempo, Bars, Kind, Complexity, DifNotes, TimeSig, Notes
-    };
+    using SortColumn = BrowserSortColumn;
 
     FileListPanel();
 
@@ -526,7 +545,7 @@ private:
     static constexpr int kTimeSigW = 52;
     static constexpr int kNotesW = 48;
     static constexpr int kSortArrowW = 12;
-    static constexpr int kIconW = 18;
+    static constexpr int kIconW = 22;
     static constexpr int kResizeHitSlop = 8;
 
     int nameResizeHandleX() const;
@@ -633,6 +652,7 @@ public:
 
     std::function<void(int)> onSelect;                  // entry index
     std::function<void(int)> onOpen;                    // entry index (double-click)
+    std::function<void(int)> onToggleStar;              // entry index (star hit)
     std::function<void(const juce::File&)> onDragFile;
     std::function<void(int)> onStep;                    // -1 / +1 with arrow keys (legacy vertical)
     std::function<void()> onActivated;                  // sticky browser key-nav
@@ -640,6 +660,7 @@ public:
 private:
     struct Column { ClipKind kind; std::vector<int> entries; };
     int entryAt(juce::Point<int> p) const;
+    juce::Rectangle<int> starBoundsForCell(juce::Rectangle<int> inner) const;
     int maxScroll() const;
     int cellH() const;
     int numVisibleCols() const { return (int) cols.size(); }
@@ -692,7 +713,7 @@ public:
     void setGrid(bool);
     void setSubfolders(bool);
     void setSaved(bool, bool);
-    void setFiltersActive(bool open, int activeCount);
+    void setFiltersActive(bool open, int activeCount, const juce::String& summary = {});
 
     std::function<void()> onToggleGrid;
     std::function<void()> onToggleSubfolders;
@@ -705,6 +726,9 @@ private:
     IconBtn btnSubfolders { icons::subfolders, "Include files in subfolders" };
     IconBtn btnGrid { icons::grid, "Grid view: files as clips in columns by kind" };
     IconBtn btnFilters { icons::sliders, "Filters" };
+    bool filtersOpen = false;
+    int filtersActiveCount = 0;
+    juce::String filtersSummary;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(BrowserToolbar)
 };
@@ -716,7 +740,6 @@ public:
     FilterPopover();
     void setContent(juce::Component* panel, std::function<int()> idealPanelHeight);
     void setCountText(const juce::String& t);
-    void setHideDuplicates(bool on);
     int idealHeight() const;
     void resized() override;
     void paint(juce::Graphics&) override;
@@ -725,14 +748,12 @@ public:
     std::function<void()> onDone;
     std::function<void()> onSaveSearch;
     std::function<void()> onReset;
-    std::function<void()> onToggleHideDuplicates;
 
 private:
     juce::Component* panel = nullptr;
     std::function<int()> panelHeight;
     juce::String countText;
-    ChipBtn btnHideDupes { "Hide duplicates" };
-    ChipBtn btnReset { "Reset" };
+    IconBtn btnReset { icons::undo, "Reset filters" };
     ChipBtn btnSave { "Save Search", icons::plus };
     ChipBtn btnDone { "Done" };
     juce::DropShadower shadower { juce::DropShadow(juce::Colours::black.withAlpha(0.6f), 12, { 0, 4 }) };

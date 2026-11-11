@@ -231,8 +231,8 @@ TransportBar::TransportBar()
     };
     addAndMakeVisible(btnSync);
 
+    prep(btnPassthrough);
     btnPassthrough.setComponentID("btnPassthrough");
-    btnPassthrough.setWantsKeyboardFocus(false);
     btnPassthrough.setTooltip("Passthrough: effect mode — transform MIDI in, no file/generator playback (P)");
     btnPassthrough.onClick = [this] { if (onTogglePassthrough) onTogglePassthrough(); };
     addAndMakeVisible(btnPassthrough);
@@ -576,12 +576,13 @@ void TransportBar::mouseDoubleClick(const juce::MouseEvent& e)
 #endif
 }
 
-void TransportBar::applyHeaderCaptions(bool withText)
+void TransportBar::applyHeaderCaptions(bool /*withText*/)
 {
+    // Icon-only chrome — captions stay empty so buttons are glyphs.
     btnSync.caption = {};
-    btnEditor.caption = withText ? "Piano Roll" : juce::String();
-    btnEffects.caption = withText ? "Effects" : juce::String();
-    btnPassthrough.label = withText ? "Passthrough" : "P";
+    btnEditor.caption = {};
+    btnEffects.caption = {};
+    btnPassthrough.caption = {};
 }
 
 void TransportBar::resized()
@@ -604,14 +605,19 @@ void TransportBar::resized()
     // Drag Me sits between Effects and Settings when a clip is available.
     btnDragToDaw.setVisible(hasClip);
     btnEditor.setVisible(true);
-    // Passthrough appears left of Piano Roll only while Effects is open.
+    // Passthrough sits next to Sync; visible while Effects is open.
     btnPassthrough.setVisible(effectsOpen);
     btnPlay.setVisible(transportControlsVisible);
-    btnRecord.setVisible(transportControlsVisible);
+    // Passthrough is effect-only — no record arm on the header.
+    const bool showRecord = transportControlsVisible && !passthrough;
+    btnRecord.setVisible(showRecord);
 
     const int pillW = statusPill.idealWidth();
-    const int playRecW = transportControlsVisible ? (btn + tight + btn + groupGap) : 0;
-    const int leftW = pillW + groupGap + playRecW + btn;
+    const int passW = btnPassthrough.isVisible() ? (tight + btn) : 0;
+    const int playRecW = transportControlsVisible
+        ? (btn + tight + (showRecord ? btn + tight : 0) + groupGap)
+        : 0;
+    const int leftW = pillW + groupGap + playRecW + btn + passW;
     const int chipW = btnDragToDaw.isVisible() ? btnDragToDaw.idealWidth() : 0;
 
     auto rightWidth = [&]()
@@ -620,7 +626,6 @@ void TransportBar::resized()
         if (chipW > 0)              w += chipW + tight; // Drag Me before Settings
         if (btnEffects.isVisible()) w += btnEffects.captionWidth();
         if (btnEditor.isVisible())  w += tight + btnEditor.captionWidth();
-        if (btnPassthrough.isVisible()) w += tight + btnPassthrough.idealWidth();
         return w;
     };
 
@@ -652,14 +657,27 @@ void TransportBar::resized()
     if (transportControlsVisible)
     {
         btnPlay.setBounds(x, y, btn, btn);            x += btn + tight;
-        btnRecord.setBounds(x, y, btn, btn);          x += btn + groupGap;
+        if (showRecord)
+        {
+            btnRecord.setBounds(x, y, btn, btn);
+            x += btn + groupGap;
+        }
+        else
+        {
+            btnRecord.setBounds({});
+            x += groupGap - tight;
+        }
     }
     else
     {
         btnPlay.setBounds({});
         btnRecord.setBounds({});
     }
-    btnSync.setBounds(x, y, btn, btn);
+    btnSync.setBounds(x, y, btn, btn);                x += btn + tight;
+    if (btnPassthrough.isVisible())
+        btnPassthrough.setBounds(x, y, btn, btn);
+    else
+        btnPassthrough.setBounds({});
     transportGroupBounds = {};
     dividerBounds = {};
 
@@ -686,17 +704,7 @@ void TransportBar::resized()
     {
         const int w = btnEditor.captionWidth();
         btnEditor.setBounds(xr - w, y, w, btn);
-        xr -= w + (btnPassthrough.isVisible() ? tight : groupGap);
-    }
-    if (btnPassthrough.isVisible())
-    {
-        const int w = btnPassthrough.idealWidth();
-        btnPassthrough.setBounds(xr - w, y, w, btn);
         xr -= w + groupGap;
-    }
-    else
-    {
-        btnPassthrough.setBounds({});
     }
 }
 

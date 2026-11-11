@@ -434,7 +434,8 @@ void IconBtn::paintButton(juce::Graphics& g, bool over, bool down)
             g.fillRoundedRectangle(b, radius);
         }
         const auto col = active ? ds::acc() : (over ? ds::ink() : ds::inkMuted());
-        drawIcon(g, icon, b.withSizeKeepingCentre(12.0f, 12.0f), col, 1.3f);
+        const float glyph = (float) metrics::chromeIconGlyphSize() * iconScale;
+        drawIcon(g, icon, b.withSizeKeepingCentre(glyph, glyph), col, 1.35f);
         if (hasKeyboardFocus(true))
             drawFocusRing(g, b, radius);
         return;
@@ -466,15 +467,16 @@ void IconBtn::paintButton(juce::Graphics& g, bool over, bool down)
     const juce::Colour col = lit ? (activeTint.isTransparent() ? ds::onAccent() : ds::onLit())
                            : isEnabled() ? ds::ink()
                                          : ds::inkFaint();
-    const float stroke = juce::jlimit(1.2f, 1.5f, 1.35f * contentScale());
-    const float glyphPx = juce::jmin(b.getHeight() - 8.0f,
-                                     10.0f * juce::jmax(0.7f, contentScale()) * iconScale * 1.2f);
+    const float stroke = juce::jlimit(1.2f, 1.55f, 1.4f * contentScale());
+    // Keep the 24px box; enlarge the glyph for legibility.
+    const float glyphPx = juce::jmin(b.getHeight() - 4.0f,
+                                     (float) metrics::chromeIconGlyphSize() * iconScale);
 
     if (caption.isNotEmpty())
     {
         const float sc = juce::jmax(0.5f, contentScale());
         const auto font = uiFont(11.0f, true);
-        const float padL = 8.0f * sc, iconW = 10.0f * sc, gap = 4.0f * sc;
+        const float padL = 8.0f * sc, iconW = glyphPx, gap = 4.0f * sc;
         auto iconR = juce::Rectangle<float>(b.getX() + padL, b.getCentreY() - iconW * 0.5f, iconW, iconW);
         drawIcon(g, icon, iconR, col, stroke);
         g.setFont(font);
