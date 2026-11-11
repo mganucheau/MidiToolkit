@@ -251,7 +251,7 @@ private:
     void timerCallback() override;
 
     IconBtn btnToggle { icons::sidebar, "Show or hide sidebar" };
-    IconBtn btnSettings { icons::gear, "Settings" };
+    IconBtn btnSettings { icons::wrench, "Settings" };
     juce::StringArray dirs;
     juce::String active; // current folder path when a root is loaded
     std::vector<SavedSearchEntry> savedSearches;
@@ -725,7 +725,7 @@ private:
     juce::Component* search = nullptr;
     IconBtn btnSubfolders { icons::subfolders, "Include files in subfolders" };
     IconBtn btnGrid { icons::grid, "Grid view: files as clips in columns by kind" };
-    IconBtn btnFilters { icons::sliders, "Filters" };
+    IconBtn btnFilters { icons::funnel, "Filters" };
     bool filtersOpen = false;
     int filtersActiveCount = 0;
     juce::String filtersSummary;

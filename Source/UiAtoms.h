@@ -23,6 +23,12 @@ namespace icons {
     inline constexpr const char* sliders       = "sliders";
     /** Vertical EQ bars — standard audio Effects glyph. */
     inline constexpr const char* eq            = "eq";
+    /** Two rotary dials — Effects. */
+    inline constexpr const char* knobs         = "knobs";
+    /** Funnel — Filters. */
+    inline constexpr const char* funnel        = "funnel";
+    /** Wrench — Settings. */
+    inline constexpr const char* wrench        = "wrench";
     inline constexpr const char* folder        = "folder";
     inline constexpr const char* folderOpen    = "folder-open";
     inline constexpr const char* star          = "star";
@@ -128,6 +134,30 @@ public:
     int idealWidth() const;
 
     juce::String onLabel, offLabel;
+};
+
+/** Connected two-option text toggle — both labels always visible. */
+class SegmentToggle : public juce::Component,
+                      public juce::SettableTooltipClient
+{
+public:
+    SegmentToggle(juce::String leftLabel, juce::String rightLabel);
+    void setIndex(int i, juce::NotificationType notify = juce::dontSendNotification);
+    int getIndex() const { return index; }
+    int idealWidth() const;
+    std::function<void(int)> onChange;
+
+    void paint(juce::Graphics&) override;
+    void mouseDown(const juce::MouseEvent&) override;
+    void mouseMove(const juce::MouseEvent&) override;
+    void mouseExit(const juce::MouseEvent&) override;
+
+private:
+    int hitIndex(juce::Point<int> p) const;
+
+    juce::String left, right;
+    int index = 0;
+    int hover = -1;
 };
 
 /** Labelled mini switch (Fit to scale / Map to root): caption · track · value

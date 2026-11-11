@@ -152,6 +152,8 @@ bool TransportBar::StatusPill::keyPressed(const juce::KeyPress& key)
 int TransportBar::DragChip::idealWidth() const
 {
     const float sc = juce::jmax(0.5f, contentScale());
+    if (iconOnly)
+        return juce::roundToInt(8.0f * sc) * 2 + juce::roundToInt(12.0f * sc);
     const juce::String label = getButtonText().isNotEmpty() ? getButtonText() : "Drag Me";
     const int textW = (int) std::ceil(juce::GlyphArrangement::getStringWidth(uiFont(11.0f, true), label)) + 2;
     return juce::roundToInt(8.0f * sc) * 2 + juce::roundToInt(10.0f * sc) + juce::roundToInt(4.0f * sc) + textW;
@@ -169,15 +171,23 @@ void TransportBar::DragChip::paintButton(juce::Graphics& g, bool over, bool down
     g.drawRoundedRectangle(face.reduced(0.5f), ds::radius::sm, 1.0f);
 
     const float sc = juce::jmax(0.5f, contentScale());
-    auto inner = face.reduced(8.0f * sc, 0.0f);
-    auto glyph = inner.removeFromLeft(10.0f * sc).withSizeKeepingCentre(10.0f * sc, 10.0f * sc);
     const auto ink = gold.contrasting(0.9f).withMultipliedAlpha(foregroundAlpha);
-    drawIcon(g, icons::dragOut, glyph, ink, 1.3f);
-    inner.removeFromLeft(4.0f * sc);
-    g.setFont(uiFont(11.0f, true));
-    g.setColour(ink);
-    const juce::String label = getButtonText().isNotEmpty() ? getButtonText() : "Drag Me";
-    g.drawText(label, inner, juce::Justification::centredLeft, false);
+    if (iconOnly)
+    {
+        auto glyph = face.withSizeKeepingCentre(12.0f * sc, 12.0f * sc);
+        drawIcon(g, icons::dragOut, glyph, ink, 1.3f);
+    }
+    else
+    {
+        auto inner = face.reduced(8.0f * sc, 0.0f);
+        auto glyph = inner.removeFromLeft(10.0f * sc).withSizeKeepingCentre(10.0f * sc, 10.0f * sc);
+        drawIcon(g, icons::dragOut, glyph, ink, 1.3f);
+        inner.removeFromLeft(4.0f * sc);
+        g.setFont(uiFont(11.0f, true));
+        g.setColour(ink);
+        const juce::String label = getButtonText().isNotEmpty() ? getButtonText() : "Drag Me";
+        g.drawText(label, inner, juce::Justification::centredLeft, false);
+    }
     if (hasKeyboardFocus(true))
         drawFocusRing(g, face, ds::radius::sm);
 }
@@ -357,6 +367,15 @@ void TransportBar::setTransportControlsVisible(bool visible)
     if (transportControlsVisible == visible)
         return;
     transportControlsVisible = visible;
+    resized();
+}
+
+void TransportBar::setCompactChrome(bool compact)
+{
+    if (compactChrome == compact)
+        return;
+    compactChrome = compact;
+    btnDragToDaw.iconOnly = compact;
     resized();
 }
 
@@ -612,12 +631,14 @@ void TransportBar::resized()
     const bool showRecord = transportControlsVisible && !passthrough;
     btnRecord.setVisible(showRecord);
 
-    const int pillW = statusPill.idealWidth();
+    const bool showBpm = !compactChrome;
+    const int pillW = showBpm ? statusPill.idealWidth() : 0;
     const int passW = btnPassthrough.isVisible() ? (tight + btn) : 0;
     const int playRecW = transportControlsVisible
         ? (btn + tight + (showRecord ? btn + tight : 0) + groupGap)
         : 0;
-    const int leftW = pillW + groupGap + playRecW + btn + passW;
+    const int leftW = (showBpm ? pillW + groupGap : 0) + playRecW + btn + passW;
+    btnDragToDaw.iconOnly = compactChrome;
     const int chipW = btnDragToDaw.isVisible() ? btnDragToDaw.idealWidth() : 0;
 
     auto rightWidth = [&]()
@@ -652,8 +673,16 @@ void TransportBar::resized()
     titleBounds = { lightsZoneW, 0, titleW, h };
 
     int x = lightsZoneW + (titleW > 0 ? titleW + groupGap : 0);
-    statusPill.setVisible(true);
-    statusPill.setBounds(x, y, pillW, btn);           x += pillW + groupGap;
+    statusPill.setVisible(showBpm);
+    if (showBpm)
+    {
+        statusPill.setBounds(x, y, pillW, btn);
+        x += pillW + groupGap;
+    }
+    else
+    {
+        statusPill.setBounds({});
+    }
     if (transportControlsVisible)
     {
         btnPlay.setBounds(x, y, btn, btn);            x += btn + tight;

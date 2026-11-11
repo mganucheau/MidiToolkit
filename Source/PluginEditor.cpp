@@ -3491,17 +3491,10 @@ MidiToolkitEditor::LeftPaneTabs::LeftPaneTabs()
         b.setWantsKeyboardFocus(true);
     };
 
-    prep(btnFiles);
-    btnFiles.setComponentID("btnFilesTab");
-    btnFiles.setTooltip("Browse MIDI files");
-    btnFiles.onClick = [this] { if (onTab) onTab(0); };
-    addAndMakeVisible(btnFiles);
-
-    prep(btnGenerator);
-    btnGenerator.setComponentID("btnGeneratorTab");
-    btnGenerator.setTooltip("Generators");
-    btnGenerator.onClick = [this] { if (onTab) onTab(1); };
-    addAndMakeVisible(btnGenerator);
+    tabToggle.setComponentID("btnPaneTabToggle");
+    tabToggle.setTooltip("Switch between Browser and Generator");
+    tabToggle.onChange = [this](int i) { if (onTab) onTab(i); };
+    addAndMakeVisible(tabToggle);
 
     prep(btnGrid);
     btnGrid.setComponentID("btnGridView");
@@ -3521,8 +3514,7 @@ MidiToolkitEditor::LeftPaneTabs::LeftPaneTabs()
 void MidiToolkitEditor::LeftPaneTabs::setTab(int t)
 {
     tab = juce::jlimit(0, 1, t);
-    btnFiles.active = tab == 0;
-    btnGenerator.active = tab == 1;
+    tabToggle.setIndex(tab);
     btnGrid.setVisible(tab == 0);
     // Preview stays available in Generator-only mode.
     btnPreview.setVisible(true);
@@ -3547,9 +3539,10 @@ void MidiToolkitEditor::LeftPaneTabs::resized()
     auto row = getLocalBounds().reduced(metrics::scaled(8), 0);
     const int ctl = metrics::chromeIconButton();
     const int gap = metrics::scaled(4);
-    btnFiles.setBounds(row.removeFromLeft(ctl).withSizeKeepingCentre(ctl, ctl));
-    row.removeFromLeft(gap);
-    btnGenerator.setBounds(row.removeFromLeft(ctl).withSizeKeepingCentre(ctl, ctl));
+    const int toggleH = juce::jmin(ctl, row.getHeight() - metrics::scaled(4));
+    const int toggleW = tabToggle.idealWidth();
+    tabToggle.setBounds(row.removeFromLeft(toggleW)
+                            .withSizeKeepingCentre(toggleW, toggleH));
 
     btnPreview.setBounds(row.removeFromRight(ctl).withSizeKeepingCentre(ctl, ctl));
     row.removeFromRight(gap);
@@ -3572,6 +3565,9 @@ void MidiToolkitEditor::setLeftPaneTab(int tab)
     leftPaneTab = juce::jlimit(0, 1, tab);
     leftPaneTabs.setTab(leftPaneTab);
     transport.setTransportControlsVisible(leftPaneTab == 0);
+    transport.setCompactChrome(leftPaneTab == 1
+                               && !processorRef.editorOpen
+                               && !processorRef.effectsOpen);
     applyLayoutState();
 }
 
@@ -3640,6 +3636,7 @@ void MidiToolkitEditor::applyLayoutState()
     const bool pass = processorRef.passthrough;
     transport.setEditorOpen(edOpen);
     transport.setEffectsOpen(fxOpen);
+    transport.setCompactChrome(leftPaneTab == 1 && !edOpen && !fxOpen);
     if (getHeight() > 0)
         lastWindowH = getHeight();
 

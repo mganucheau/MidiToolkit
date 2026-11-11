@@ -32,6 +32,8 @@ public:
     void setPassthroughLocked(bool locked);
     /** Hide play/record (Generator view). */
     void setTransportControlsVisible(bool visible);
+    /** Single-column chrome: hide BPM pill; Drag Me becomes icon-only. */
+    void setCompactChrome(bool compact);
     void setHasClip(bool has);
     void setClipName(const juce::String& name);
     /** Standalone macOS reserves a traffic-light gutter; plugins must not. */
@@ -106,6 +108,7 @@ private:
         std::function<void()> onCopyToFolder;
         juce::String clipName;
         float foregroundAlpha = 1.0f;
+        bool iconOnly = false;
 
         void paintButton(juce::Graphics& g, bool over, bool down) override;
         int idealWidth() const;
@@ -153,9 +156,10 @@ private:
     IconBtn btnPassthrough { icons::arrowsIn, "Passthrough" };
     DragChip btnDragToDaw { "Drag Me" };
     IconBtn btnEditor { icons::noteKeys, "Piano Roll" };
-    IconBtn btnEffects { icons::eq, "Effects" };
-    IconBtn btnSettings { icons::gear, "Settings" };
+    IconBtn btnEffects { icons::knobs, "Effects" };
+    IconBtn btnSettings { icons::wrench, "Settings" };
     bool transportControlsVisible = true;
+    bool compactChrome = false;
 
     juce::Rectangle<int> titleBounds, transportGroupBounds, dividerBounds;
 

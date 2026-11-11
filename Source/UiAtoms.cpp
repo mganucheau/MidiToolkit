@@ -112,6 +112,46 @@ void drawIcon(juce::Graphics& g, const juce::String& name,
             g.fillRoundedRectangle(x, y, barW, h, barW * 0.35f);
         }
     }
+    else if (name == icons::knobs)
+    {
+        // Two rotary dials — Effects.
+        auto dial = [&](float ox)
+        {
+            g.drawEllipse(ox - s * 0.55f, cy - s * 0.55f, s * 1.1f, s * 1.1f, px);
+            g.drawLine(ox, cy, ox + s * 0.28f, cy - s * 0.42f, px);
+        };
+        dial(cx - s * 0.7f);
+        dial(cx + s * 0.7f);
+    }
+    else if (name == icons::funnel)
+    {
+        // Funnel / filter cone.
+        juce::Path funnel;
+        funnel.startNewSubPath(cx - s, cy - s * 0.85f);
+        funnel.lineTo(cx + s, cy - s * 0.85f);
+        funnel.lineTo(cx + s * 0.28f, cy + s * 0.15f);
+        funnel.lineTo(cx + s * 0.28f, cy + s * 0.95f);
+        funnel.lineTo(cx - s * 0.28f, cy + s * 0.95f);
+        funnel.lineTo(cx - s * 0.28f, cy + s * 0.15f);
+        funnel.closeSubPath();
+        g.strokePath(funnel, st);
+    }
+    else if (name == icons::wrench)
+    {
+        // Open-ended wrench — Settings.
+        juce::Path jaw;
+        jaw.startNewSubPath(cx - s * 0.95f, cy - s * 0.55f);
+        jaw.lineTo(cx - s * 0.35f, cy - s * 0.55f);
+        jaw.lineTo(cx - s * 0.05f, cy - s * 0.15f);
+        jaw.lineTo(cx + s * 0.95f, cy + s * 0.85f);
+        g.strokePath(jaw, st);
+        juce::Path jaw2;
+        jaw2.startNewSubPath(cx - s * 0.95f, cy + s * 0.15f);
+        jaw2.lineTo(cx - s * 0.25f, cy + s * 0.15f);
+        jaw2.lineTo(cx + s * 0.05f, cy - s * 0.25f);
+        g.strokePath(jaw2, st);
+        g.drawEllipse(cx + s * 0.45f, cy + s * 0.35f, s * 0.55f, s * 0.55f, px);
+    }
     else if (name == icons::folder || name == icons::folderOpen)
     {
         p.startNewSubPath(cx - s, cy + s * 0.7f);
@@ -583,6 +623,99 @@ void PillToggle::paintButton(juce::Graphics& g, bool over, bool down)
     g.drawFittedText(on ? onLabel : offLabel, area, juce::Justification::centredLeft, 1, 1.0f);
     if (hasKeyboardFocus(true))
         drawFocusRing(g, b, r);
+}
+
+// ── SegmentToggle ────────────────────────────────────────────────────────────
+
+SegmentToggle::SegmentToggle(juce::String leftLabel, juce::String rightLabel)
+    : left(std::move(leftLabel)), right(std::move(rightLabel))
+{
+    setMouseCursor(juce::MouseCursor::PointingHandCursor);
+}
+
+void SegmentToggle::setIndex(int i, juce::NotificationType notify)
+{
+    const int next = juce::jlimit(0, 1, i);
+    if (next == index)
+        return;
+    index = next;
+    repaint();
+    if (notify != juce::dontSendNotification && onChange)
+        onChange(index);
+}
+
+int SegmentToggle::idealWidth() const
+{
+    const auto f = uiFont(11.0f, true);
+    const float lw = juce::GlyphArrangement::getStringWidth(f, left);
+    const float rw = juce::GlyphArrangement::getStringWidth(f, right);
+    return (int) std::ceil(lw + rw) + 36;
+}
+
+int SegmentToggle::hitIndex(juce::Point<int> p) const
+{
+    return p.x < getWidth() / 2 ? 0 : 1;
+}
+
+void SegmentToggle::mouseDown(const juce::MouseEvent& e)
+{
+    setIndex(hitIndex(e.getPosition()), juce::sendNotification);
+}
+
+void SegmentToggle::mouseMove(const juce::MouseEvent& e)
+{
+    const int h = hitIndex(e.getPosition());
+    if (h == hover) return;
+    hover = h;
+    repaint();
+}
+
+void SegmentToggle::mouseExit(const juce::MouseEvent&)
+{
+    if (hover < 0) return;
+    hover = -1;
+    repaint();
+}
+
+void SegmentToggle::paint(juce::Graphics& g)
+{
+    auto bounds = getLocalBounds().toFloat().reduced(0.5f);
+    const float r = ds::radius::sm;
+    const float mid = bounds.getX() + bounds.getWidth() * 0.5f;
+
+    auto paintSeg = [&](juce::Rectangle<float> seg, bool active, bool isHover, bool roundLeft, bool roundRight)
+    {
+        juce::Path path;
+        path.addRoundedRectangle(seg.getX(), seg.getY(), seg.getWidth(), seg.getHeight(),
+                                 r, r, roundLeft, roundRight, roundLeft, roundRight);
+        if (active)
+        {
+            g.setColour(ds::acc());
+            g.fillPath(path);
+        }
+        else
+        {
+            g.setColour(isHover ? ds::surface300() : ds::surface200());
+            g.fillPath(path);
+        }
+    };
+
+    const auto leftSeg = bounds.withRight(mid);
+    const auto rightSeg = bounds.withLeft(mid);
+    paintSeg(leftSeg, index == 0, hover == 0, true, false);
+    paintSeg(rightSeg, index == 1, hover == 1, false, true);
+
+    g.setColour(ds::edge());
+    g.drawRoundedRectangle(bounds, r, 1.0f);
+    g.setColour(ds::line());
+    g.drawLine(mid, bounds.getY() + 2.0f, mid, bounds.getBottom() - 2.0f, 1.0f);
+
+    const auto f = uiFont(11.0f, true);
+    g.setFont(f);
+    g.setColour(index == 0 ? ds::onAccent() : ds::ink());
+    g.drawText(left, leftSeg.toNearestInt(), juce::Justification::centred, false);
+    g.setColour(index == 1 ? ds::onAccent() : ds::ink());
+    g.drawText(right, rightSeg.toNearestInt(), juce::Justification::centred, false);
 }
 
 // ── MiniSwitch ───────────────────────────────────────────────────────────────

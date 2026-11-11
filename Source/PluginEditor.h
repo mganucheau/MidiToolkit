@@ -240,8 +240,7 @@ private:
         void paint(juce::Graphics&) override;
     private:
         int tab = 0;
-        IconBtn btnFiles { icons::midi, "Files" };
-        IconBtn btnGenerator { icons::infinity, "Generator" };
+        SegmentToggle tabToggle { "Browser", "Generator" };
         IconBtn btnGrid { icons::grid, "Grid" };
         IconBtn btnPreview { icons::noteKeys, "Preview" };
     };
