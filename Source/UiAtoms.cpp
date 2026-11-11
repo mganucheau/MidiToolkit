@@ -89,12 +89,27 @@ void drawIcon(juce::Graphics& g, const juce::String& name,
     }
     else if (name == icons::sliders)
     {
+        // Horizontal adjustment tracks (Filters).
         for (int i = 0; i < 3; ++i)
         {
             const float y = cy - s + (float) i * s;
             g.drawLine(cx - s, y, cx + s, y, px);
             const float kx = cx + (i == 0 ? s * 0.4f : i == 1 ? -s * 0.35f : s * 0.05f);
             g.fillEllipse(kx - px, y - px, px * 2.0f, px * 2.0f);
+        }
+    }
+    else if (name == icons::eq)
+    {
+        // Vertical EQ / mixer faders — the usual Effects glyph.
+        const float barW = juce::jmax(px * 1.1f, s * 0.28f);
+        const float gap = s * 0.55f;
+        const float heights[3] = { s * 0.55f, s * 1.15f, s * 0.8f };
+        for (int i = 0; i < 3; ++i)
+        {
+            const float x = cx + ((float) i - 1.0f) * gap - barW * 0.5f;
+            const float h = heights[i];
+            const float y = cy + s - h;
+            g.fillRoundedRectangle(x, y, barW, h, barW * 0.35f);
         }
     }
     else if (name == icons::folder || name == icons::folderOpen)
@@ -344,16 +359,17 @@ void drawIcon(juce::Graphics& g, const juce::String& name,
     }
     else if (name == icons::gear)
     {
-        // Bold 4-tooth cog with a punched hub — stays legible at chrome size.
+        // Standard 6-tooth settings cog: outer teeth + rim + hub.
         juce::Path cog;
-        constexpr int kSteps = 8;
+        constexpr int kTeeth = 6;
+        constexpr int kSteps = kTeeth * 2;
         for (int i = 0; i < kSteps; ++i)
         {
-            const float a0 = juce::MathConstants<float>::twoPi * ((float) i - 0.5f) / (float) kSteps
+            const float a0 = juce::MathConstants<float>::twoPi * ((float) i) / (float) kSteps
                              - juce::MathConstants<float>::halfPi;
-            const float a1 = juce::MathConstants<float>::twoPi * ((float) i + 0.5f) / (float) kSteps
+            const float a1 = juce::MathConstants<float>::twoPi * ((float) i + 0.55f) / (float) kSteps
                              - juce::MathConstants<float>::halfPi;
-            const float r = (i % 2 == 0) ? s * 0.98f : s * 0.62f;
+            const float r = (i % 2 == 0) ? s * 0.98f : s * 0.68f;
             const float x0 = cx + r * std::cos(a0), y0 = cy + r * std::sin(a0);
             const float x1 = cx + r * std::cos(a1), y1 = cy + r * std::sin(a1);
             if (i == 0) cog.startNewSubPath(x0, y0);
@@ -361,9 +377,9 @@ void drawIcon(juce::Graphics& g, const juce::String& name,
             cog.lineTo(x1, y1);
         }
         cog.closeSubPath();
-        cog.setUsingNonZeroWinding(false);
-        cog.addEllipse(cx - s * 0.28f, cy - s * 0.28f, s * 0.56f, s * 0.56f);
-        g.fillPath(cog);
+        g.strokePath(cog, st);
+        g.drawEllipse(cx - s * 0.42f, cy - s * 0.42f, s * 0.84f, s * 0.84f, px);
+        g.drawEllipse(cx - s * 0.18f, cy - s * 0.18f, s * 0.36f, s * 0.36f, px);
     }
     else if (name == icons::grid)
     {
@@ -423,52 +439,21 @@ int IconBtn::captionWidth() const
 void IconBtn::paintButton(juce::Graphics& g, bool over, bool down)
 {
     auto b = getLocalBounds().toFloat();
-    const float radius = ds::radius::sm;
+    // No square chrome — toggles read through glyph colour only.
+    juce::ignoreUnused(ghost, headerChrome);
 
-    if (headerChrome)
-    {
-        // Pane-header icon: no face; hover raises one surface step.
-        if (over || down)
-        {
-            g.setColour(ds::surface300());
-            g.fillRoundedRectangle(b, radius);
-        }
-        const auto col = active ? ds::acc() : (over ? ds::ink() : ds::inkMuted());
-        const float glyph = (float) metrics::chromeIconGlyphSize() * iconScale;
-        drawIcon(g, icon, b.withSizeKeepingCentre(glyph, glyph), col, 1.35f);
-        if (hasKeyboardFocus(true))
-            drawFocusRing(g, b, radius);
-        return;
-    }
-
-    const bool lit = active;
-    const juce::Colour litFill = activeTint.isTransparent() ? ds::acc() : activeTint;
-
-    if (lit)
-    {
-        // Lit toggle: state fill + matching border; glyph in on-accent / on-lit.
-        g.setColour(down ? litFill.darker(0.12f) : litFill);
-        g.fillRoundedRectangle(b, radius);
-    }
-    else if (!ghost)
-    {
-        // Unlit Groove toggle: surface-200 face, edge border; hover raises to surface-300.
-        g.setColour((over || down) ? ds::surface300() : ds::surface200());
-        g.fillRoundedRectangle(b, radius);
-        g.setColour(ds::edge());
-        g.drawRoundedRectangle(b.reduced(0.5f), radius, 1.0f);
-    }
+    const juce::Colour litCol = activeTint.isTransparent() ? ds::acc() : activeTint;
+    juce::Colour col;
+    if (!isEnabled())
+        col = ds::inkFaint();
+    else if (active)
+        col = down ? litCol.darker(0.12f) : litCol;
     else if (over || down)
-    {
-        g.setColour(ds::surface300());
-        g.fillRoundedRectangle(b, radius);
-    }
+        col = ds::ink();
+    else
+        col = headerChrome ? ds::inkMuted() : ds::ink();
 
-    const juce::Colour col = lit ? (activeTint.isTransparent() ? ds::onAccent() : ds::onLit())
-                           : isEnabled() ? ds::ink()
-                                         : ds::inkFaint();
     const float stroke = juce::jlimit(1.2f, 1.55f, 1.4f * contentScale());
-    // Keep the 24px box; enlarge the glyph for legibility.
     const float glyphPx = juce::jmin(b.getHeight() - 4.0f,
                                      (float) metrics::chromeIconGlyphSize() * iconScale);
 
@@ -491,7 +476,7 @@ void IconBtn::paintButton(juce::Graphics& g, bool over, bool down)
     }
 
     if (hasKeyboardFocus(true))
-        drawFocusRing(g, b, radius);
+        drawFocusRing(g, b, ds::radius::sm);
 }
 
 // ── ChipBtn ──────────────────────────────────────────────────────────────────

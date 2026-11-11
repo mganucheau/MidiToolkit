@@ -21,6 +21,8 @@ namespace icons {
     inline constexpr const char* dragOut       = "drag-out";
     inline constexpr const char* scissors      = "scissors";
     inline constexpr const char* sliders       = "sliders";
+    /** Vertical EQ bars — standard audio Effects glyph. */
+    inline constexpr const char* eq            = "eq";
     inline constexpr const char* folder        = "folder";
     inline constexpr const char* folderOpen    = "folder-open";
     inline constexpr const char* star          = "star";
@@ -80,7 +82,7 @@ inline void drawFocusRing(juce::Graphics& g, juce::Rectangle<float> bounds, floa
 
 // ── Small controls ───────────────────────────────────────────────────────────
 
-/** Square icon button. Optional `active` accent state. */
+/** Icon-only button — no square face; `active` tints the glyph. */
 class IconBtn : public juce::Button
 {
 public:
@@ -88,9 +90,9 @@ public:
     void paintButton(juce::Graphics&, bool over, bool down) override;
 
     juce::String icon;
-    bool active = false;       // accent fill
-    bool ghost = true;         // no background when idle
-    bool headerChrome = false; // toolkit pane header: tx3, accent wash on hover
+    bool active = false;       // accent (or activeTint) glyph
+    bool ghost = true;         // retained for callers; faces are never drawn
+    bool headerChrome = false; // muted idle glyph in pane headers
     float iconScale = 1.0f;
     /** When set, the button draws this label beside the icon and grows to fit. */
     juce::String caption;

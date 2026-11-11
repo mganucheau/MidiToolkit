@@ -153,7 +153,7 @@ private:
     IconBtn btnPassthrough { icons::arrowsIn, "Passthrough" };
     DragChip btnDragToDaw { "Drag Me" };
     IconBtn btnEditor { icons::noteKeys, "Piano Roll" };
-    IconBtn btnEffects { icons::sliders, "Effects" };
+    IconBtn btnEffects { icons::eq, "Effects" };
     IconBtn btnSettings { icons::gear, "Settings" };
     bool transportControlsVisible = true;
 

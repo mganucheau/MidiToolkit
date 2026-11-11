@@ -1788,15 +1788,16 @@ void FavoritesSidebar::paintRow(juce::Graphics& g, int rowIdx, const juce::Recta
 
     if (collapsed)
     {
-        // Rail: square buttons matching the Files-row fold toggle.
+        // Rail: icon only — active/hover tint the glyph, no square face.
         auto b = r.toFloat();
-        g.setColour(isActive || hovered ? ds::surface300() : ds::surface200());
-        g.fillRoundedRectangle(b, ds::radius::sm);
-        g.setColour(ds::edge());
-        g.drawRoundedRectangle(b.reduced(0.5f), ds::radius::sm, 1.0f);
         const float glyph = (float) metrics::chromeIconGlyphSize();
-        drawIcon(g, icon, b.withSizeKeepingCentre(glyph, glyph),
-                 row.kind == RowKind::SavedDir ? ds::ink() : iconCol, kSidebarIconStroke);
+        auto col = row.kind == RowKind::SavedDir ? ds::ink() : iconCol;
+        if (isActive)
+            col = (row.kind == RowKind::Starred || row.kind == RowKind::StarredFolders)
+                      ? favoriteGold() : ds::acc();
+        else if (hovered)
+            col = ds::ink();
+        drawIcon(g, icon, b.withSizeKeepingCentre(glyph, glyph), col, kSidebarIconStroke);
         if (keyboardFocus)
             drawFocusRing(g, b, ds::radius::sm);
         return;
