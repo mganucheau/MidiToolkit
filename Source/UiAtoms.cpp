@@ -69,6 +69,27 @@ void drawIcon(juce::Graphics& g, const juce::String& name,
         arrow(-1.0f);
         arrow(1.0f);
     }
+    else if (name == icons::grip)
+    {
+        const float d = s * 0.42f;
+        for (int row = -1; row <= 1; ++row)
+            for (int col = 0; col < 2; ++col)
+                g.fillEllipse(cx + (col == 0 ? -s * 0.48f : s * 0.48f) - d * 0.5f,
+                              cy + (float) row * s * 0.9f - d * 0.5f, d, d);
+    }
+    else if (name == icons::through)
+    {
+        // A line passing through a ring, arrowhead on the way out.
+        const float rr = s * 0.55f;
+        g.drawEllipse(cx - rr, cy - rr, rr * 2.0f, rr * 2.0f, px);
+        g.drawLine(cx - s * 1.25f, cy, cx - rr, cy, px);
+        g.drawLine(cx + rr, cy, cx + s * 1.25f, cy, px);
+        juce::Path h;
+        h.startNewSubPath(cx + s * 0.85f, cy - s * 0.42f);
+        h.lineTo(cx + s * 1.27f, cy);
+        h.lineTo(cx + s * 0.85f, cy + s * 0.42f);
+        g.strokePath(h, st);
+    }
     else if (name == icons::dragOut)
     {
         // Arrow entering a tray: the clip leaving the browser for a DAW track.
@@ -479,19 +500,55 @@ int IconBtn::captionWidth() const
 void IconBtn::paintButton(juce::Graphics& g, bool over, bool down)
 {
     auto b = getLocalBounds().toFloat();
-    // No square chrome — toggles read through glyph colour only.
-    juce::ignoreUnused(ghost, headerChrome);
-
+    // Levels icon button: no chrome at rest (glyph @ 64 %), 7 % fill on hover,
+    // active = secondary border + 12 % tint with a secondary glyph.
+    juce::ignoreUnused(ghost);
+    const float face = ds::radius::sm;
     const juce::Colour litCol = activeTint.isTransparent() ? ds::acc() : activeTint;
+    if (solid)
+    {
+        const auto fill = (active && !activeTint.isTransparent()) ? activeTint : ds::primary();
+        g.setColour(isEnabled() ? (down ? fill.interpolatedWith(ds::bg(), 0.15f) : fill) : ds::surface300());
+        g.fillRoundedRectangle(b, ds::radius::md);
+    }
+    else if (outlined)
+    {
+        if (active && !activeTint.isTransparent())
+        {
+            g.setColour(activeTint);
+            g.fillRoundedRectangle(b, ds::radius::md);
+        }
+        else
+        {
+            g.setColour((over || down) ? ds::surface300() : ds::surface200());
+            g.fillRoundedRectangle(b, ds::radius::md);
+            g.setColour(ds::edge());
+            g.drawRoundedRectangle(b.reduced(0.5f), ds::radius::md, 1.0f);
+        }
+    }
+    else if (active && isEnabled())
+    {
+        ds::drawActive(g, b.reduced(0.5f), face);
+    }
+    else if ((over || down) && isEnabled())
+    {
+        g.setColour(ds::surface300());
+        g.fillRoundedRectangle(b, face);
+    }
     juce::Colour col;
-    if (!isEnabled())
-        col = ds::inkFaint();
+    if (solid)
+        col = (active && !activeTint.isTransparent()) ? juce::Colours::white : ds::onPrimary();
+    else if (outlined)
+        col = active ? juce::Colours::white : (activeTint.isTransparent() ? ds::ink() : activeTint);
+    else if (!isEnabled())
+        col = ds::inkFaint().withMultipliedAlpha(0.6f);
     else if (active)
-        col = down ? litCol.darker(0.12f) : litCol;
+        col = litCol;
     else if (over || down)
         col = ds::ink();
     else
-        col = headerChrome ? ds::inkMuted() : ds::ink();
+        col = ds::inkMuted();
+    juce::ignoreUnused(headerChrome);
 
     const float stroke = juce::jlimit(1.2f, 1.55f, 1.4f * contentScale());
     const float glyphPx = juce::jmin(b.getHeight() - 4.0f,
@@ -539,14 +596,24 @@ int ChipBtn::idealWidth() const
 
 void ChipBtn::paintButton(juce::Graphics& g, bool over, bool down)
 {
-    // Groove toggle / tag: square-ish (radius-sm), edge border when unlit, accent fill when lit.
+    // Levels chip: idle = surface + 18 % border; active = secondary border + 12 % tint
+    // (label stays text colour); primaryStyle = the solid primary action.
     auto b = getLocalBounds().toFloat();
-    const float r = ds::radius::sm;
+    const float r = primaryStyle ? ds::radius::md : ds::radius::sm;
 
-    if (active)
+    if (primaryStyle && isEnabled())
     {
-        g.setColour(down ? ds::acc().darker(0.12f) : ds::acc());
+        g.setColour(down ? ds::primary().interpolatedWith(ds::bg(), 0.15f) : ds::primary());
         g.fillRoundedRectangle(b, r);
+    }
+    else if (primaryStyle)
+    {
+        g.setColour(ds::surface300());
+        g.fillRoundedRectangle(b, r);
+    }
+    else if (active)
+    {
+        ds::drawActive(g, b, r);
     }
     else
     {
@@ -556,7 +623,7 @@ void ChipBtn::paintButton(juce::Graphics& g, bool over, bool down)
         g.drawRoundedRectangle(b.reduced(0.5f), r, 1.0f);
     }
 
-    juce::Colour col = active ? ds::onAccent()
+    juce::Colour col = (primaryStyle && isEnabled()) ? ds::onPrimary()
                      : accentText ? ds::acc()
                                   : ds::ink();
     if (!isEnabled())
@@ -604,13 +671,15 @@ void PillToggle::paintButton(juce::Graphics& g, bool over, bool down)
     const float r = b.getHeight() * 0.5f;
     const bool on = getToggleState();
 
-    juce::Colour fill = on ? colours::accentSoft() : colours::elev();
-    if (down) fill = fill.darker(0.1f);
-    else if (over) fill = fill.brighter(0.05f);
-    g.setColour(fill);
-    g.fillRoundedRectangle(b, r);
-    g.setColour(on ? colours::accentLine() : colours::line());
-    g.drawRoundedRectangle(b, r, 1.0f);
+    if (on)
+        ds::drawActive(g, b, r);
+    else
+    {
+        g.setColour(over || down ? ds::surface300() : ds::surface200());
+        g.fillRoundedRectangle(b, r);
+        g.setColour(ds::edge());
+        g.drawRoundedRectangle(b, r, 1.0f);
+    }
 
     auto area = getLocalBounds().reduced(10, 0);
     auto dot = area.removeFromLeft(8).toFloat().withSizeKeepingCentre(6.0f, 6.0f);
@@ -618,7 +687,7 @@ void PillToggle::paintButton(juce::Graphics& g, bool over, bool down)
     g.fillEllipse(dot);
     area.removeFromLeft(6);
 
-    g.setColour(on ? colours::accentBright() : colours::text2());
+    g.setColour(on ? colours::text() : colours::text2());
     g.setFont(uiFont(13.0f, true));
     g.drawFittedText(on ? onLabel : offLabel, area, juce::Justification::centredLeft, 1, 1.0f);
     if (hasKeyboardFocus(true))
@@ -646,10 +715,10 @@ void SegmentToggle::setIndex(int i, juce::NotificationType notify)
 
 int SegmentToggle::idealWidth() const
 {
-    const auto f = uiFont(11.0f, true);
+    const auto f = uiFont(12.0f, true);
     const float lw = juce::GlyphArrangement::getStringWidth(f, left);
     const float rw = juce::GlyphArrangement::getStringWidth(f, right);
-    return (int) std::ceil(lw + rw) + 36;
+    return (int) std::ceil(lw + rw) + 54;   // 2 px inset · 12 px label padding · 2 px gap
 }
 
 int SegmentToggle::hitIndex(juce::Point<int> p) const
@@ -679,43 +748,36 @@ void SegmentToggle::mouseExit(const juce::MouseEvent&)
 
 void SegmentToggle::paint(juce::Graphics& g)
 {
-    auto bounds = getLocalBounds().toFloat().reduced(0.5f);
-    const float r = ds::radius::sm;
-    const float mid = bounds.getX() + bounds.getWidth() * 0.5f;
-
-    auto paintSeg = [&](juce::Rectangle<float> seg, bool active, bool isHover, bool roundLeft, bool roundRight)
+    // Levels segmented control: 7 % track (radius-md, 2 px inset); the selected half is a
+    // surface thumb with an 18 % border and 600 label; the idle half is a 64 % label,
+    // with a 7 % hover fill.
+    auto bounds = getLocalBounds().toFloat();
+    g.setColour(ds::surface300());
+    g.fillRoundedRectangle(bounds, ds::radius::md);
+    auto inner = bounds.reduced(2.0f);
+    const float mid = inner.getX() + inner.getWidth() * 0.5f;
+    const auto leftSeg = inner.withRight(mid - 1.0f);
+    const auto rightSeg = inner.withLeft(mid + 1.0f);
+    auto paintSeg = [&](juce::Rectangle<float> seg, bool sel, bool hov, const juce::String& text)
     {
-        juce::Path path;
-        path.addRoundedRectangle(seg.getX(), seg.getY(), seg.getWidth(), seg.getHeight(),
-                                 r, r, roundLeft, roundRight, roundLeft, roundRight);
-        if (active)
+        if (sel)
         {
-            g.setColour(ds::acc());
-            g.fillPath(path);
+            g.setColour(ds::surface200());
+            g.fillRoundedRectangle(seg, ds::radius::sm);
+            g.setColour(ds::edge());
+            g.drawRoundedRectangle(seg.reduced(0.5f), ds::radius::sm, 1.0f);
         }
-        else
+        else if (hov)
         {
-            g.setColour(isHover ? ds::surface300() : ds::surface200());
-            g.fillPath(path);
+            g.setColour(ds::hoverWash());
+            g.fillRoundedRectangle(seg, ds::radius::sm);
         }
+        g.setFont(uiFont(12.0f, sel));
+        g.setColour(sel ? ds::ink() : ds::inkMuted());
+        g.drawText(text, seg.toNearestInt(), juce::Justification::centred, false);
     };
-
-    const auto leftSeg = bounds.withRight(mid);
-    const auto rightSeg = bounds.withLeft(mid);
-    paintSeg(leftSeg, index == 0, hover == 0, true, false);
-    paintSeg(rightSeg, index == 1, hover == 1, false, true);
-
-    g.setColour(ds::edge());
-    g.drawRoundedRectangle(bounds, r, 1.0f);
-    g.setColour(ds::line());
-    g.drawLine(mid, bounds.getY() + 2.0f, mid, bounds.getBottom() - 2.0f, 1.0f);
-
-    const auto f = uiFont(11.0f, true);
-    g.setFont(f);
-    g.setColour(index == 0 ? ds::onAccent() : ds::ink());
-    g.drawText(left, leftSeg.toNearestInt(), juce::Justification::centred, false);
-    g.setColour(index == 1 ? ds::onAccent() : ds::ink());
-    g.drawText(right, rightSeg.toNearestInt(), juce::Justification::centred, false);
+    paintSeg(leftSeg, index == 0, hover == 0, left);
+    paintSeg(rightSeg, index == 1, hover == 1, right);
 }
 
 // ── MiniSwitch ───────────────────────────────────────────────────────────────
@@ -751,14 +813,15 @@ void MiniSwitch::paintButton(juce::Graphics& g, bool over, bool down)
     row.removeFromLeft(7);
 
     auto track = row.removeFromLeft(26).toFloat().withSizeKeepingCentre(24.0f, 14.0f);
-    g.setColour(on ? colours::accent() : (over ? colours::elev().brighter(0.1f) : colours::elev()));
+    // Levels switch: secondary track when on, 18 % track when off; white knob.
+    g.setColour(on ? colours::accent() : (over ? ds::edge().darker(0.08f) : ds::edge()));
     g.fillRoundedRectangle(track, 7.0f);
-    g.setColour(on ? colours::accentInk() : colours::text3());
+    g.setColour(juce::Colours::white);
     const float kx = on ? track.getRight() - 12.0f : track.getX() + 2.0f;
     g.fillEllipse(kx, track.getCentreY() - 5.0f, 10.0f, 10.0f);
 
     row.removeFromLeft(6);
-    g.setColour(on ? colours::accentBright() : colours::text3());
+    g.setColour(on ? colours::text() : colours::text3());
     g.setFont(monoFont(13.0f, true));
     g.drawFittedText(on ? onText : offText, row, juce::Justification::centredLeft, 1, 1.0f);
     if (hasKeyboardFocus(true))
@@ -797,9 +860,11 @@ void Stepper::resized()
 void Stepper::paint(juce::Graphics& g)
 {
     auto mid = getLocalBounds().withTrimmedLeft(getHeight()).withTrimmedRight(getHeight());
-    g.setColour(colours::elev());
-    g.fillRoundedRectangle(mid.toFloat().reduced(1.0f, 2.0f), 4.0f);
-    g.setColour(value != 0 ? colours::accent() : colours::text2());
+    g.setColour(ds::surface200());
+    g.fillRoundedRectangle(mid.toFloat().reduced(1.0f, 2.0f), ds::radius::sm);
+    g.setColour(ds::edge());
+    g.drawRoundedRectangle(mid.toFloat().reduced(1.5f, 2.5f), ds::radius::sm, 1.0f);
+    g.setColour(value != 0 ? colours::text() : colours::text2());
     g.setFont(monoFont(14.0f, true));
     const juce::String text = format ? format(value)
                                      : (value > 0 ? "+" + juce::String(value) : juce::String(value));

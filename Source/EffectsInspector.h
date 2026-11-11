@@ -143,8 +143,8 @@ private:
     uint16_t candidateKeyMask = 0;
     uint16_t candidateModeMask = 0;
 
-    IconBtn btnReset { icons::undo, "Reset effects to defaults" };
-    IconBtn btnEffectsLock { icons::lockOpen, "Lock effects while browsing" };
+    IconBtn btnReset { icons::undo, "Reset Toolkit to defaults" };
+    IconBtn btnEffectsLock { icons::lockOpen, "Lock Toolkit while browsing" };
     juce::Rectangle<int> toolkitFoldBounds;
     juce::Rectangle<int> generatorsTabBounds, effectsTabBounds;
     IconBtn btnChanged { icons::foldRows, "Hide Unused" };

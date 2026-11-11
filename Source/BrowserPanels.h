@@ -615,13 +615,14 @@ inline juce::Colour kindClipColour(ClipKind k)
 {
     switch (k)
     {
-        case ClipKind::Drums: return ds::clip(1);
-        case ClipKind::Bass:  return ds::clip(6);
-        case ClipKind::Keys:  return ds::clip(7);
-        case ClipKind::Lead:  return ds::clip(5);
-        case ClipKind::Arp:   return ds::clip(3);
+        // Levels kind hues — status tokens only, no new colours.
+        case ClipKind::Drums: return ds::record();   // danger red
+        case ClipKind::Bass:  return ds::acc();      // secondary violet
+        case ClipKind::Keys:  return ds::play();     // success green
+        case ClipKind::Lead:  return ds::warning();  // warning amber
+        case ClipKind::Arp:   return ds::primary();  // primary neutral
     }
-    return ds::clip(6);
+    return ds::acc();
 }
 
 /** Grid browser: files as clip slots in one column per kind (Groove ClipSlot look). */

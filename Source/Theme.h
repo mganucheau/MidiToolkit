@@ -66,7 +66,7 @@ inline int migrateThemeIndex(int stored, bool themeCatalog)
 }
 
 /** Favorite / starred glyph — solid gold, independent of accent tint. */
-inline juce::Colour favoriteGold() { return juce::Colour(0xffe8b84a); }
+inline juce::Colour favoriteGold() { return ds::warning(); } // Levels amber
 enum class ScalePlacement { Top, Bottom };   // legacy; Pitch & Scale lives in inspector
 
 constexpr int kNumContentSizes = 3;

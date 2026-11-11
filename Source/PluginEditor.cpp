@@ -3241,7 +3241,7 @@ void MidiToolkitEditor::updateMiniPreview()
     const auto groove = selectedGroove();
     const auto resolved = resolveClip(*clip, edit, formSelectionIds());
     const int rootPc = edit.root >= 0 ? edit.root : (clip->root >= 0 ? clip->root : 0);
-    miniRoll.setNoteColour(kindClipColour(clip->kind));
+    miniRoll.setNoteColour(ds::primary()); // Levels: primary notes
     auto grooved = applyGroove(resolved.notes, groove, clip->complexity,
                                clip->kind, clip->root, edit.mode);
     if (edit.fitScale && edit.root >= 0)
@@ -4038,7 +4038,7 @@ public:
     std::function<void()> onSaveDefault;
 
     static constexpr int kTextPctChoices[] = { 70, 85, 100, 115, 130 };
-    static constexpr int kPanelW = 400;
+    static constexpr int kPanelW = 480; // Levels: settings max width
     static constexpr int kHeaderH = 44;
     static constexpr int kTabH = 28;
     static constexpr int kFooterH = 8;
@@ -4056,7 +4056,7 @@ public:
                                  juce::jlimit(0, 2, tweaks().appearance.load()));
         refreshThemePopup();
         sizePopup.setItems({ "Small", "Medium", "Large" }, tweaks().size.load());
-        fontPopup.setItems({ "Archivo", "System", "Helvetica Neue", "Avenir Next" },
+        fontPopup.setItems({ "Inter", "System", "Helvetica Neue", "Avenir Next" },
                            juce::jlimit(0, (int) FontFamily::Count - 1, tweaks().fontFamily.load()));
 
         juce::StringArray pctLabels;
@@ -4144,10 +4144,13 @@ public:
         themePopup.setItems(names, juce::jlimit(0, kNumThemesPerFamily - 1, sel));
     }
 
-    static int contentHeightForTab(int t)
+    int currentTab() const { return tab; }
+
+    static int contentHeightForTab(int t, bool narrow = false)
     {
+        // Narrow (< 360 px) stacks label over control, so rows are taller.
         const int header = kHeaderH + kTabH + 8 + kFooterH + 20;
-        const int rowH = 40 + 6;
+        const int rowH = (narrow ? 56 : 40) + 6;
         if (t == 0) return header + rowH + 8;
         if (t == 1) return header + rowH * 7 + 8; // appearance + theme + size..alt
         return header + 56;
@@ -4379,8 +4382,10 @@ void MidiToolkitEditor::showTweaksMenu()
             const int w = juce::jmin(SettingsPanel::kPanelW,
                                      juce::jmax(minW, getWidth() - margin * 2));
             const int availH = juce::jmax(minH, getHeight() - margin * 2);
-            const int contentH = panel.getHeight() > 0 ? panel.getHeight()
-                                                      : SettingsPanel::contentHeightForTab(1);
+            // Height follows the layout the panel will use at this width;
+            // capped to the window and scrolled when it doesn't fit.
+            const int contentH = SettingsPanel::contentHeightForTab(
+                panel.currentTab(), SettingsPanel::narrowWidth(w));
             const int h = juce::jmin(contentH, availH);
             view.setBounds(getLocalBounds().withSizeKeepingCentre(w, h));
             view.setScrollBarsShown(contentH > h, false);

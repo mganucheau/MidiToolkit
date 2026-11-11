@@ -348,14 +348,8 @@ void PianoRollEditor::setClip(const StepClip& c, const ClipEdit& e, const Groove
     const int prevBars = hasClip ? resolved.bars : -1;
     hasClip = true;
     clip = c;
-    switch (c.kind)
-    {
-        case ClipKind::Drums: noteColour = ds::clip(1); break;
-        case ClipKind::Bass:  noteColour = ds::clip(6); break;
-        case ClipKind::Keys:  noteColour = ds::clip(7); break;
-        case ClipKind::Lead:  noteColour = ds::clip(5); break;
-        case ClipKind::Arp:   noteColour = ds::clip(3); break;
-    }
+    // Levels: notes are primary at velocity opacity; selection is violet.
+    noteColour = ds::primary();
     edit = e;
     groove = k;
     rebuildResolved();

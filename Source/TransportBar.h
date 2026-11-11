@@ -156,7 +156,7 @@ private:
     IconBtn btnPassthrough { icons::arrowsIn, "Passthrough" };
     DragChip btnDragToDaw { "Drag Me" };
     IconBtn btnEditor { icons::noteKeys, "Piano Roll" };
-    IconBtn btnEffects { icons::knobs, "Effects" };
+    IconBtn btnEffects { icons::knobs, "Toolkit" };
     IconBtn btnSettings { icons::wrench, "Settings" };
     bool transportControlsVisible = true;
     bool compactChrome = false;

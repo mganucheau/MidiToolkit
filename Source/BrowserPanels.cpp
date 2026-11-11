@@ -58,9 +58,9 @@ inline SourceListPalette sl()
         ds::inkMuted(),     // text2
         ds::inkMuted(),     // text3
         ds::acc(),          // accent
-        ds::surface300(),   // selectWash (selected row)
+        ds::selsoft(),      // selectWash (selected row)
         ds::edge(),         // border
-        ds::acc(),          // gold (favorite star)
+        ds::warning(),      // gold (favorite star)
         juce::Colours::transparentBlack,
     };
 }
@@ -480,16 +480,13 @@ void FavoritesSidebar::FilterPanel::paint(juce::Graphics& g)
         auto track = switchBounds.toFloat();
         if (track.isEmpty()) return;
         const float radius = track.getHeight() * 0.5f;
-        g.setColour(on ? t.accent : t.tallWell);
+        // Levels switch: violet track when on, edge when off, white knob.
+        juce::ignoreUnused(t);
+        g.setColour(on ? ds::acc() : ds::edge());
         g.fillRoundedRectangle(track, radius);
-        if (!on)
-        {
-            g.setColour(t.controlHairline);
-            g.drawRoundedRectangle(track.reduced(0.5f), radius, 1.0f);
-        }
         const float knob = juce::jmax(8.0f, track.getHeight() - 4.0f);
         const float kx = on ? track.getRight() - knob - 2.0f : track.getX() + 2.0f;
-        g.setColour(on ? fx::onAccentColour() : t.headerText);
+        g.setColour(juce::Colours::white);
         g.fillEllipse(kx, track.getCentreY() - knob * 0.5f, knob, knob);
     };
 
@@ -720,12 +717,13 @@ void FavoritesSidebar::SearchQueryPanel::paint(juce::Graphics& g)
     auto well = queryWell.toFloat();
     if (!well.isEmpty())
     {
-        g.setColour(ds::surface300());
-        g.fillRoundedRectangle(well, ds::radius::sm);
+        // Levels field: surface, edge border, radius-md, 2px primary focus ring.
+        g.setColour(ds::surface200());
+        g.fillRoundedRectangle(well, ds::radius::md);
         g.setColour(ds::edge());
-        g.drawRoundedRectangle(well.reduced(0.5f), ds::radius::sm, 1.0f);
+        g.drawRoundedRectangle(well.reduced(0.5f), ds::radius::md, 1.0f);
         if (focused)
-            drawFocusRing(g, well, ds::radius::sm);
+            drawFocusRing(g, well, ds::radius::md);
     }
     auto iconArea = juce::Rectangle<float>(well.getX() + 5.0f, well.getY(), 10.0f, well.getHeight())
                         .withSizeKeepingCentre(10.0f, 10.0f);
@@ -733,9 +731,9 @@ void FavoritesSidebar::SearchQueryPanel::paint(juce::Graphics& g)
 
     if (saveVisible && !saveChipBounds.isEmpty())
     {
-        g.setColour(ds::acc());
+        g.setColour(ds::primary());
         g.fillRoundedRectangle(saveChipBounds.toFloat(), ds::radius::sm);
-        g.setColour(ds::onAccent());
+        g.setColour(ds::onPrimary());
         g.setFont(uiFontFixed(11.0f, true));
         g.drawText("Save", saveChipBounds, juce::Justification::centred, false);
     }
@@ -1794,7 +1792,12 @@ void FavoritesSidebar::paintRow(juce::Graphics& g, int rowIdx, const juce::Recta
         auto col = row.kind == RowKind::SavedDir ? ds::ink() : iconCol;
         if (isActive)
             col = (row.kind == RowKind::Starred || row.kind == RowKind::StarredFolders)
-                      ? favoriteGold() : ds::acc();
+                      ? favoriteGold() : ds::ink();
+        if (isActive)
+        {
+            g.setColour(ds::ink().withAlpha(0.07f));
+            g.fillRoundedRectangle(b.reduced(4.0f, 2.0f), ds::radius::md);
+        }
         else if (hovered)
             col = ds::ink();
         drawIcon(g, icon, b.withSizeKeepingCentre(glyph, glyph), col, kSidebarIconStroke);
@@ -1803,14 +1806,17 @@ void FavoritesSidebar::paintRow(juce::Graphics& g, int rowIdx, const juce::Recta
         return;
     }
 
-    // Expanded row: edge to edge, 1px line beneath; selected = surface-300 + label-strong.
+    // Levels sidebar row: current = 7% ink tint + violet dot, hover = 4%.
     if (isActive || hovered)
     {
-        g.setColour(isActive ? ds::surface300() : ds::surface200());
-        g.fillRect(r);
+        g.setColour(ds::ink().withAlpha(isActive ? 0.07f : 0.04f));
+        g.fillRoundedRectangle(r.toFloat().reduced(4.0f, 1.0f), ds::radius::md);
     }
-    g.setColour(ds::line());
-    g.fillRect(r.getX(), r.getBottom() - 1, r.getWidth(), 1);
+    if (isActive)
+    {
+        g.setColour(ds::acc());
+        g.fillEllipse((float) r.getRight() - 14.0f, (float) r.getCentreY() - 2.5f, 5.0f, 5.0f);
+    }
 
     auto textArea = r.reduced(sidebarRowPadX(), 0);
     const float glyph = 12.0f;
@@ -1835,7 +1841,8 @@ void FavoritesSidebar::paintRow(juce::Graphics& g, int rowIdx, const juce::Recta
 
 void FavoritesSidebar::paint(juce::Graphics& g)
 {
-    g.setColour(ds::surface100());
+    // Levels sidebar: ground with a 4% ink tint.
+    g.setColour(ds::surface200().overlaidWith(ds::ink().withAlpha(0.04f)));
     g.fillRect(getLocalBounds());
 
     g.setColour(ds::line());
@@ -2692,8 +2699,11 @@ void FileListPanel::paintRow(juce::Graphics& g, int displayIdx, juce::Rectangle<
     // Folder rows get a slightly cooler wash so they read as containers.
     if (isSelected)
     {
-        g.setColour(ds::acc());
+        // Levels selected row: violet tint + 2px violet leading bar, text stays ink.
+        g.setColour(ds::selsoft());
         g.fillRect(r);
+        g.setColour(ds::acc());
+        g.fillRect(r.getX(), r.getY(), 2, r.getHeight());
     }
     else if (e.isDirectory)
     {
@@ -2714,9 +2724,9 @@ void FileListPanel::paintRow(juce::Graphics& g, int displayIdx, juce::Rectangle<
     g.setColour(ds::line());
     g.fillRect(r.getX(), r.getBottom() - 1, r.getWidth(), 1);
 
-    const auto textCol = isSelected ? ds::onAccent() : ds::ink();
-    const auto metaCol = isSelected ? ds::onAccent() : ds::ink();
-    const auto mutedCol = isSelected ? ds::onAccent() : ds::inkMuted();
+    const auto textCol = ds::ink();
+    const auto metaCol = isSelected ? ds::ink() : ds::inkMuted();
+    const auto mutedCol = ds::inkMuted();
 
     auto cols = splitRowColumns(r);
     auto row = cols.name;
@@ -2727,20 +2737,18 @@ void FileListPanel::paintRow(juce::Graphics& g, int displayIdx, juce::Rectangle<
                         .withSizeKeepingCentre(kStarGlyph, kStarGlyph);
     // Favorite star for files and folders — filled stars are gold.
     {
-        const auto starCol = e.starred ? (isSelected ? ds::onAccent() : favoriteGold())
-                                       : (hoverStar ? textCol : (isSelected ? ds::onAccent().withAlpha(0.55f)
-                                                                            : ds::inkMuted()));
+        const auto starCol = e.starred ? favoriteGold()
+                                       : (hoverStar ? textCol : ds::inkMuted());
         drawIcon(g, e.starred ? icons::star : icons::starOutline, iconArea, starCol,
                  e.starred ? 1.6f : 1.35f);
     }
 
-    const auto nameFont = uiFontFixed(13.0f, isSelected);
+    const auto nameFont = uiFontFixed(13.0f, isSelected); // 600 when selected
     if (e.isDirectory)
     {
         auto folderArea = row.removeFromLeft(metrics::scaled(kIconW)).toFloat()
                               .withSizeKeepingCentre(13.0f, 13.0f);
-        drawIcon(g, icons::folder, folderArea,
-                 isSelected ? ds::onAccent() : ds::inkMuted(), 1.35f);
+        drawIcon(g, icons::folder, folderArea, ds::inkMuted(), 1.35f);
         g.setColour(textCol);
         g.setFont(nameFont);
         g.drawText(e.name, row, juce::Justification::centredLeft, true);
@@ -3526,42 +3534,37 @@ void KindGridView::paint(juce::Graphics& g)
                     const bool isSel = entryIdx == selected;
                     const bool isPlayingSel = isSel && playing;
 
-                    // Active clip uses accent wash so it reads apart from kind colour.
+                    // Levels: kind-tinted cell (kind hue at 10% over surface), ink text.
+                    // Selected = violet tint + 1.5px violet border; playing = success bar.
                     if (isSel)
-                        g.setColour(isPlayingSel ? ds::acc().brighter(0.08f) : ds::acc());
+                        g.setColour(ds::selsoft());
                     else
-                        g.setColour(clipCol);
+                        g.setColour(ds::surface200().overlaidWith(clipCol.withAlpha(0.10f)));
                     g.fillRect(inner);
 
                     if (isPlayingSel)
                     {
                         const float prog = juce::jlimit(0.0f, 1.0f, phase);
-                        g.setColour(ds::onAccent().withAlpha(0.18f));
-                        g.fillRect(inner.getX(), inner.getY(),
-                                   juce::roundToInt((float) inner.getWidth() * prog),
-                                   inner.getHeight());
-                        g.setColour(ds::onAccent());
+                        g.setColour(ds::play());
                         g.fillRect(inner.getX(), inner.getBottom() - 3,
                                    juce::roundToInt((float) inner.getWidth() * prog), 3);
                     }
 
                     const bool starred = e != nullptr && e->starred;
                     auto starR = starBoundsForCell(inner).toFloat();
-                    const auto starCol = isSel
-                        ? (starred ? ds::onAccent() : ds::onAccent().withAlpha(0.55f))
-                        : (starred ? favoriteGold() : ds::onClip().withAlpha(0.55f));
+                    const auto starCol = starred ? favoriteGold() : ds::inkMuted().withAlpha(0.7f);
                     drawIcon(g, starred ? icons::star : icons::starOutline, starR, starCol,
                              starred ? 1.6f : 1.35f);
 
-                    g.setColour(isSel ? ds::onAccent() : ds::onClip());
+                    g.setColour(ds::ink());
                     g.setFont(uiFontFixed(11.0f, isSel));
                     g.drawText(e != nullptr ? e->name : juce::String(),
                                inner.withTrimmedLeft(20).withTrimmedRight(4), juce::Justification::centredLeft, true);
 
                     if (isSel)
                     {
-                        g.setColour(ds::onAccent());
-                        g.drawRect(inner.toFloat().reduced(0.5f), 1.5f);
+                        g.setColour(ds::acc());
+                        g.drawRect(inner.toFloat().reduced(0.75f), 1.5f);
                     }
                 }
                 g.setColour(ds::line());
@@ -3570,15 +3573,15 @@ void KindGridView::paint(juce::Graphics& g)
         }
 
         auto head = colR.withHeight(headH);
-        g.setColour(ds::surface300());
+        g.setColour(ds::surface200());
         g.fillRect(head);
         g.setColour(clipCol);
-        g.fillRect(head.removeFromTop(2));
+        g.fillRect(head.removeFromTop(3));
         g.setColour(ds::line());
         g.fillRect(head.getX(), head.getBottom() - 1, head.getWidth(), 1);
         auto label = head.reduced(6, 0);
         g.setColour(ds::inkMuted());
-        g.setFont(monoFontFixed(11.0f));
+        g.setFont(monoFontFixed(12.0f));
         const auto count = juce::String((int) col.entries.size());
         g.drawText(count, label.removeFromRight(24), juce::Justification::centredRight, false);
         g.setColour(ds::ink());

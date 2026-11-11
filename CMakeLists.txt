@@ -245,6 +245,12 @@ juce_add_binary_data(MidiToolkitAssets
         Resources/Fonts/Archivo-Bold.ttf
         Resources/Fonts/IBMPlexMono-Regular.ttf
         Resources/Fonts/IBMPlexMono-Medium.ttf
+        Resources/Fonts/Inter-Regular.ttf
+        Resources/Fonts/Inter-Medium.ttf
+        Resources/Fonts/Inter-SemiBold.ttf
+        Resources/Fonts/Inter-Bold.ttf
+        Resources/Fonts/JetBrainsMono-Regular.ttf
+        Resources/Fonts/JetBrainsMono-Medium.ttf
 )
 
 set(MIDITOOLKIT_SOURCES

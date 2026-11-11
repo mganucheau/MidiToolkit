@@ -125,7 +125,7 @@ void drawInspectorDivider(juce::Graphics& g, juce::Rectangle<int> bounds)
     g.fillRect(bounds.getX(), bounds.getBottom() - 1, bounds.getWidth(), 1);
 }
 
-// ── Fonts (Groove Panel: Archivo for the interface, IBM Plex Mono for live values) ──
+// ── Fonts (Levels: Inter for the interface, JetBrains Mono for live values) ──
 
 namespace {
 
@@ -137,12 +137,12 @@ struct GrooveFaces
         {
             return juce::Typeface::createSystemTypefaceFor(data, (size_t) size);
         };
-        regular  = load(BinaryData::ArchivoRegular_ttf,    BinaryData::ArchivoRegular_ttfSize);
-        medium   = load(BinaryData::ArchivoMedium_ttf,     BinaryData::ArchivoMedium_ttfSize);
-        semibold = load(BinaryData::ArchivoSemiBold_ttf,   BinaryData::ArchivoSemiBold_ttfSize);
-        bold     = load(BinaryData::ArchivoBold_ttf,       BinaryData::ArchivoBold_ttfSize);
-        monoReg  = load(BinaryData::IBMPlexMonoRegular_ttf, BinaryData::IBMPlexMonoRegular_ttfSize);
-        monoMed  = load(BinaryData::IBMPlexMonoMedium_ttf,  BinaryData::IBMPlexMonoMedium_ttfSize);
+        regular  = load(BinaryData::InterRegular_ttf,         BinaryData::InterRegular_ttfSize);
+        medium   = load(BinaryData::InterMedium_ttf,          BinaryData::InterMedium_ttfSize);
+        semibold = load(BinaryData::InterSemiBold_ttf,        BinaryData::InterSemiBold_ttfSize);
+        bold     = load(BinaryData::InterBold_ttf,            BinaryData::InterBold_ttfSize);
+        monoReg  = load(BinaryData::JetBrainsMonoRegular_ttf, BinaryData::JetBrainsMonoRegular_ttfSize);
+        monoMed  = load(BinaryData::JetBrainsMonoMedium_ttf,  BinaryData::JetBrainsMonoMedium_ttfSize);
     }
     juce::Typeface::Ptr regular, medium, semibold, bold, monoReg, monoMed;
 };

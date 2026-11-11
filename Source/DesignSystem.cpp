@@ -20,83 +20,86 @@ juce::Colour rgba(juce::uint8 r, juce::uint8 g, juce::uint8 b, float a)
 
 const Palette& palette()
 {
-    // Groove Panel tokens (Studio Dark / Daylight), mapped onto the legacy slots.
-    // Hex lives only in this file.
+    // Levels design system (DESIGN.md) mapped onto the legacy slots.
+    // Light = Levels tokens; neutrals are opacity steps of text #111827 on surface #FFFFFF.
+    // Dark  = derived: ground = primary #27272A, text = surface #FFFFFF, same opacity steps.
+    // acc = secondary violet = the ACTIVE state (drawn as border + selsoft tint, never a fill
+    // behind text). Solid actions use primary() / onPrimary(). Hex lives only in this file.
     static const Palette light {
-        juce::Colour(0xffa3a3a3),   // bg        = surface-000
-        juce::Colour(0xffc9c9c9),   // chrome    = surface-100
-        juce::Colour(0xffc9c9c9),   // side      = surface-100
-        juce::Colour(0xffc9c9c9),   // panel     = surface-100
-        juce::Colour(0xffc9c9c9),   // rollchrome= surface-100
-        juce::Colour(0xff7d7d7d),   // hl        = line
-        juce::Colour(0xff111111),   // tx        = ink
-        juce::Colour(0xff3e3e3e),   // tx2       = ink-muted
-        juce::Colour(0xff3e3e3e),   // tx3       = ink-muted (readable labels)
-        juce::Colour(0xffb94e00),   // acc       = accent
-        rgba(185, 78, 0, 0.22f),    // selsoft
-        juce::Colour(0xffd8d8d8),   // ctl       = surface-200
-        juce::Colour(0xff6e6e6e),   // ctlb      = edge
-        juce::Colour(0xffebebeb),   // field     = surface-300
-        juce::Colour(0xff5e5e5e),   // trk       = ink-faint
-        rgba(0, 0, 0, 0.0f),        // rowalt    (hairlines, no zebra)
-        juce::Colour(0xff6fb5f0),   // note      = clip-6
-        juce::Colour(0xffb94e00),   // stron     = accent
-        juce::Colour(0xfff4f4f4),   // kw (white keys)
-        juce::Colour(0xff3e3e3e),   // kb (black keys)
-        rgba(0, 0, 0, 0.10f),       // laneb
-        rgba(0, 0, 0, 0.16f),       // beat
-        juce::Colour(0xffff7a6b),   // kindDrums = clip-1
-        juce::Colour(0xff6fb5f0),   // kindBass  = clip-6
-        juce::Colour(0xffb99af2),   // kindKeys  = clip-7
-        juce::Colour(0xffffa64d),   // kindPerc  = clip-2
-        juce::Colour(0xff7d7d7d),   // winbrd    = line
-        rgba(0, 0, 0, 0.06f),       // hoverWash
-        juce::Colour(0xffebebeb),   // head      = surface-300
-        juce::Colour(0xffd8d8d8),   // well      = surface-200
-        rgba(185, 78, 0, 0.28f),    // kfInW
-        rgba(185, 78, 0, 0.70f),    // kfInB
-        juce::Colour(0xffd8d8d8),   // kfOutW
-        juce::Colour(0xff7d7d7d),   // kfOutB
-        juce::Colour(0xffd8d8d8),   // lensFill
-        juce::Colour(0xffb94e00),   // logoNoteHi
+        juce::Colour(0xffffffff),   // bg        = surface
+        juce::Colour(0xffffffff),   // chrome    = surface
+        juce::Colour(0xfff6f6f6),   // side      = text @ 4 %
+        juce::Colour(0xffffffff),   // panel     = surface
+        juce::Colour(0xfffafafb),   // rollchrome= text @ 2 %
+        juce::Colour(0xffe7e8e9),   // hl        = text @ 10 %
+        juce::Colour(0xff111827),   // tx        = text
+        juce::Colour(0xff676b75),   // tx2       = text @ 64 %
+        juce::Colour(0xff676b75),   // tx3       = text @ 64 % (lowest text step)
+        juce::Colour(0xff8b5cf6),   // acc       = secondary (active)
+        juce::Colour(0xfff1ebfe),   // selsoft   = secondary @ 12 %
+        juce::Colour(0xffffffff),   // ctl       = surface
+        juce::Colour(0xffd4d5d8),   // ctlb      = text @ 18 %
+        juce::Colour(0xffffffff),   // field     = surface
+        juce::Colour(0xffd4d5d8),   // trk       = text @ 18 %
+        rgba(17, 24, 39, 0.03f),    // rowalt
+        juce::Colour(0xff27272a),   // note      = primary
+        juce::Colour(0xffd97706),   // stron     = warning (stars)
+        juce::Colour(0xffffffff),   // kw
+        juce::Colour(0xff27272a),   // kb        = primary
+        rgba(17, 24, 39, 0.04f),    // laneb
+        juce::Colour(0xffdedfe1),   // beat      = text @ 14 %
+        juce::Colour(0xffdc2626),   // kindDrums = danger
+        juce::Colour(0xff8b5cf6),   // kindBass  = secondary
+        juce::Colour(0xff16a34a),   // kindKeys  = success
+        juce::Colour(0xffd97706),   // kindPerc  = warning (Lead)
+        juce::Colour(0xffd4d5d8),   // winbrd    = text @ 18 %
+        rgba(17, 24, 39, 0.07f),    // hoverWash
+        juce::Colour(0xffffffff),   // head      = surface (flat section headers)
+        juce::Colour(0xfff6f6f6),   // well      = text @ 4 %
+        juce::Colour(0xff27272a),   // kfInW     = primary (in key)
+        juce::Colour(0xff27272a),   // kfInB
+        juce::Colour(0xffffffff),   // kfOutW
+        juce::Colour(0xffd4d5d8),   // kfOutB
+        juce::Colour(0xfff6f6f6),   // lensFill
+        juce::Colour(0xff8b5cf6),   // logoNoteHi
     };
     static const Palette dark {
-        juce::Colour(0xff141414),   // bg        = surface-000
-        juce::Colour(0xff232323),   // chrome    = surface-100
-        juce::Colour(0xff232323),   // side      = surface-100
-        juce::Colour(0xff232323),   // panel     = surface-100
-        juce::Colour(0xff232323),   // rollchrome= surface-100
-        juce::Colour(0xff0a0a0a),   // hl        = line
-        juce::Colour(0xffececec),   // tx        = ink
-        juce::Colour(0xffa8a8a8),   // tx2       = ink-muted
-        juce::Colour(0xffa8a8a8),   // tx3       = ink-muted (readable labels)
-        juce::Colour(0xffff8b3d),   // acc       = accent
-        rgba(255, 139, 61, 0.24f),  // selsoft
-        juce::Colour(0xff2e2e2e),   // ctl       = surface-200
-        juce::Colour(0xff808080),   // ctlb      = edge
-        juce::Colour(0xff3a3a3a),   // field     = surface-300
-        juce::Colour(0xff7a7a7a),   // trk       = ink-faint
-        rgba(0, 0, 0, 0.0f),        // rowalt
-        juce::Colour(0xff6fb5f0),   // note      = clip-6
-        juce::Colour(0xffff8b3d),   // stron     = accent
-        juce::Colour(0xffa8a8a8),   // kw        = ink-muted
-        juce::Colour(0xff141414),   // kb        = surface-000
-        rgba(0, 0, 0, 0.22f),       // laneb
-        rgba(0, 0, 0, 0.28f),       // beat
-        juce::Colour(0xffff7a6b),   // kindDrums = clip-1
-        juce::Colour(0xff6fb5f0),   // kindBass  = clip-6
-        juce::Colour(0xffb99af2),   // kindKeys  = clip-7
-        juce::Colour(0xffffa64d),   // kindPerc  = clip-2
-        juce::Colour(0xff0a0a0a),   // winbrd    = line
-        rgba(255, 255, 255, 0.05f), // hoverWash
-        juce::Colour(0xff3a3a3a),   // head      = surface-300
-        juce::Colour(0xff2e2e2e),   // well      = surface-200
-        rgba(255, 139, 61, 0.28f),  // kfInW
-        rgba(255, 139, 61, 0.70f),  // kfInB
-        juce::Colour(0xff3a3a3a),   // kfOutW
-        juce::Colour(0xff7a7a7a),   // kfOutB
-        juce::Colour(0xff2e2e2e),   // lensFill
-        juce::Colour(0xffff8b3d),   // logoNoteHi
+        juce::Colour(0xff27272a),   // bg        = primary
+        juce::Colour(0xff27272a),   // chrome
+        juce::Colour(0xff303033),   // side      = white @ 4 %
+        juce::Colour(0xff27272a),   // panel
+        juce::Colour(0xff2b2b2e),   // rollchrome= white @ 2 %
+        juce::Colour(0xff3d3d3f),   // hl        = white @ 10 %
+        juce::Colour(0xffffffff),   // tx        = surface
+        juce::Colour(0xffb1b1b2),   // tx2       = white @ 64 %
+        juce::Colour(0xffb1b1b2),   // tx3
+        juce::Colour(0xff8b5cf6),   // acc       = secondary
+        juce::Colour(0xff3d3357),   // selsoft   = secondary @ 22 %
+        juce::Colour(0xff27272a),   // ctl
+        juce::Colour(0xff4e4e50),   // ctlb      = white @ 18 %
+        juce::Colour(0xff27272a),   // field
+        juce::Colour(0xff4e4e50),   // trk
+        rgba(255, 255, 255, 0.03f), // rowalt
+        juce::Colour(0xffffffff),   // note      = surface (white notes)
+        juce::Colour(0xffd97706),   // stron
+        juce::Colour(0xff2e2e31),   // kw
+        juce::Colour(0xff5b5b5e),   // kb        = white @ 24 %
+        rgba(255, 255, 255, 0.05f), // laneb
+        juce::Colour(0xff454548),   // beat      = white @ 14 %
+        juce::Colour(0xffdc2626),   // kindDrums
+        juce::Colour(0xff8b5cf6),   // kindBass
+        juce::Colour(0xff16a34a),   // kindKeys
+        juce::Colour(0xffd97706),   // kindPerc
+        juce::Colour(0xff4e4e50),   // winbrd
+        rgba(255, 255, 255, 0.07f), // hoverWash
+        juce::Colour(0xff27272a),   // head
+        juce::Colour(0xff303033),   // well
+        juce::Colour(0xffffffff),   // kfInW
+        juce::Colour(0xffffffff),   // kfInB
+        juce::Colour(0xff27272a),   // kfOutW
+        juce::Colour(0xff4e4e50),   // kfOutB
+        juce::Colour(0xff303033),   // lensFill
+        juce::Colour(0xff8b5cf6),   // logoNoteHi
     };
 
     auto tinted = [](const Palette& src)
@@ -134,22 +137,25 @@ const Palette& palette()
         return tintForTheme(base); \
     }
 
-GP_TOKEN(surface000, 0xff141414, 0xffa3a3a3)
-GP_TOKEN(surface100, 0xff232323, 0xffc9c9c9)
-GP_TOKEN(surface200, 0xff2e2e2e, 0xffd8d8d8)
-GP_TOKEN(surface300, 0xff3a3a3a, 0xffebebeb)
-GP_TOKEN(line,       0xff0a0a0a, 0xff7d7d7d)
-GP_TOKEN(edge,       0xff808080, 0xff6e6e6e)
-GP_TOKEN(ink,        0xffececec, 0xff111111)
-GP_TOKEN(inkMuted,   0xffa8a8a8, 0xff3e3e3e)
-GP_TOKEN(inkFaint,   0xff7a7a7a, 0xff5e5e5e)
-juce::Colour onAccent() { return juce::Colour(usesDarkAppearance() ? (juce::uint32) 0xff141414 : (juce::uint32) 0xffffffff); }
-GP_TOKEN(play,       0xff7ad35a, 0xff2c7a1c)
-GP_TOKEN(record,     0xffff5b52, 0xffc0241a)
-GP_TOKEN(solo,       0xff5cb3ff, 0xff1d62b5)
-GP_TOKEN(active,     0xfff2cd3a, 0xff7d6300)
-juce::Colour onLit() { return juce::Colour(usesDarkAppearance() ? (juce::uint32) 0xff141414 : (juce::uint32) 0xffffffff); }
-GP_TOKEN(focus,      0xffececec, 0xff111111)
+GP_TOKEN(surface000, 0xff27272a, 0xffffffff)   // ground
+GP_TOKEN(surface100, 0xff303033, 0xfff6f6f6)   // text/white @ 4 % (sidebar, wells)
+GP_TOKEN(surface200, 0xff27272a, 0xffffffff)   // control face = surface
+GP_TOKEN(surface300, 0xff363639, 0xffeeeff0)   // hover = text/white @ 7 %
+GP_TOKEN(line,       0xff3d3d3f, 0xffe7e8e9)   // @ 10 %
+GP_TOKEN(edge,       0xff4e4e50, 0xffd4d5d8)   // @ 18 %
+GP_TOKEN(ink,        0xffffffff, 0xff111827)   // text
+GP_TOKEN(inkMuted,   0xffb1b1b2, 0xff676b75)   // @ 64 %
+GP_TOKEN(inkFaint,   0xffb1b1b2, 0xff676b75)   // @ 64 % (lowest text step)
+juce::Colour onAccent() { return juce::Colour(0xffffffff); }
+GP_TOKEN(play,       0xff16a34a, 0xff16a34a)   // success: playhead, previewing
+GP_TOKEN(record,     0xffdc2626, 0xffdc2626)   // danger
+GP_TOKEN(solo,       0xff8b5cf6, 0xff8b5cf6)   // secondary
+GP_TOKEN(active,     0xffd97706, 0xffd97706)   // warning
+juce::Colour onLit() { return juce::Colour(0xffffffff); }
+GP_TOKEN(focus,      0xffffffff, 0xff27272a)   // 2 px primary ring
+GP_TOKEN(primary,    0xffffffff, 0xff27272a)   // solid actions: Play, Drag Me, active New
+GP_TOKEN(onPrimary,  0xff27272a, 0xffffffff)
+GP_TOKEN(warning,    0xffd97706, 0xffd97706)
 
 #undef GP_TOKEN
 
@@ -162,6 +168,14 @@ juce::Colour clip(int n)
 
 juce::Colour onClip() { return juce::Colour(0xff141414); }
 
+void drawActive(juce::Graphics& g, juce::Rectangle<float> r, float radius)
+{
+    g.setColour(selsoft());
+    g.fillRoundedRectangle(r, radius);
+    g.setColour(acc());
+    g.drawRoundedRectangle(r.reduced(0.5f), radius, 1.0f);
+}
+
 namespace shadow {
 
 // Groove Panel: nothing docked casts a shadow. Kept as no-ops so call sites compile.
@@ -170,19 +184,21 @@ void card(juce::Graphics&, juce::Rectangle<float>, float) {}
 
 void popover(juce::Graphics& g, juce::Rectangle<float> r, float radius)
 {
-    // shadow-popover: 0 4px 12px rgba(0,0,0,.6 dark / .25 light)
-    const bool d = usesDarkAppearance();
-    juce::DropShadow(juce::Colours::black.withAlpha(d ? 0.60f : 0.25f), 12, { 0, 4 })
-        .drawForRectangle(g, r.getSmallestIntegerContainer());
-    g.setColour(line());
+    // Levels: no drop shadows. A popover separates by its 18 % border and surface fill.
+    juce::ignoreUnused(g, r, radius);
+    g.setColour(edge());
     g.drawRoundedRectangle(r.reduced(0.5f), radius, 1.0f);
 }
 
 void thumb(juce::Graphics& g, juce::Rectangle<float> thumb)
 {
-    // Groove handle: a solid ink block with radius-sm, no border needed in either theme.
-    g.setColour(ink());
-    g.fillRoundedRectangle(thumb, 2.0f);
+    // Levels handle: 12 px surface disc with a 2 px primary ring, no shadow.
+    const float d = juce::jlimit(10.0f, 14.0f, juce::jmin(thumb.getWidth(), thumb.getHeight()));
+    const auto c = juce::Rectangle<float>(d, d).withCentre(thumb.getCentre());
+    g.setColour(surface200());
+    g.fillEllipse(c);
+    g.setColour(primary());
+    g.drawEllipse(c.reduced(1.0f), 2.0f);
 }
 
 } // namespace shadow
@@ -192,15 +208,15 @@ juce::Font font(Type t)
     // Groove Panel type scale (label 11 / body 12 / title 13 / readout 11 mono / readout-lg 15 mono).
     switch (t)
     {
-        case Type::AppName:        return uiFontFixed(13.0f, true);
-        case Type::PanelHeading:   return uiFontFixed(13.0f, true);   // title
-        case Type::SectionLabel:   return uiFontFixed(11.0f, false);  // label
-        case Type::TableHeader:    return uiFontFixed(11.0f, false);  // label
+        case Type::AppName:        return uiFontFixed(14.0f, true);
+        case Type::PanelHeading:   return uiFontFixed(14.0f, true);   // Levels 14 / 600
+        case Type::SectionLabel:   return monoFontFixed(12.0f).withExtraKerningFactor(0.03f);  // label-caps
+        case Type::TableHeader:    return monoFontFixed(12.0f).withExtraKerningFactor(0.03f);  // label-caps
         case Type::Body:           return uiFontFixed(12.0f, false);  // body
-        case Type::Metadata:       return monoFontFixed(11.0f);       // readout
-        case Type::Caption:        return uiFontFixed(11.0f, false);  // label
-        case Type::NumericDisplay: return monoFontFixed(15.0f);       // readout-lg
-        case Type::Logo:           return grooveFont(14.0f * textIconScale(), 700).withExtraKerningFactor(-0.01f);
+        case Type::Metadata:       return monoFontFixed(12.0f);       // readout
+        case Type::Caption:        return uiFontFixed(12.0f, false);  // label
+        case Type::NumericDisplay: return monoFontFixed(14.0f, true); // BPM readout
+        case Type::Logo:           return grooveFont(14.0f * textIconScale(), 600).withExtraKerningFactor(-0.01f);
     }
     return uiFontFixed(12.0f, false);
 }

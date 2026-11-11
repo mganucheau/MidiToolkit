@@ -5,7 +5,7 @@ namespace pflow {
 namespace {
 constexpr float kHeaderIconScale = 1.0f;
 
-constexpr int kBtnH = 24;
+constexpr int kBtnH = 28;   // Levels: 28 px header controls
 }
 
 // ── StatusPill ───────────────────────────────────────────────────────────────
@@ -19,14 +19,23 @@ void TransportBar::StatusPill::setText(const juce::String& t)
 
 void TransportBar::StatusPill::paint(juce::Graphics& g)
 {
-    // Groove position box: surface-300, edge border, radius-sm; readout-lg value + "BPM" label.
+    // Levels tempo readout: surface + 18 % border (radius-md), sits flush right of the Sync
+    // toggle so the two read as one group. Editing = 2 px primary inner ring.
     auto r = getLocalBounds().toFloat();
-    g.setColour(ds::surface300());
-    g.fillRoundedRectangle(r, ds::radius::sm);
-    g.setColour((editable && (isMouseOverOrDragging() || editing)) ? ds::acc() : ds::edge());
-    g.drawRoundedRectangle(r.reduced(0.5f), ds::radius::sm, 1.0f);
+    g.setColour(ds::surface200());
+    g.fillRoundedRectangle(r, ds::radius::md);
+    if (editable && editing)
+    {
+        g.setColour(ds::primary());
+        g.drawRoundedRectangle(r.reduced(1.0f), ds::radius::md, 2.0f);
+    }
+    else
+    {
+        g.setColour((editable && isMouseOverOrDragging()) ? ds::inkMuted() : ds::edge());
+        g.drawRoundedRectangle(r.reduced(0.5f), ds::radius::md, 1.0f);
+    }
 
-    auto inner = r.reduced(6.0f, 0.0f);
+    auto inner = r.reduced(10.0f, 0.0f);
     const auto shownText = editing ? editBuffer + "|"
                                    : text.upToFirstOccurrenceOf(" ", false, false);
     const auto valueFont = ds::font(ds::Type::NumericDisplay);
@@ -35,7 +44,7 @@ void TransportBar::StatusPill::paint(juce::Graphics& g)
     const float valueW = juce::GlyphArrangement::getStringWidth(valueFont, shownText) + 4.0f;
     g.drawText(shownText, inner.removeFromLeft(valueW), juce::Justification::centredLeft, false);
     g.setColour(ds::inkMuted().withMultipliedAlpha(foregroundAlpha));
-    g.setFont(uiFontFixed(11.0f, false));
+    g.setFont(monoFontFixed(12.0f));
     g.drawText("BPM", inner, juce::Justification::centredLeft, false);
     if (hasKeyboardFocus(false))
         drawFocusRing(g, r, ds::radius::sm);
@@ -153,43 +162,42 @@ int TransportBar::DragChip::idealWidth() const
 {
     const float sc = juce::jmax(0.5f, contentScale());
     if (iconOnly)
-        return juce::roundToInt(8.0f * sc) * 2 + juce::roundToInt(12.0f * sc);
+        return juce::roundToInt(8.0f * sc) * 2 + juce::roundToInt(14.0f * sc);
     const juce::String label = getButtonText().isNotEmpty() ? getButtonText() : "Drag Me";
-    const int textW = (int) std::ceil(juce::GlyphArrangement::getStringWidth(uiFont(11.0f, true), label)) + 2;
-    return juce::roundToInt(8.0f * sc) * 2 + juce::roundToInt(10.0f * sc) + juce::roundToInt(4.0f * sc) + textW;
+    const int textW = (int) std::ceil(juce::GlyphArrangement::getStringWidth(uiFont(12.0f, true), label)) + 2;
+    return juce::roundToInt(12.0f * sc) * 2 + juce::roundToInt(14.0f * sc) + juce::roundToInt(8.0f * sc) + textW;
 }
 
 void TransportBar::DragChip::paintButton(juce::Graphics& g, bool over, bool down)
 {
     auto face = getLocalBounds().toFloat();
-    // Warm amber — distinct from Effects / Settings chrome so the drag handle stands out.
-    const auto gold = juce::Colour(0xffe8b84a);
-    const auto fill = over || down ? gold.brighter(0.08f) : gold;
+    // Levels primary action: solid primary fill, radius-md, six-dot grip + "Drag Me".
+    const auto base = ds::primary();
+    const auto fill = down ? base.interpolatedWith(ds::bg(), 0.15f) : base;
+    juce::ignoreUnused(over);
     g.setColour(fill.withMultipliedAlpha(foregroundAlpha));
-    g.fillRoundedRectangle(face, ds::radius::sm);
-    g.setColour(gold.darker(0.25f).withMultipliedAlpha(foregroundAlpha));
-    g.drawRoundedRectangle(face.reduced(0.5f), ds::radius::sm, 1.0f);
+    g.fillRoundedRectangle(face, ds::radius::md);
 
     const float sc = juce::jmax(0.5f, contentScale());
-    const auto ink = gold.contrasting(0.9f).withMultipliedAlpha(foregroundAlpha);
+    const auto ink = ds::onPrimary().withMultipliedAlpha(foregroundAlpha);
     if (iconOnly)
     {
-        auto glyph = face.withSizeKeepingCentre(12.0f * sc, 12.0f * sc);
-        drawIcon(g, icons::dragOut, glyph, ink, 1.3f);
+        auto glyph = face.withSizeKeepingCentre(14.0f * sc, 14.0f * sc);
+        drawIcon(g, icons::grip, glyph, ink, 1.3f);
     }
     else
     {
-        auto inner = face.reduced(8.0f * sc, 0.0f);
-        auto glyph = inner.removeFromLeft(10.0f * sc).withSizeKeepingCentre(10.0f * sc, 10.0f * sc);
-        drawIcon(g, icons::dragOut, glyph, ink, 1.3f);
-        inner.removeFromLeft(4.0f * sc);
-        g.setFont(uiFont(11.0f, true));
+        auto inner = face.reduced(12.0f * sc, 0.0f);
+        auto glyph = inner.removeFromLeft(14.0f * sc).withSizeKeepingCentre(14.0f * sc, 14.0f * sc);
+        drawIcon(g, icons::grip, glyph, ink, 1.3f);
+        inner.removeFromLeft(8.0f * sc);
+        g.setFont(uiFont(12.0f, true));
         g.setColour(ink);
         const juce::String label = getButtonText().isNotEmpty() ? getButtonText() : "Drag Me";
         g.drawText(label, inner, juce::Justification::centredLeft, false);
     }
     if (hasKeyboardFocus(true))
-        drawFocusRing(g, face, ds::radius::sm);
+        drawFocusRing(g, face, ds::radius::md);
 }
 
 // ── TransportBar ─────────────────────────────────────────────────────────────
@@ -206,6 +214,7 @@ TransportBar::TransportBar()
     // Play and stop share one button: play glyph while stopped, stop glyph while playing.
     prep(btnPlay);
     btnPlay.activeTint = ds::play();
+    btnPlay.solid = true;         // Levels: the one solid transport control
     btnPlay.setTooltip("Play preview (Space)");
     btnPlay.onClick = [this]
     {
@@ -219,6 +228,7 @@ TransportBar::TransportBar()
 
     prep(btnRecord);
     btnRecord.activeTint = ds::record();
+    btnRecord.outlined = true;    // Levels: outline with a danger dot
     btnRecord.setTooltip("Record MIDI input");
     btnRecord.onClick = [this] { if (onToggleRecord) onToggleRecord(); };
     addAndMakeVisible(btnRecord);
@@ -243,7 +253,8 @@ TransportBar::TransportBar()
 
     prep(btnPassthrough);
     btnPassthrough.setComponentID("btnPassthrough");
-    btnPassthrough.setTooltip("Passthrough: effect mode — transform MIDI in, no file/generator playback (P)");
+    btnPassthrough.icon = icons::through;
+    btnPassthrough.setTooltip("Through: live MIDI input runs through the Toolkit — no file/generator playback (P)");
     btnPassthrough.onClick = [this] { if (onTogglePassthrough) onTogglePassthrough(); };
     addAndMakeVisible(btnPassthrough);
 
@@ -261,7 +272,7 @@ TransportBar::TransportBar()
     addAndMakeVisible(btnEditor);
 
     prep(btnEffects);
-    btnEffects.setTooltip("Effects (F)");
+    btnEffects.setTooltip("Toolkit (F)");
     btnEffects.onClick = [this] { if (onToggleEffects) onToggleEffects(); };
     addAndMakeVisible(btnEffects);
 
@@ -676,6 +687,9 @@ void TransportBar::resized()
     statusPill.setVisible(showBpm);
     if (showBpm)
     {
+        // Levels tempo group: Sync toggle flush against the BPM readout.
+        btnSync.setBounds(x, y, btn, btn);
+        x += btn + tight;
         statusPill.setBounds(x, y, pillW, btn);
         x += pillW + groupGap;
     }
@@ -702,7 +716,11 @@ void TransportBar::resized()
         btnPlay.setBounds({});
         btnRecord.setBounds({});
     }
-    btnSync.setBounds(x, y, btn, btn);                x += btn + tight;
+    if (!showBpm)
+    {
+        btnSync.setBounds(x, y, btn, btn);
+        x += btn + tight;
+    }
     if (btnPassthrough.isVisible())
         btnPassthrough.setBounds(x, y, btn, btn);
     else
@@ -739,8 +757,8 @@ void TransportBar::resized()
 
 void TransportBar::paint(juce::Graphics& g)
 {
-    // Header: surface-100 with a 1px line beneath. No grouped faces or dividers.
-    g.setColour(ds::surface100());
+    // Levels header: surface with a 10 % hairline beneath. No grouped faces.
+    g.setColour(ds::bg());
     g.fillRect(getLocalBounds());
     g.setColour(ds::line());
     g.fillRect(0, getHeight() - 1, getWidth(), 1);

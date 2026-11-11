@@ -48,12 +48,12 @@ inline int toolkitBodyPadB()         { return toolkitDensity(8); }
     fails and white type needs a deeper fill. */
 inline juce::Colour accentFillColour()
 {
-    return ds::acc();   // Groove: lit = accent, text on it = on-accent
+    return ds::primary();   // Levels: lit = primary, text on it = on-primary
 }
 
 inline juce::Colour onAccentColour()
 {
-    return ds::onAccent();
+    return ds::onPrimary();
 }
 
 inline juce::Font inspectorFont(bool semibold = false) { return uiFontFixed(kFontPt, semibold); }
@@ -61,8 +61,9 @@ inline juce::Font inspectorMono(bool semibold = false) { return monoFontFixed(kF
 inline juce::Font popupFont(bool semibold = false) { return uiFontFixed(kPopupFontPt, semibold); }
 inline juce::Font sectionTitleFont()
 {
-    auto f = uiFontFixed(kSectionTitlePt, true);
-    f.setExtraKerningFactor(0.07f);
+    // Levels section label: mono 12, caps, slight tracking.
+    auto f = monoFontFixed(12.0f, true);
+    f.setExtraKerningFactor(0.04f);
     return f;
 }
 inline juce::Font paneTitleFont() { return uiFontFixed(kPaneTitlePt, true); }
@@ -73,10 +74,11 @@ inline void fillTallWell(juce::Graphics& g, juce::Rectangle<float> r, bool hot,
     // Groove field: surface-300, edge border (accent while hot), radius-sm.
     // Tip highlight paints the same amber as the tooltip bubble.
     const bool tipHot = tipSource != nullptr && hasTooltipHighlight(tipSource);
-    g.setColour(tipHot ? tooltipAccent() : ds::surface300());
+    // Levels field: surface, edge border (primary while hot), radius-sm.
+    g.setColour(tipHot ? tooltipAccent() : ds::surface200());
     g.fillRoundedRectangle(r, ds::radius::sm);
-    g.setColour(tipHot ? juce::Colour(0xff5a3a00) : (hot ? ds::acc() : ds::edge()));
-    g.drawRoundedRectangle(r.reduced(0.5f), ds::radius::sm, 1.0f);
+    g.setColour(tipHot ? ds::warning().darker(0.6f) : (hot ? ds::primary() : ds::edge()));
+    g.drawRoundedRectangle(r.reduced(0.5f), ds::radius::sm, hot ? 1.5f : 1.0f);
 }
 
 inline void drawCaretDown(juce::Graphics& g, juce::Rectangle<float> area, juce::Colour colour)
@@ -147,14 +149,20 @@ public:
     {
         const auto& t = inspectorTokens();
         auto r = getLocalBounds().toFloat();
-        if (active)
+        if (active && primaryStyle)
         {
-            auto fill = accentFillColour();
-            if (down) fill = fill.darker(0.08f);
-            else if (over) fill = fill.brighter(0.06f);
+            auto fill = ds::primary();
+            if (down) fill = fill.withMultipliedAlpha(0.85f);
+            else if (over) fill = fill.withMultipliedAlpha(0.92f);
             g.setColour(fill);
-            g.fillRoundedRectangle(r, metrics::controlRadius);
-            g.setColour(onAccentColour());
+            g.fillRoundedRectangle(r, ds::radius::md);
+            g.setColour(ds::onPrimary());
+        }
+        else if (active)
+        {
+            // Levels active: violet tint + 1px violet border, label stays ink.
+            ds::drawActive(g, r, ds::radius::md);
+            g.setColour(ds::ink());
         }
         else
         {
@@ -177,6 +185,7 @@ public:
 
     juce::String label;
     bool active = false;
+    bool primaryStyle = false; // solid primary when active (main action)
 };
 
 // ── FlatSwitch ───────────────────────────────────────────────────────────────
@@ -192,27 +201,26 @@ public:
 
     void paintButton(juce::Graphics& g, bool, bool) override
     {
-        // Groove toggle: "On" lit in accent, "Off" on the unlit face.
+        // Levels switch: 28x16 pill, violet track when on, edge when off,
+        // white knob.
         const bool on = getToggleState();
         const bool tipHot = hasTooltipHighlight(this);
-        auto face = getLocalBounds().toFloat().withSizeKeepingCentre(36.0f, 18.0f);
-        g.setColour(tipHot ? tooltipAccent()
-                           : (on ? ds::acc() : (isMouseOver() ? ds::surface300() : ds::surface200())));
-        g.fillRoundedRectangle(face, ds::radius::sm);
-        if (!on && !tipHot)
-        {
-            g.setColour(ds::edge());
-            g.drawRoundedRectangle(face.reduced(0.5f), ds::radius::sm, 1.0f);
-        }
-        g.setColour(tipHot ? juce::Colour(0xff1a1200)
-                           : (on ? ds::onAccent() : (isEnabled() ? ds::ink() : ds::inkFaint())));
-        g.setFont(uiFontFixed(11.0f, true));
-        g.drawText(on ? "On" : "Off", face.toNearestInt(), juce::Justification::centred, false);
+        auto face = getLocalBounds().toFloat().withSizeKeepingCentre(28.0f, 16.0f);
+        const float rad = face.getHeight() * 0.5f;
+        auto track = tipHot ? tooltipAccent() : (on ? ds::acc() : ds::edge());
+        if (!isEnabled()) track = track.withMultipliedAlpha(0.45f);
+        else if (isMouseOver() && !on) track = track.withMultipliedAlpha(0.8f).overlaidWith(ds::inkFaint().withAlpha(0.25f));
+        g.setColour(track);
+        g.fillRoundedRectangle(face, rad);
+        auto knob = juce::Rectangle<float>(12.0f, 12.0f)
+                        .withCentre({ on ? face.getRight() - rad : face.getX() + rad, face.getCentreY() });
+        g.setColour(juce::Colours::white);
+        g.fillEllipse(knob);
         if (hasKeyboardFocus(true))
-            drawFocusRing(g, face, ds::radius::sm);
+            drawFocusRing(g, face, rad);
     }
 
-    int idealWidth() const { return 36; }
+    int idealWidth() const { return 28; }
 };
 
 // ── FlatPopup ────────────────────────────────────────────────────────────────
@@ -566,26 +574,28 @@ public:
     void paint(juce::Graphics& g) override
     {
         // Two Groove toggles side by side (2 px apart).
-        auto r = getLocalBounds().toFloat().withSizeKeepingCentre((float) getWidth(), 18.0f);
-        auto left = r.withTrimmedRight(r.getWidth() * 0.5f + 1.0f);
-        auto right = r.withTrimmedLeft(r.getWidth() * 0.5f + 1.0f);
+        // Levels segmented control: muted track, selected cell is a raised
+        // surface with an edge border.
+        auto r = getLocalBounds().toFloat().withSizeKeepingCentre((float) getWidth(), 22.0f);
+        g.setColour(ds::surface300());
+        g.fillRoundedRectangle(r, ds::radius::md);
+        auto inner = r.reduced(2.0f);
+        auto left = inner.withTrimmedRight(inner.getWidth() * 0.5f);
+        auto right = inner.withTrimmedLeft(inner.getWidth() * 0.5f);
         for (auto [cell, sel] : { std::pair<juce::Rectangle<float>, Sel>{ left, Sel::Half },
                                   std::pair<juce::Rectangle<float>, Sel>{ right, Sel::Double } })
         {
-            const bool on = selected == sel;
-            g.setColour(on ? ds::acc() : ds::surface200());
-            g.fillRoundedRectangle(cell, ds::radius::sm);
-            if (!on)
-            {
-                g.setColour(ds::edge());
-                g.drawRoundedRectangle(cell.reduced(0.5f), ds::radius::sm, 1.0f);
-            }
+            if (selected != sel) continue;
+            g.setColour(ds::surface200());
+            g.fillRoundedRectangle(cell, ds::radius::md - 2.0f);
+            g.setColour(ds::edge());
+            g.drawRoundedRectangle(cell.reduced(0.5f), ds::radius::md - 2.0f, 1.0f);
         }
 
-        g.setFont(uiFontFixed(11.0f, true));
+        g.setFont(uiFontFixed(12.0f, true));
         auto textCol = [&](Sel s)
         {
-            return selected == s ? ds::onAccent() : ds::ink();
+            return selected == s ? ds::ink() : ds::inkMuted();
         };
         g.setColour(textCol(Sel::Half));
         g.drawText("Half", left.toNearestInt(), juce::Justification::centred, false);
@@ -738,9 +748,9 @@ private:
         g.drawText(text, valueR, juce::Justification::centredRight, true);
 
         auto lane = trackLane();
-        auto track = lane.withSizeKeepingCentre(lane.getWidth(), 4.0f);
+        auto track = lane.withSizeKeepingCentre(lane.getWidth(), 2.0f);
         g.setColour(ds::trk());
-        g.fillRoundedRectangle(track, 2.0f);
+        g.fillRoundedRectangle(track, 1.0f);
 
         const auto travel = thumbTravel();
         const float span = juce::jmax(1.0f, travel.getEnd() - travel.getStart());
@@ -755,21 +765,19 @@ private:
             g.fillRect(cx - 0.5f, lane.getCentreY() - 5.0f, 1.0f, 10.0f);
             auto fill = juce::Rectangle<float>::leftTopRightBottom(
                 juce::jmin(cx, x), track.getY(), juce::jmax(cx, x), track.getBottom());
-            g.setColour(t.accent);
-            g.fillRoundedRectangle(fill, 2.0f);
+            g.setColour(ds::primary());
+            g.fillRoundedRectangle(fill, 1.0f);
         }
         else
         {
             auto fill = juce::Rectangle<float>::leftTopRightBottom(
                 track.getX(), track.getY(), x, track.getBottom());
-            g.setColour(t.accent);
-            g.fillRoundedRectangle(fill, 2.0f);
+            g.setColour(ds::primary());
+            g.fillRoundedRectangle(fill, 1.0f);
         }
 
         auto thumb = juce::Rectangle<float>(x - 7.0f, lane.getCentreY() - 7.0f, 14.0f, 14.0f);
         ds::shadow::thumb(g, thumb);
-        g.setColour(juce::Colours::black.withAlpha(0.15f));
-        g.drawEllipse(thumb, 0.5f);
     }
 
     void setFromX(float x)
@@ -914,7 +922,7 @@ public:
         const float xHi = track.getX() + track.getWidth() * ((float) (hi - minV) / span);
         auto fill = juce::Rectangle<float>::leftTopRightBottom(
             xLo, track.getY(), xHi, track.getBottom());
-        g.setColour(t.accent);
+        g.setColour(ds::primary());
         g.fillRoundedRectangle(fill, track.getHeight() * 0.5f);
 
         auto thumbAt = [&](float x)
@@ -927,7 +935,7 @@ public:
         ds::shadow::thumb(g, thumbAt(xHi));
         if (hot)
         {
-            g.setColour(t.accent.withAlpha(0.55f));
+            g.setColour(ds::acc());
             g.drawEllipse(thumbAt(xLo).reduced(0.5f), 1.0f);
             g.drawEllipse(thumbAt(xHi).reduced(0.5f), 1.0f);
         }
@@ -946,22 +954,23 @@ public:
         g.setFont(inspectorFont());
         g.setColour(t.rowLabel);
         g.drawText(label, header, juce::Justification::centredLeft, true);
-        g.setColour(atDefault ? t.valueText : t.accent);
+        g.setFont(inspectorMono());
+        g.setColour(atDefault ? t.valueText : ds::ink());
         g.drawText(text, header, juce::Justification::centredRight, true);
 
         r.removeFromTop(7);
         auto lane = r.removeFromTop(24).toFloat();
         constexpr float kThumbD = 14.0f;
         const float inset = kThumbD * 0.5f;
-        auto track = lane.reduced(inset, 0.0f).withSizeKeepingCentre(lane.getWidth() - inset * 2.0f, 4.0f);
+        auto track = lane.reduced(inset, 0.0f).withSizeKeepingCentre(lane.getWidth() - inset * 2.0f, 2.0f);
         g.setColour(ds::trk());
-        g.fillRoundedRectangle(track, 2.0f);
+        g.fillRoundedRectangle(track, 1.0f);
         const float span = (float) juce::jmax(1, maxV - minV);
         const float xLo = track.getX() + track.getWidth() * ((float) (lo - minV) / span);
         const float xHi = track.getX() + track.getWidth() * ((float) (hi - minV) / span);
         auto fill = juce::Rectangle<float>::leftTopRightBottom(xLo, track.getY(), xHi, track.getBottom());
-        g.setColour(t.accent);
-        g.fillRoundedRectangle(fill, 2.0f);
+        g.setColour(ds::primary());
+        g.fillRoundedRectangle(fill, 1.0f);
         auto thumbAt = [&](float x)
         {
             return juce::Rectangle<float>(x - kThumbD * 0.5f, lane.getCentreY() - kThumbD * 0.5f,
@@ -1160,14 +1169,19 @@ public:
             const bool on = i < (int) selected.size() && selected[(size_t) i];
             const bool cand = !on && i < 16
                 && (candidateMask & (uint16_t) (1u << i)) != 0;
-            // Groove toggle: accent when lit, surface-200 + edge when not; a candidate
-            // (suggested) chip keeps the unlit face with an accent outline.
-            g.setColour(on ? ds::acc() : ds::surface200());
+            // Levels key chip: primary fill when selected, surface + edge when
+            // not; a candidate (suggested) chip carries a small violet dot.
+            g.setColour(on ? ds::primary() : ds::surface200());
             g.fillRoundedRectangle(cell, ds::radius::sm);
             if (!on)
             {
-                g.setColour(cand ? ds::acc() : ds::edge());
+                g.setColour(ds::edge());
                 g.drawRoundedRectangle(cell.reduced(0.5f), ds::radius::sm, 1.0f);
+            }
+            if (cand)
+            {
+                g.setColour(ds::acc());
+                g.fillEllipse(cell.getRight() - 7.0f, cell.getY() + 3.0f, 4.0f, 4.0f);
             }
             float chipPt = kAnnotPt;
             if (sidebarLabelStyle)
@@ -1178,7 +1192,7 @@ public:
                     chipPt = 9.0f;
             }
             g.setFont(uiFontFixed(chipPt, on));
-            g.setColour(on ? ds::onAccent() : ds::ink());
+            g.setColour(on ? ds::onPrimary() : ds::ink());
             g.drawText(labels[i], cell.toNearestInt(), juce::Justification::centred, false);
         }
         if (hint.isNotEmpty())
@@ -1363,22 +1377,27 @@ public:
         auto track = r.removeFromTop(kTrackH).toFloat();
 
         if (labels.isEmpty()) return;
-        // A row of Groove toggles, 2 px apart; the lit one is the selection.
-        const float gapX = 2.0f;
-        const float cellW = (track.getWidth() - gapX * (float) (labels.size() - 1)) / (float) labels.size();
+        // Levels segmented control: muted track, raised selected cell.
+        const float gapX = 0.0f;
+        {
+            auto bg = juce::Rectangle<float>(track.getX(), track.getCentreY() - 11.0f, track.getWidth(), 22.0f);
+            g.setColour(ds::surface300());
+            g.fillRoundedRectangle(bg, ds::radius::md);
+        }
+        const float cellW = (track.getWidth() - 4.0f) / (float) labels.size();
         for (int i = 0; i < labels.size(); ++i)
         {
-            auto cell = juce::Rectangle<float>(track.getX() + (cellW + gapX) * (float) i,
+            auto cell = juce::Rectangle<float>(track.getX() + 2.0f + (cellW + gapX) * (float) i,
                                                track.getCentreY() - 9.0f, cellW, 18.0f);
-            g.setColour(i == index ? ds::acc() : ds::surface200());
-            g.fillRoundedRectangle(cell, ds::radius::sm);
-            if (i != index)
+            if (i == index)
             {
+                g.setColour(ds::surface200());
+                g.fillRoundedRectangle(cell, ds::radius::sm);
                 g.setColour(ds::edge());
                 g.drawRoundedRectangle(cell.reduced(0.5f), ds::radius::sm, 1.0f);
             }
-            g.setFont(uiFontFixed(kAnnotPt, true));
-            g.setColour(i == index ? ds::onAccent() : ds::ink());
+            g.setFont(uiFontFixed(kAnnotPt, i == index));
+            g.setColour(i == index ? ds::ink() : ds::inkMuted());
             g.drawText(labels[i], cell.toNearestInt(), juce::Justification::centred, false);
             if (i == nativeIndex)
             {
@@ -1567,7 +1586,7 @@ public:
             }
             else
             {
-                g.setColour(inRange ? ds::acc() : ds::inkFaint());
+                g.setColour(inRange ? ds::primary().withAlpha(0.85f) : ds::ink().withAlpha(0.18f));
                 g.fillRect(bar);
             }
         }
@@ -1577,13 +1596,13 @@ public:
         const float thumbInset = kThumbD * 0.5f;
         auto lane = r.removeFromTop(kTrackH).toFloat();
         auto track = lane.reduced(thumbInset, 0.0f).withSizeKeepingCentre(lane.getWidth() - thumbInset * 2.0f, 2.0f);
-        g.setColour(ds::inkFaint());
+        g.setColour(ds::trk());
         g.fillRect(track);
         const float trackSpan = (float) juce::jmax(1, maxV - minV);
         const float xLo = track.getX() + track.getWidth() * ((float) (lo - minV) / trackSpan);
         const float xHi = track.getX() + track.getWidth() * ((float) (hi - minV) / trackSpan);
         auto sel = juce::Rectangle<float>::leftTopRightBottom(xLo, track.getY(), xHi, track.getBottom());
-        g.setColour(ds::acc());
+        g.setColour(ds::primary());
         g.fillRect(sel);
         // Groove handles: solid ink blocks (10 x 12, radius-sm).
         auto thumbAt = [&](float x)
@@ -1839,7 +1858,8 @@ public:
         g.setFont(inspectorFont());
         g.setColour(t.rowLabel);
         g.drawText("Note filter", header, juce::Justification::centredLeft, true);
-        g.setColour(allOn ? t.valueText : t.accent);
+        g.setFont(inspectorMono());
+        g.setColour(allOn ? t.valueText : ds::ink());
         g.drawText(allOn ? "All notes" : (juce::String(onCount) + " of 12"),
                    header, juce::Justification::centredRight, true);
 
@@ -1856,16 +1876,18 @@ private:
      * 2) on + out of scale — tx3 / trk
      * 3) off — panel/ctl + slash
      */
-    static juce::Colour activeWhite()   { return ds::kfInW(); }
-    static juce::Colour activeBlack()   { return ds::kfInB(); }
-    static juce::Colour outScaleWhite() { return ds::kfOutW(); }
-    static juce::Colour outScaleBlack() { return ds::kfOutB(); }
-    static juce::Colour offWhiteKey()   { return ds::panel(); }
-    static juce::Colour offBlackKey()   { return ds::ctl(); }
+    // Levels: in key = primary, outside = ink 18% (opaque over surface so
+    // overlapping black keys stay solid), muted = surface + slash.
+    static juce::Colour activeWhite()   { return ds::primary(); }
+    static juce::Colour activeBlack()   { return ds::primary(); }
+    static juce::Colour outScaleWhite() { return ds::surface200().overlaidWith(ds::ink().withAlpha(0.18f)); }
+    static juce::Colour outScaleBlack() { return ds::surface200().overlaidWith(ds::ink().withAlpha(0.30f)); }
+    static juce::Colour offWhiteKey()   { return ds::surface200(); }
+    static juce::Colour offBlackKey()   { return ds::surface300(); }
 
     static void paintOffSlash(juce::Graphics& g, juce::Rectangle<float> key)
     {
-        g.setColour(ds::tx3().withAlpha(0.60f));
+        g.setColour(ds::inkMuted());
         const float inset = 4.0f;
         g.drawLine(key.getX() + inset, key.getBottom() - inset,
                    key.getRight() - inset, key.getY() + inset, 1.4f);
@@ -1911,13 +1933,13 @@ private:
             { offWhiteKey(), "Muted", true },
         };
         float x = row.getX();
-        g.setFont(uiFontFixed(10.5f));
+        g.setFont(monoFontFixed(12.0f));
         for (const auto& item : items)
         {
             auto sw = juce::Rectangle<float>(x, row.getCentreY() - 5.0f, 10.0f, 10.0f);
             g.setColour(item.fill);
             g.fillRoundedRectangle(sw, 2.0f);
-            g.setColour(ds::ctlb());
+            g.setColour(ds::edge());
             g.drawRoundedRectangle(sw.reduced(0.5f), 2.0f, 1.0f);
             if (item.slash)
                 paintOffSlash(g, sw);
@@ -1967,11 +1989,10 @@ private:
             fillKey(g, key, true);
             if (!on)
                 paintOffSlash(g, key);
-            const auto border = !on ? ds::ctlb()
-                              : (scale ? t.accent.withAlpha(0.50f) : ds::ctlb());
+            const auto border = (on && scale) ? ds::primary() : ds::edge();
             strokeKey(g, key, true, border);
-            g.setFont(uiFontFixed(8.5f));
-            g.setColour(scale && on ? t.accent : t.valueText);
+            g.setFont(monoFontFixed(10.0f));
+            g.setColour(!on ? ds::inkMuted() : (scale ? ds::onPrimary() : ds::ink()));
             g.drawText(juce::String(kNoteNames[(size_t) pc]),
                        key.removeFromBottom(12.0f).toNearestInt(),
                        juce::Justification::centred, false);
@@ -1989,8 +2010,9 @@ private:
             fillKey(g, key, false);
             if (!on)
                 paintOffSlash(g, key);
-            const auto border = !on ? ds::ctlb()
-                              : (scale ? t.accent.withAlpha(0.50f) : ds::ctlb());
+            // Black keys sit on the whites: a surface-coloured outline keeps
+            // them separated from an in-key (primary) neighbour.
+            const auto border = (on && scale) ? ds::surface200() : ds::edge();
             strokeKey(g, key, false, border);
         }
     }
@@ -2319,8 +2341,12 @@ public:
             juce::Path clip;
             clip.addRoundedRectangle(b, rad);
             g.reduceClipRegion(clip);
-            g.setColour(headerHover || dragging ? ds::surface300().brighter(0.04f) : ds::surface300());
-            g.fillRect(header);
+            // Levels: flat header on the section surface; hover = 4% wash.
+            if (headerHover || dragging)
+            {
+                g.setColour(ds::ink().withAlpha(0.04f));
+                g.fillRect(header);
+            }
             if (visibleRowCount() > 0)
             {
                 g.setColour(ds::line());
@@ -2338,16 +2364,27 @@ public:
             titleR.removeFromRight(4);
         g.setFont(sectionTitleFont());
         g.setColour(ds::ink());
-        const int titleW = (int) std::ceil(juce::GlyphArrangement::getStringWidth(g.getCurrentFont(), title)) + 2;
-        g.drawText(title, titleR.removeFromLeft(juce::jmin(titleW, titleR.getWidth())),
+        const auto titleCaps = title.toUpperCase();
+        const int titleW = (int) std::ceil(juce::GlyphArrangement::getStringWidth(g.getCurrentFont(), titleCaps)) + 2;
+        g.drawText(titleCaps, titleR.removeFromLeft(juce::jmin(titleW, titleR.getWidth())),
                    juce::Justification::centredLeft, true);
 
         if (showHeaderChrome && mods > 0)
         {
+            // Count-only badge: primary pill, on-primary mono digits.
             titleR.removeFromLeft(6);
-            g.setFont(monoFontFixed(11.0f));
-            g.setColour(ds::acc());
-            g.drawText(juce::String(mods) + " changed", titleR, juce::Justification::centredLeft, true);
+            const auto txt = juce::String(mods);
+            const auto bf = monoFontFixed(11.0f, true);
+            const float bw = juce::jmax(16.0f, juce::GlyphArrangement::getStringWidth(bf, txt) + 8.0f);
+            auto badge = juce::Rectangle<float>((float) titleR.getX(), (float) titleR.getCentreY() - 8.0f, bw, 16.0f);
+            if (badge.getRight() <= (float) titleR.getRight())
+            {
+                g.setColour(ds::primary());
+                g.fillRoundedRectangle(badge, 8.0f);
+                g.setFont(bf);
+                g.setColour(ds::onPrimary());
+                g.drawText(txt, badge.toNearestInt(), juce::Justification::centred, false);
+            }
         }
 
         if (showHeaderChrome)
@@ -2361,8 +2398,7 @@ public:
             auto lock = lockBounds().toFloat().withSizeKeepingCentre(16.0f, 14.0f);
             if (locked)
             {
-                g.setColour(ds::acc());
-                g.fillRoundedRectangle(lock, ds::radius::sm);
+                ds::drawActive(g, lock, ds::radius::sm);
             }
             else
             {
@@ -2370,11 +2406,11 @@ public:
                 g.drawRoundedRectangle(lock.reduced(0.5f), ds::radius::sm, 1.0f);
             }
             drawIcon(g, locked ? icons::lockClosed : icons::lockOpen, lock.withSizeKeepingCentre(9.0f, 9.0f),
-                     locked ? ds::onAccent() : ds::inkMuted(), 1.2f);
+                     locked ? ds::acc() : ds::inkMuted(), 1.2f);
         }
 
         g.setColour(dragging ? ds::acc() : ds::line());
-        g.drawRoundedRectangle(b.reduced(0.5f), rad, 1.0f);
+        g.drawRoundedRectangle(b.reduced(0.5f), rad, dragging ? 1.5f : 1.0f);
     }
 
     juce::String title;

@@ -19,6 +19,10 @@ namespace icons {
     inline constexpr const char* arrowsOut     = "arrows-out-line-horizontal";
     /** Arrow into a tray — drag a clip out to the DAW. */
     inline constexpr const char* dragOut       = "drag-out";
+    /** Six-dot grip — “pick this up and drag it” (Drag Me). */
+    inline constexpr const char* grip          = "grip";
+    /** Signal line through a ring — live MIDI runs through the Toolkit. */
+    inline constexpr const char* through       = "through";
     inline constexpr const char* scissors      = "scissors";
     inline constexpr const char* sliders       = "sliders";
     /** Vertical EQ bars — standard audio Effects glyph. */
@@ -82,8 +86,9 @@ void drawIcon(juce::Graphics& g, const juce::String& name,
 /** Groove focus: 1px solid `focus` outline, offset 1px. */
 inline void drawFocusRing(juce::Graphics& g, juce::Rectangle<float> bounds, float radius)
 {
+    // Levels focus: 2 px primary ring, offset 2 px.
     g.setColour(ds::focus());
-    g.drawRoundedRectangle(bounds.expanded(1.5f), radius + 1.0f, 1.0f);
+    g.drawRoundedRectangle(bounds.expanded(2.5f), radius + 2.0f, 2.0f);
 }
 
 // ── Small controls ───────────────────────────────────────────────────────────
@@ -99,6 +104,10 @@ public:
     bool active = false;       // accent (or activeTint) glyph
     bool ghost = true;         // retained for callers; faces are never drawn
     bool headerChrome = false; // muted idle glyph in pane headers
+    /** Levels solid primary face (Play): primary fill, onPrimary glyph; activeTint fill while active. */
+    bool solid = false;
+    /** Levels outlined face (Record): surface + 18 % border; glyph in activeTint; filled while active. */
+    bool outlined = false;
     float iconScale = 1.0f;
     /** When set, the button draws this label beside the icon and grows to fit. */
     juce::String caption;
@@ -121,6 +130,8 @@ public:
     bool active = false;       // accent style
     bool accentText = false;   // accent-tinted text/icon when inactive
     bool mono = false;
+    /** Levels primary action (Drag Me): solid primary fill, onPrimary label. */
+    bool primaryStyle = false;
     /** If >= 0, use this corner radius; otherwise capsule (height/2). */
     float cornerRadius = -1.0f;
 };
