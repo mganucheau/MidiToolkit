@@ -1,4 +1,5 @@
 #include "Theme.h"
+#include "BinaryData.h"
 #include <unordered_map>
 #include <cmath>
 
@@ -23,17 +24,29 @@ juce::Colour rgba(juce::uint8 r, juce::uint8 g, juce::uint8 b, float a)
 
 bool usesDarkAppearance()
 {
-    switch (currentAppearance())
+    return themeAt(themeIndex()).dark;
+}
+
+juce::Colour tintForTheme(juce::Colour c)
+{
+    const auto& spec = themeAt(themeIndex());
+    if (c.getFloatAlpha() <= 0.001f)
+        return c;
+    if (spec.amount <= 0.001f && std::abs(spec.lift) <= 0.001f)
+        return c;
+
+    juce::Colour out = c;
+    if (spec.amount > 0.001f)
     {
-        case Appearance::Light: return false;
-        case Appearance::Dark:  return true;
-        default: break;
+        const auto hueCol = juce::Colour::fromHSV(spec.hue,
+                                                   spec.dark ? 0.42f : 0.20f,
+                                                   c.getBrightness(),
+                                                   c.getFloatAlpha());
+        out = c.interpolatedWith(hueCol, spec.amount);
     }
-#if JUCE_MAC
-    return juce::Desktop::getInstance().isDarkModeActive();
-#else
-    return false;
-#endif
+    if (std::abs(spec.lift) > 0.001f)
+        out = out.withBrightness(juce::jlimit(0.0f, 1.0f, out.getBrightness() + spec.lift));
+    return out.withAlpha(c.getFloatAlpha());
 }
 
 const ThemeTokens& themeTokens()
@@ -78,9 +91,9 @@ const InspectorTokens& inspectorTokens()
         p.tx3,             // valueText
         p.hl,              // divider
         p.trk,             // sliderTrack
-        juce::Colours::white,
+        ds::ink(),         // sliderKnob (Groove handle = solid ink block)
         p.ctl,             // controlSurface
-        d ? p.ctl.brighter(0.08f) : p.ctl.darker(0.03f),
+        ds::surface300(),  // controlSurfaceHi (hover raises one surface step)
         p.hl,              // controlSeparator
         p.trk,             // switchOffTrack
         p.tx3,             // chevron
@@ -88,7 +101,7 @@ const InspectorTokens& inspectorTokens()
         p.ctlb,            // controlHairline
         p.field,           // tallWell
         p.trk,             // tallFill
-        d ? p.ctl.brighter(0.12f) : p.ctl.darker(0.06f),
+        ds::surface300(),  // tallWellHot
         d,
     };
     return cached;
@@ -114,42 +127,110 @@ void drawInspectorDivider(juce::Graphics& g, juce::Rectangle<int> bounds)
     g.fillRect(bounds.getX(), bounds.getBottom() - 1, bounds.getWidth(), 1);
 }
 
-// ── Fonts (system stack) ─────────────────────────────────────────────────────
+// ── Fonts (Levels: Inter for the interface, JetBrains Mono for live values) ──
 
-// Resolve the San Francisco system font. "-apple-system" is a CSS alias, not a
-// CoreText family name, so JUCE would silently fall back to Helvetica.
-static const juce::String& systemFontFamily(bool display)
+namespace {
+
+struct GrooveFaces
 {
-    struct Families
+    GrooveFaces()
     {
-        Families()
+        auto load = [](const char* data, int size)
         {
-            const auto all = juce::Font::findAllTypefaceNames();
-            text = all.contains("SF Pro Text") ? "SF Pro Text"
-                 : all.contains("Helvetica Neue") ? "Helvetica Neue"
-                 : juce::Font::getDefaultSansSerifFontName();
-            displayFamily = all.contains("SF Pro Display") ? "SF Pro Display" : text;
-            sf = text.startsWith("SF ");
-        }
-        juce::String text, displayFamily;
-        bool sf = false;
-    };
-    static const Families f;
-    return display ? f.displayFamily : f.text;
+            return juce::Typeface::createSystemTypefaceFor(data, (size_t) size);
+        };
+        regular  = load(BinaryData::InterRegular_ttf,         BinaryData::InterRegular_ttfSize);
+        medium   = load(BinaryData::InterMedium_ttf,          BinaryData::InterMedium_ttfSize);
+        semibold = load(BinaryData::InterSemiBold_ttf,        BinaryData::InterSemiBold_ttfSize);
+        bold     = load(BinaryData::InterBold_ttf,            BinaryData::InterBold_ttfSize);
+        monoReg  = load(BinaryData::JetBrainsMonoRegular_ttf, BinaryData::JetBrainsMonoRegular_ttfSize);
+        monoMed  = load(BinaryData::JetBrainsMonoMedium_ttf,  BinaryData::JetBrainsMonoMedium_ttfSize);
+    }
+    juce::Typeface::Ptr regular, medium, semibold, bold, monoReg, monoMed;
+};
+
+const GrooveFaces& grooveFaces()
+{
+    static const GrooveFaces faces;
+    return faces;
 }
 
-static bool systemFontIsSF()
+} // namespace
+
+juce::Font grooveFont(float height, int weight, bool mono)
 {
-    return systemFontFamily(false).startsWith("SF ");
+    const auto& f = grooveFaces();
+    juce::Typeface::Ptr face;
+    if (mono)
+        face = weight >= 500 ? f.monoMed : f.monoReg;
+    else if (weight >= 700) face = f.bold;
+    else if (weight >= 600) face = f.semibold;
+    else if (weight >= 500) face = f.medium;
+    else                    face = f.regular;
+
+    if (face == nullptr)
+        return juce::Font(juce::FontOptions(height));
+    return juce::Font(juce::FontOptions().withTypeface(face).withHeight(height));
 }
 
 static juce::Font makeUiFont(float pt, bool semibold)
 {
-    // SF Pro Display for large text, SF Pro Text for body (HIG threshold 20pt).
-    const auto& family = systemFontFamily(pt >= 20.0f);
-    const char* style = semibold ? (systemFontIsSF() ? "Semibold" : "Medium")
-                                 : "Regular";
-    return juce::Font(juce::FontOptions(pt).withName(family).withStyle(style));
+    const int weight = semibold ? 600 : (pt < 12.0f ? 500 : 400);
+    const auto family = (FontFamily) juce::jlimit(0, (int) FontFamily::Count - 1,
+                                                  tweaks().fontFamily.load());
+    if (family == FontFamily::Archivo)
+        return grooveFont(pt, weight, false);
+
+    juce::String name = "Helvetica Neue";
+    if (family == FontFamily::System)
+        name = juce::Font::getDefaultSansSerifFontName();
+    else if (family == FontFamily::Avenir)
+        name = "Avenir Next";
+    const int flags = semibold ? juce::Font::bold : juce::Font::plain;
+    return juce::Font(juce::FontOptions(name, pt, flags));
+}
+
+juce::Colour contrastInkOn(juce::Colour surface)
+{
+    // Relative luminance shortcut: prefer dark ink on light, light ink on dark.
+    const float L = surface.getBrightness();
+    if (L > 0.55f)
+        return juce::Colour(0xff111111);
+    if (L > 0.35f)
+        return juce::Colour(0xff1a1a1a);
+    return juce::Colour(0xfff2f2f2);
+}
+
+juce::Colour contrastLineOn(juce::Colour surface)
+{
+    const float L = surface.getBrightness();
+    if (L > 0.55f)
+        return juce::Colour(0xff2a2a2a).withAlpha(0.55f);
+    return juce::Colour(0xffffffff).withAlpha(0.45f);
+}
+
+SurfaceStyle currentSurfaceStyle()
+{
+    return (SurfaceStyle) juce::jlimit(0, (int) SurfaceStyle::Count - 1, tweaks().surfaceStyle.load());
+}
+
+namespace {
+juce::Component::SafePointer<juce::Component> gTipHighlight;
+}
+
+void setTooltipHighlightTarget(juce::Component* c)
+{
+    if (auto* prev = gTipHighlight.getComponent())
+        if (prev != c)
+            prev->repaint();
+    gTipHighlight = c;
+    if (c != nullptr)
+        c->repaint();
+}
+
+bool hasTooltipHighlight(const juce::Component* c)
+{
+    return c != nullptr && gTipHighlight.getComponent() == c;
 }
 
 juce::Font uiFont(float pt, bool semibold)
@@ -160,9 +241,9 @@ juce::Font uiFont(float pt, bool semibold)
 
 juce::Font monoFont(float pt, bool semibold)
 {
-    auto f = uiFont(pt, semibold);
-    f.setExtraKerningFactor(0.0f);
-    return f;
+    // Every live value is a readout: IBM Plex Mono so digits never shift.
+    juce::ignoreUnused(semibold);
+    return grooveFont(pt * contentScale() * textIconScale(), 500, true);
 }
 
 juce::Font uiFontFixed(float pt, bool semibold)
@@ -173,9 +254,8 @@ juce::Font uiFontFixed(float pt, bool semibold)
 
 juce::Font monoFontFixed(float pt, bool semibold)
 {
-    auto f = uiFontFixed(pt, semibold);
-    f.setExtraKerningFactor(0.0f);
-    return f;
+    juce::ignoreUnused(semibold);
+    return grooveFont(pt * textIconScale(), 500, true);
 }
 
 juce::Font fontFor(TextStyle s)
@@ -374,9 +454,9 @@ void PatternFlowLookAndFeel::refreshColours()
     setColour(juce::DirectoryContentsDisplayComponent::highlightColourId, colours::selection());
     setColour(juce::DirectoryContentsDisplayComponent::highlightedTextColourId, colours::text());
 
-    setColour(juce::TooltipWindow::backgroundColourId, colours::panel());
-    setColour(juce::TooltipWindow::textColourId, colours::text());
-    setColour(juce::TooltipWindow::outlineColourId, colours::line());
+    setColour(juce::TooltipWindow::backgroundColourId, juce::Colours::transparentBlack);
+    setColour(juce::TooltipWindow::textColourId, juce::Colour(0xff1a1200));
+    setColour(juce::TooltipWindow::outlineColourId, juce::Colours::transparentBlack);
 }
 
 void PatternFlowLookAndFeel::drawRotarySlider(juce::Graphics& g, int x, int y,
@@ -709,31 +789,42 @@ void PatternFlowLookAndFeel::drawScrollbar(juce::Graphics& g, juce::ScrollBar&, 
                                           int thumbStartPosition, int thumbSize,
                                           bool isMouseOver, bool isMouseDown)
 {
+    // Groove scrollbar: a square thumb on a hairline track, not a floating pill.
     auto track = juce::Rectangle<int>(x, y, width, height).toFloat();
+    g.setColour(ds::surface100());
+    g.fillRect(track);
+    g.setColour(ds::line());
+    if (isScrollbarVertical)
+        g.fillRect(track.getX(), track.getY(), 1.0f, track.getHeight());
+    else
+        g.fillRect(track.getX(), track.getY(), track.getWidth(), 1.0f);
+
     juce::Rectangle<float> thumb;
     if (isScrollbarVertical)
-        thumb = { track.getX(), track.getY() + (float) thumbStartPosition, track.getWidth(), (float) thumbSize };
+        thumb = { track.getX() + 2.0f, track.getY() + (float) thumbStartPosition, track.getWidth() - 3.0f, (float) thumbSize };
     else
-        thumb = { track.getX() + (float) thumbStartPosition, track.getY(), (float) thumbSize, track.getHeight() };
-    thumb = thumb.reduced(3.0f);
-    const float alpha = isMouseDown ? 0.9f : (isMouseOver ? 0.65f : 0.35f);
-    g.setColour(colours::textDim().withAlpha(alpha));
-    // Use the short axis so horizontal thumbs are pills like vertical ones.
-    const float r = juce::jmin(thumb.getWidth(), thumb.getHeight()) * 0.5f;
-    g.fillRoundedRectangle(thumb, r);
+        thumb = { track.getX() + (float) thumbStartPosition, track.getY() + 2.0f, (float) thumbSize, track.getHeight() - 3.0f };
+    if (thumb.isEmpty())
+        return;
+
+    g.setColour(isMouseDown ? ds::acc() : ds::surface300());
+    g.fillRect(thumb);
+    g.setColour(isMouseDown || isMouseOver ? ds::acc() : ds::edge());
+    g.drawRect(thumb, 1.0f);
 }
 
 void PatternFlowLookAndFeel::drawTooltip(juce::Graphics& g, const juce::String& text,
                                          int width, int height)
 {
-    auto bounds = juce::Rectangle<float>(0.0f, 0.0f, (float) width, (float) height).reduced(0.5f);
+    // Only the bubble is filled — the window behind it stays clear (no white corners).
+    auto bounds = juce::Rectangle<float>(0.0f, 0.0f, (float) width, (float) height).reduced(1.0f);
     const float radius = 6.0f;
-    g.setColour(colours::elev());
+    g.setColour(tooltipAccent());
     g.fillRoundedRectangle(bounds, radius);
-    g.setColour(colours::line());
-    g.drawRoundedRectangle(bounds, radius, 0.5f);
+    g.setColour(juce::Colour(0xff5a3a00).withAlpha(0.35f));
+    g.drawRoundedRectangle(bounds.reduced(0.5f), radius, 1.0f);
 
-    g.setColour(colours::text());
+    g.setColour(juce::Colour(0xff1a1200));
     g.setFont(uiFont(11.5f, false));
     g.drawFittedText(text, bounds.reduced(9.0f, 6.0f).toNearestInt(),
                      juce::Justification::centredLeft, 4);
@@ -750,7 +841,7 @@ juce::Rectangle<int> PatternFlowLookAndFeel::getTooltipBounds(const juce::String
     {
         juce::AttributedString as;
         as.setJustification(juce::Justification::centredLeft);
-        as.append(tipText, font, colours::text());
+        as.append(tipText, font, juce::Colour(0xff1a1200));
         juce::TextLayout layout;
         layout.createLayout(as, (float) maxW);
         textW = (int) std::ceil(layout.getWidth());
@@ -761,12 +852,12 @@ juce::Rectangle<int> PatternFlowLookAndFeel::getTooltipBounds(const juce::String
     const int w = juce::jlimit(40, maxW + padX, textW + padX);
     const int h = (int) std::ceil(font.getHeight() * (float) lines) + padY;
 
-    int x = screenPos.x;
-    int y = screenPos.y + 14;
+    int x = screenPos.x + 8;
+    int y = screenPos.y + 22;
     if (x + w > parentArea.getRight())
         x = parentArea.getRight() - w - 4;
     if (y + h > parentArea.getBottom())
-        y = screenPos.y - h - 6;
+        y = screenPos.y - h - 10;
     x = juce::jmax(parentArea.getX() + 4, x);
     y = juce::jmax(parentArea.getY() + 4, y);
     return { x, y, w, h };

@@ -13,18 +13,18 @@ namespace fx {
 constexpr float kFontPt = 12.0f;
 constexpr float kAnnotPt = 11.0f;
 constexpr float kPopupFontPt = 12.0f;
-constexpr float kSectionTitlePt = 11.0f;
+constexpr float kSectionTitlePt = 12.0f;
 constexpr float kPaneTitlePt = 13.0f;
-constexpr int kSectionHeaderH = 38;
+constexpr int kSectionHeaderH = 36;   // Levels: flat 36 px section header
 constexpr int kSectionPadH = 12;       // chevron starts here
 constexpr int kSectionRowInset = 22;   // content indent past the chevron
-constexpr int kContentPadX = 34;       // left
-constexpr int kContentPadR = 16;       // right pad is smaller than the left
-constexpr int kRowMinH = 24;
+constexpr int kContentPadX = 30;       // Levels: rows align under the section title
+constexpr int kContentPadR = 12;
+constexpr int kRowMinH = 28;      // Levels row height
 constexpr int kControlH = 24;
-constexpr int kSliderRowH = 24;
-constexpr int kLabelColW = 84;
-constexpr int kValueColW = 40;
+constexpr int kSliderRowH = 28;
+constexpr int kLabelColW = 72;    // Levels label column
+constexpr int kValueColW = 36;
 constexpr int kSelectW = 64;
 constexpr int kSelectHalfW = 120;
 constexpr int kHeaderIconW = 20; // match library sidebar glyph hit target
@@ -37,10 +37,10 @@ inline int toolkitDensity(int compact)
     const int v = currentDensity() == Density::Comfortable ? compact + 2 : compact;
     return metrics::scaled(v);
 }
-inline int toolkitRowGap()           { return toolkitDensity(10); }
+inline int toolkitRowGap()           { return toolkitDensity(4); }
 inline int toolkitSectionPadT()      { return 0; }
-inline int toolkitSectionPadB()      { return toolkitDensity(16); }
-inline int toolkitSectionPadBFolded(){ return toolkitDensity(14); }
+inline int toolkitSectionPadB()      { return toolkitDensity(12); }
+inline int toolkitSectionPadBFolded(){ return toolkitDensity(12); }
 inline int toolkitTitleGap()         { return 0; }
 inline int toolkitBodyPadB()         { return toolkitDensity(8); }
 
@@ -48,13 +48,12 @@ inline int toolkitBodyPadB()         { return toolkitDensity(8); }
     fails and white type needs a deeper fill. */
 inline juce::Colour accentFillColour()
 {
-    const auto acc = ds::acc();
-    return usesDarkAppearance() ? acc.darker(0.28f) : acc;
+    return ds::primary();   // Levels: lit = primary, text on it = on-primary
 }
 
 inline juce::Colour onAccentColour()
 {
-    return juce::Colours::white;
+    return ds::onPrimary();
 }
 
 inline juce::Font inspectorFont(bool semibold = false) { return uiFontFixed(kFontPt, semibold); }
@@ -62,20 +61,24 @@ inline juce::Font inspectorMono(bool semibold = false) { return monoFontFixed(kF
 inline juce::Font popupFont(bool semibold = false) { return uiFontFixed(kPopupFontPt, semibold); }
 inline juce::Font sectionTitleFont()
 {
-    auto f = uiFontFixed(kSectionTitlePt, true);
-    f.setExtraKerningFactor(0.07f);
+    // Levels section label: mono 12, caps, slight tracking.
+    auto f = monoFontFixed(12.0f, true);
+    f.setExtraKerningFactor(0.04f);
     return f;
 }
 inline juce::Font paneTitleFont() { return uiFontFixed(kPaneTitlePt, true); }
 
-inline void fillTallWell(juce::Graphics& g, juce::Rectangle<float> r, bool hot)
+inline void fillTallWell(juce::Graphics& g, juce::Rectangle<float> r, bool hot,
+                         const juce::Component* tipSource = nullptr)
 {
-    g.setColour(hot ? (usesDarkAppearance() ? ds::ctl().brighter(0.08f) : ds::ctl().darker(0.03f))
-                    : ds::ctl());
-    g.fillRoundedRectangle(r, kTallRadius);
-    g.setColour(ds::ctlb());
-    g.drawRoundedRectangle(r.reduced(0.5f), kTallRadius, 1.0f);
-    ds::shadow::control(g, r, kTallRadius);
+    // Groove field: surface-300, edge border (accent while hot), radius-sm.
+    // Tip highlight paints the same amber as the tooltip bubble.
+    const bool tipHot = tipSource != nullptr && hasTooltipHighlight(tipSource);
+    // Levels field: surface, edge border (primary while hot), radius-sm.
+    g.setColour(tipHot ? tooltipAccent() : ds::surface200());
+    g.fillRoundedRectangle(r, ds::radius::sm);
+    g.setColour(tipHot ? ds::warning().darker(0.6f) : (hot ? ds::primary() : ds::edge()));
+    g.drawRoundedRectangle(r.reduced(0.5f), ds::radius::sm, hot ? 1.5f : 1.0f);
 }
 
 inline void drawCaretDown(juce::Graphics& g, juce::Rectangle<float> area, juce::Colour colour)
@@ -146,14 +149,20 @@ public:
     {
         const auto& t = inspectorTokens();
         auto r = getLocalBounds().toFloat();
-        if (active)
+        if (active && primaryStyle)
         {
-            auto fill = accentFillColour();
-            if (down) fill = fill.darker(0.08f);
-            else if (over) fill = fill.brighter(0.06f);
+            auto fill = ds::primary();
+            if (down) fill = fill.withMultipliedAlpha(0.85f);
+            else if (over) fill = fill.withMultipliedAlpha(0.92f);
             g.setColour(fill);
-            g.fillRoundedRectangle(r, metrics::controlRadius);
-            g.setColour(onAccentColour());
+            g.fillRoundedRectangle(r, ds::radius::md);
+            g.setColour(ds::onPrimary());
+        }
+        else if (active)
+        {
+            // Levels active: violet tint + 1px violet border, label stays ink.
+            ds::drawActive(g, r, ds::radius::md);
+            g.setColour(ds::ink());
         }
         else
         {
@@ -176,6 +185,7 @@ public:
 
     juce::String label;
     bool active = false;
+    bool primaryStyle = false; // solid primary when active (main action)
 };
 
 // ── FlatSwitch ───────────────────────────────────────────────────────────────
@@ -191,25 +201,26 @@ public:
 
     void paintButton(juce::Graphics& g, bool, bool) override
     {
-        const auto& t = inspectorTokens();
+        // Levels switch: 28x16 pill, violet track when on, edge when off,
+        // white knob.
         const bool on = getToggleState();
-        auto track = getLocalBounds().toFloat().withSizeKeepingCentre(30.0f, 18.0f);
-        g.setColour(on ? t.accent : t.switchOffTrack);
-        g.fillRoundedRectangle(track, 9.0f);
-        const float knob = 14.0f;
-        const float kx = on ? track.getRight() - 2.0f - knob : track.getX() + 2.0f;
+        const bool tipHot = hasTooltipHighlight(this);
+        auto face = getLocalBounds().toFloat().withSizeKeepingCentre(28.0f, 16.0f);
+        const float rad = face.getHeight() * 0.5f;
+        auto track = tipHot ? tooltipAccent() : (on ? ds::acc() : ds::edge());
+        if (!isEnabled()) track = track.withMultipliedAlpha(0.45f);
+        else if (isMouseOver() && !on) track = track.withMultipliedAlpha(0.8f).overlaidWith(ds::inkFaint().withAlpha(0.25f));
+        g.setColour(track);
+        g.fillRoundedRectangle(face, rad);
+        auto knob = juce::Rectangle<float>(12.0f, 12.0f)
+                        .withCentre({ on ? face.getRight() - rad : face.getX() + rad, face.getCentreY() });
         g.setColour(juce::Colours::white);
-        g.fillEllipse(kx, track.getCentreY() - knob * 0.5f, knob, knob);
-        if (!t.dark && !on)
-        {
-            g.setColour(t.controlHairline);
-            g.drawEllipse(kx, track.getCentreY() - knob * 0.5f, knob, knob, 0.5f);
-        }
+        g.fillEllipse(knob);
         if (hasKeyboardFocus(true))
-            drawFocusRing(g, getLocalBounds().toFloat(), 4.0f);
+            drawFocusRing(g, face, rad);
     }
 
-    int idealWidth() const { return 30; }
+    int idealWidth() const { return 28; }
 };
 
 // ── FlatPopup ────────────────────────────────────────────────────────────────
@@ -280,26 +291,16 @@ public:
 
     void paint(juce::Graphics& g) override
     {
-        auto r = getLocalBounds().toFloat();
-        g.setColour(ds::ctl());
-        g.fillRoundedRectangle(r, 6.0f);
-        g.setColour(ds::ctlb());
-        g.drawRoundedRectangle(r.reduced(0.5f), 6.0f, 1.0f);
-        if (isMouseOver() || hasKeyboardFocus(true))
-        {
-            g.setColour(ds::acc().withAlpha(0.10f));
-            g.fillRoundedRectangle(r, 6.0f);
-        }
+        // Groove field with a chevron: surface-300, edge border, accent outline on hover.
+        auto r = getLocalBounds().toFloat().withSizeKeepingCentre((float) getWidth(), juce::jmin((float) getHeight(), 20.0f));
+        fillTallWell(g, r, isMouseOver(), this);
 
-        auto capsule = r.removeFromRight(18.0f)
-                           .withSizeKeepingCentre(14.0f, 16.0f);
-        g.setColour(ds::acc());
-        g.fillRoundedRectangle(capsule, 4.0f);
-        drawCaretUpDown(g, capsule, juce::Colours::white);
+        auto caret = r.removeFromRight(16.0f).withSizeKeepingCentre(10.0f, 10.0f);
+        drawStrokedChevron(g, caret, ds::inkMuted(), true);
 
-        auto textArea = r.reduced(9.0f, 0.0f);
-        g.setColour(ds::tx());
-        g.setFont(popupFont());
+        auto textArea = r.reduced(6.0f, 0.0f);
+        g.setColour(hasTooltipHighlight(this) ? juce::Colour(0xff1a1200) : ds::ink());
+        g.setFont(monoFontFixed(11.0f));
         const juce::String val = labels.size() > index ? labels[index] : juce::String();
         g.drawText(val, textArea.toNearestInt(), juce::Justification::centredLeft, false);
 
@@ -572,35 +573,29 @@ public:
 
     void paint(juce::Graphics& g) override
     {
-        const auto& t = inspectorTokens();
-        auto r = getLocalBounds().toFloat();
-        g.setColour(ds::well());
-        g.fillRoundedRectangle(r, 7.0f);
-        g.setColour(t.divider);
-        g.drawRoundedRectangle(r.reduced(0.5f), 7.0f, 1.0f);
-
-        auto inner = r.reduced(2.0f, 2.0f);
+        // Two Groove toggles side by side (2 px apart).
+        // Levels segmented control: muted track, selected cell is a raised
+        // surface with an edge border.
+        auto r = getLocalBounds().toFloat().withSizeKeepingCentre((float) getWidth(), 22.0f);
+        g.setColour(ds::surface300());
+        g.fillRoundedRectangle(r, ds::radius::md);
+        auto inner = r.reduced(2.0f);
         auto left = inner.withTrimmedRight(inner.getWidth() * 0.5f);
         auto right = inner.withTrimmedLeft(inner.getWidth() * 0.5f);
-        auto seg = left.withHeight(20.0f).withCentre(left.getCentre());
-        if (selected == Sel::Half)
+        for (auto [cell, sel] : { std::pair<juce::Rectangle<float>, Sel>{ left, Sel::Half },
+                                  std::pair<juce::Rectangle<float>, Sel>{ right, Sel::Double } })
         {
-            g.setColour(accentFillColour());
-            g.fillRoundedRectangle(seg, 5.0f);
+            if (selected != sel) continue;
+            g.setColour(ds::surface200());
+            g.fillRoundedRectangle(cell, ds::radius::md - 2.0f);
+            g.setColour(ds::edge());
+            g.drawRoundedRectangle(cell.reduced(0.5f), ds::radius::md - 2.0f, 1.0f);
         }
-        seg = right.withHeight(20.0f).withCentre(right.getCentre());
-        if (selected == Sel::Double)
-        {
-            g.setColour(accentFillColour());
-            g.fillRoundedRectangle(seg, 5.0f);
-        }
-        left = r.withTrimmedRight(r.getWidth() * 0.5f);
-        right = r.withTrimmedLeft(r.getWidth() * 0.5f);
 
-        g.setFont(inspectorFont());
+        g.setFont(uiFontFixed(12.0f, true));
         auto textCol = [&](Sel s)
         {
-            return selected == s ? onAccentColour() : t.rowLabel;
+            return selected == s ? ds::ink() : ds::inkMuted();
         };
         g.setColour(textCol(Sel::Half));
         g.drawText("Half", left.toNearestInt(), juce::Justification::centred, false);
@@ -643,6 +638,8 @@ public:
     }
 
     int getValue() const { return value; }
+    /** No label → the track starts at the left edge (e.g. Settings › Contrast). */
+    int labelColW() const { return label.isEmpty() ? 0 : kLabelColW; }
     void setDefault(int d) { defV = juce::jlimit(minV, maxV, d); }
 
     void mouseMove(const juce::MouseEvent& e) override
@@ -671,7 +668,7 @@ public:
         const auto& t = inspectorTokens();
         auto r = getLocalBounds().toFloat();
         const bool hot = isMouseOverOrDragging();
-        fillTallWell(g, r, false);
+        fillTallWell(g, r, false, this);
 
         const float norm = (float) (value - minV) / (float) juce::jmax(1, maxV - minV);
         juce::Rectangle<float> fill;
@@ -722,7 +719,7 @@ private:
     juce::Rectangle<float> trackLane() const
     {
         auto r = getLocalBounds().toFloat();
-        r.removeFromLeft((float) kLabelColW + 10.0f);
+        r.removeFromLeft((float) labelColW() + 10.0f);
         r.removeFromRight((float) kValueColW + 8.0f);
         return r;
     }
@@ -739,7 +736,7 @@ private:
     {
         const auto& t = inspectorTokens();
         auto bounds = getLocalBounds();
-        auto labelR = bounds.removeFromLeft(kLabelColW);
+        auto labelR = bounds.removeFromLeft(labelColW());
         auto valueR = bounds.removeFromRight(kValueColW);
         const bool atDefault = value == defV;
         const auto text = valueText.isNotEmpty() ? valueText
@@ -753,9 +750,9 @@ private:
         g.drawText(text, valueR, juce::Justification::centredRight, true);
 
         auto lane = trackLane();
-        auto track = lane.withSizeKeepingCentre(lane.getWidth(), 4.0f);
+        auto track = lane.withSizeKeepingCentre(lane.getWidth(), 2.0f);
         g.setColour(ds::trk());
-        g.fillRoundedRectangle(track, 2.0f);
+        g.fillRoundedRectangle(track, 1.0f);
 
         const auto travel = thumbTravel();
         const float span = juce::jmax(1.0f, travel.getEnd() - travel.getStart());
@@ -770,21 +767,20 @@ private:
             g.fillRect(cx - 0.5f, lane.getCentreY() - 5.0f, 1.0f, 10.0f);
             auto fill = juce::Rectangle<float>::leftTopRightBottom(
                 juce::jmin(cx, x), track.getY(), juce::jmax(cx, x), track.getBottom());
-            g.setColour(t.accent);
-            g.fillRoundedRectangle(fill, 2.0f);
+            // Levels: primary filled track (LvRow spec).
+            g.setColour(ds::primary());
+            g.fillRoundedRectangle(fill, 1.0f);
         }
         else
         {
             auto fill = juce::Rectangle<float>::leftTopRightBottom(
                 track.getX(), track.getY(), x, track.getBottom());
-            g.setColour(t.accent);
-            g.fillRoundedRectangle(fill, 2.0f);
+            g.setColour(ds::primary());
+            g.fillRoundedRectangle(fill, 1.0f);
         }
 
         auto thumb = juce::Rectangle<float>(x - 7.0f, lane.getCentreY() - 7.0f, 14.0f, 14.0f);
         ds::shadow::thumb(g, thumb);
-        g.setColour(juce::Colours::black.withAlpha(0.15f));
-        g.drawEllipse(thumb, 0.5f);
     }
 
     void setFromX(float x)
@@ -929,7 +925,7 @@ public:
         const float xHi = track.getX() + track.getWidth() * ((float) (hi - minV) / span);
         auto fill = juce::Rectangle<float>::leftTopRightBottom(
             xLo, track.getY(), xHi, track.getBottom());
-        g.setColour(t.accent);
+        g.setColour(ds::primary());
         g.fillRoundedRectangle(fill, track.getHeight() * 0.5f);
 
         auto thumbAt = [&](float x)
@@ -942,7 +938,7 @@ public:
         ds::shadow::thumb(g, thumbAt(xHi));
         if (hot)
         {
-            g.setColour(t.accent.withAlpha(0.55f));
+            g.setColour(ds::acc());
             g.drawEllipse(thumbAt(xLo).reduced(0.5f), 1.0f);
             g.drawEllipse(thumbAt(xHi).reduced(0.5f), 1.0f);
         }
@@ -961,22 +957,23 @@ public:
         g.setFont(inspectorFont());
         g.setColour(t.rowLabel);
         g.drawText(label, header, juce::Justification::centredLeft, true);
-        g.setColour(atDefault ? t.valueText : t.accent);
+        g.setFont(inspectorMono());
+        g.setColour(atDefault ? t.valueText : ds::ink());
         g.drawText(text, header, juce::Justification::centredRight, true);
 
         r.removeFromTop(7);
         auto lane = r.removeFromTop(24).toFloat();
         constexpr float kThumbD = 14.0f;
         const float inset = kThumbD * 0.5f;
-        auto track = lane.reduced(inset, 0.0f).withSizeKeepingCentre(lane.getWidth() - inset * 2.0f, 4.0f);
+        auto track = lane.reduced(inset, 0.0f).withSizeKeepingCentre(lane.getWidth() - inset * 2.0f, 2.0f);
         g.setColour(ds::trk());
-        g.fillRoundedRectangle(track, 2.0f);
+        g.fillRoundedRectangle(track, 1.0f);
         const float span = (float) juce::jmax(1, maxV - minV);
         const float xLo = track.getX() + track.getWidth() * ((float) (lo - minV) / span);
         const float xHi = track.getX() + track.getWidth() * ((float) (hi - minV) / span);
         auto fill = juce::Rectangle<float>::leftTopRightBottom(xLo, track.getY(), xHi, track.getBottom());
-        g.setColour(t.accent);
-        g.fillRoundedRectangle(fill, 2.0f);
+        g.setColour(ds::primary());
+        g.fillRoundedRectangle(fill, 1.0f);
         auto thumbAt = [&](float x)
         {
             return juce::Rectangle<float>(x - kThumbD * 0.5f, lane.getCentreY() - kThumbD * 0.5f,
@@ -1138,8 +1135,8 @@ public:
         auto header = getLocalBounds().removeFromTop(headerStrip());
         if (sidebarLabelStyle)
         {
-            g.setFont(uiFontFixed(11.0f));
-            g.setColour(ds::tx2());
+            g.setFont(uiFontFixed(11.0f, true));
+            g.setColour(ds::inkMuted());
         }
         else
         {
@@ -1162,7 +1159,7 @@ public:
         }
         g.setFont(sidebarLabelStyle ? uiFontFixed(11.0f) : inspectorFont());
         const bool summaryDefault = getSelectedIndex() == neutralIndex;
-        g.setColour(summaryDefault ? t.valueText : t.accent);
+        g.setColour(summaryDefault ? ds::inkMuted() : ds::ink());
         g.drawText(selectedSummary(), header, juce::Justification::centredRight, true);
 
         if (collapsible && collapsed)
@@ -1175,24 +1172,19 @@ public:
             const bool on = i < (int) selected.size() && selected[(size_t) i];
             const bool cand = !on && i < 16
                 && (candidateMask & (uint16_t) (1u << i)) != 0;
-            if (on)
-                g.setColour(accentFillColour());
-            else if (cand)
-                g.setColour(t.accent.withAlpha(0.12f));
-            else
-                g.setColour(t.tallWell);
-            g.fillRoundedRectangle(cell, 6.0f);
+            // Levels key chip: primary fill when selected, surface + edge when
+            // not; a candidate (suggested) chip carries a small violet dot.
+            g.setColour(on ? ds::primary() : ds::surface200());
+            g.fillRoundedRectangle(cell, ds::radius::sm);
+            if (!on)
+            {
+                g.setColour(ds::edge());
+                g.drawRoundedRectangle(cell.reduced(0.5f), ds::radius::sm, 1.0f);
+            }
             if (cand)
             {
-                g.setColour(t.accent.withAlpha(0.12f));
-                g.fillRoundedRectangle(cell, 6.0f);
-                g.setColour(t.accent);
-                g.drawRoundedRectangle(cell.reduced(0.5f), 6.0f, 1.0f);
-            }
-            else if (!on)
-            {
-                g.setColour(t.controlHairline);
-                g.drawRoundedRectangle(cell.reduced(0.5f), 6.0f, 1.0f);
+                g.setColour(ds::acc());
+                g.fillEllipse(cell.getRight() - 7.0f, cell.getY() + 3.0f, 4.0f, 4.0f);
             }
             float chipPt = kAnnotPt;
             if (sidebarLabelStyle)
@@ -1203,8 +1195,7 @@ public:
                     chipPt = 9.0f;
             }
             g.setFont(uiFontFixed(chipPt, on));
-            g.setColour(on ? onAccentColour()
-                           : (cand ? t.accent : t.headerText));
+            g.setColour(on ? ds::onPrimary() : ds::ink());
             g.drawText(labels[i], cell.toNearestInt(), juce::Justification::centred, false);
         }
         if (hint.isNotEmpty())
@@ -1381,31 +1372,34 @@ public:
         g.drawText(title, header, juce::Justification::centredLeft, true);
         if (summary.isNotEmpty())
         {
-            g.setColour(summaryDefault ? t.valueText : t.accent);
+            g.setColour(summaryDefault ? ds::inkMuted() : ds::ink());
             g.drawText(summary, header, juce::Justification::centredRight, true);
         }
 
         r.removeFromTop(7);
         auto track = r.removeFromTop(kTrackH).toFloat();
-        g.setColour(ds::well());
-        g.fillRoundedRectangle(track, 7.0f);
-        g.setColour(t.divider);
-        g.drawRoundedRectangle(track.reduced(0.5f), 7.0f, 1.0f);
 
         if (labels.isEmpty()) return;
-        auto inner = track.reduced(2.0f, 2.0f);
-        const float cellW = inner.getWidth() / (float) labels.size();
+        // Levels segmented control: muted track, raised selected cell.
+        {
+            auto bg = juce::Rectangle<float>(track.getX(), track.getCentreY() - 11.0f, track.getWidth(), 22.0f);
+            g.setColour(ds::surface300());
+            g.fillRoundedRectangle(bg, ds::radius::md);
+        }
+        const float cellW = (track.getWidth() - 4.0f) / (float) labels.size();
         for (int i = 0; i < labels.size(); ++i)
         {
-            auto cell = juce::Rectangle<float>(inner.getX() + cellW * (float) i,
-                                               inner.getY(), cellW, 20.0f);
+            auto cell = juce::Rectangle<float>(track.getX() + 2.0f + cellW * (float) i,
+                                               track.getCentreY() - 9.0f, cellW, 18.0f);
             if (i == index)
             {
-                g.setColour(accentFillColour());
-                g.fillRoundedRectangle(cell.reduced(1.0f, 0.0f), 5.0f);
+                g.setColour(ds::surface200());
+                g.fillRoundedRectangle(cell, ds::radius::sm);
+                g.setColour(ds::edge());
+                g.drawRoundedRectangle(cell.reduced(0.5f), ds::radius::sm, 1.0f);
             }
             g.setFont(uiFontFixed(kAnnotPt, i == index));
-            g.setColour(i == index ? onAccentColour() : t.headerText);
+            g.setColour(i == index ? ds::ink() : ds::inkMuted());
             g.drawText(labels[i], cell.toNearestInt(), juce::Justification::centred, false);
             if (i == nativeIndex)
             {
@@ -1536,8 +1530,8 @@ public:
         auto header = r.removeFromTop(headerStrip());
         if (sidebarLabelStyle)
         {
-            g.setFont(uiFont(11.0f));
-            g.setColour(ds::tx2());
+            g.setFont(uiFontFixed(11.0f, true));
+            g.setColour(ds::inkMuted());
         }
         else
         {
@@ -1558,8 +1552,8 @@ public:
             g.drawText(label, header.removeFromLeft(header.getWidth() / 2),
                        juce::Justification::centredLeft, true);
         }
-        g.setColour(isFullRange() ? t.valueText : t.accent);
-        g.setFont(sidebarLabelStyle ? uiFont(11.0f, true) : inspectorFont());
+        g.setColour(isFullRange() ? ds::inkMuted() : ds::ink());
+        g.setFont(sidebarLabelStyle ? monoFontFixed(11.0f) : inspectorFont());
         const juce::String val = isFullRange() ? "Any"
             : (juce::String(lo) + juce::String::charToString((juce::juce_wchar) 0x2013) + juce::String(hi));
         g.drawText(val, header, juce::Justification::centredRight, true);
@@ -1586,39 +1580,44 @@ public:
                 hist.getX() + (float) i * (barW + gap),
                 hist.getBottom() - juce::jmax(2.0f, h),
                 barW, juce::jmax(2.0f, h));
-            g.setColour(inRange ? t.accent : t.tallFill);
-            g.fillRoundedRectangle(bar, 1.5f);
+            if (bins[(size_t) i] <= 0)
+            {
+                // Empty bin: a 1px hairline so the range still reads.
+                g.setColour(ds::surface300());
+                g.fillRect(bar.withTop(hist.getBottom() - 1.0f));
+            }
+            else
+            {
+                g.setColour(inRange ? ds::primary().withAlpha(0.85f) : ds::ink().withAlpha(0.18f));
+                g.fillRect(bar);
+            }
         }
 
         r.removeFromTop(4);
         constexpr float kThumbD = 14.0f;
         const float thumbInset = kThumbD * 0.5f;
         auto lane = r.removeFromTop(kTrackH).toFloat();
-        auto track = lane.reduced(thumbInset, 0.0f).withSizeKeepingCentre(lane.getWidth() - thumbInset * 2.0f, 4.0f);
+        auto track = lane.reduced(thumbInset, 0.0f).withSizeKeepingCentre(lane.getWidth() - thumbInset * 2.0f, 2.0f);
         g.setColour(ds::trk());
-        g.fillRoundedRectangle(track, 2.0f);
+        g.fillRect(track);
         const float trackSpan = (float) juce::jmax(1, maxV - minV);
         const float xLo = track.getX() + track.getWidth() * ((float) (lo - minV) / trackSpan);
         const float xHi = track.getX() + track.getWidth() * ((float) (hi - minV) / trackSpan);
         auto sel = juce::Rectangle<float>::leftTopRightBottom(xLo, track.getY(), xHi, track.getBottom());
-        g.setColour(t.accent);
-        g.fillRoundedRectangle(sel, 2.0f);
+        g.setColour(ds::primary());
+        g.fillRect(sel);
+        // Groove handles: solid ink blocks (10 x 12, radius-sm).
         auto thumbAt = [&](float x)
         {
-            return juce::Rectangle<float>(x - kThumbD * 0.5f,
-                                          lane.getCentreY() - kThumbD * 0.5f,
-                                          kThumbD, kThumbD);
+            return juce::Rectangle<float>(x - 5.0f, lane.getCentreY() - 6.0f, 10.0f, 12.0f);
         };
         ds::shadow::thumb(g, thumbAt(xLo));
         ds::shadow::thumb(g, thumbAt(xHi));
-        g.setColour(juce::Colours::black.withAlpha(0.15f));
-        g.drawEllipse(thumbAt(xLo), 0.5f);
-        g.drawEllipse(thumbAt(xHi), 0.5f);
     }
 
 private:
     static constexpr int kLabelH = 18;
-    static constexpr int kHistH = 16;
+    static constexpr int kHistH = 24;
     static constexpr int kTrackH = 20;
 
     int headerStrip() const { return collapsible ? 22 : kLabelH; }
@@ -1734,6 +1733,7 @@ class PitchRow : public juce::Component
 public:
     FlatStepper stepper;
     juce::String annotation;
+    juce::String label { "Pitch" };
 
     PitchRow()
     {
@@ -1758,7 +1758,7 @@ public:
     {
         g.setFont(inspectorFont());
         g.setColour(inspectorTokens().rowLabel);
-        g.drawText("Pitch", getLocalBounds().withWidth(kLabelColW),
+        g.drawText(label, getLocalBounds().withWidth(kLabelColW),
                    juce::Justification::centredLeft, true);
 
         g.setFont(uiFontFixed(kAnnotPt, false));
@@ -1860,7 +1860,8 @@ public:
         g.setFont(inspectorFont());
         g.setColour(t.rowLabel);
         g.drawText("Note filter", header, juce::Justification::centredLeft, true);
-        g.setColour(allOn ? t.valueText : t.accent);
+        g.setFont(inspectorMono());
+        g.setColour(allOn ? t.valueText : ds::ink());
         g.drawText(allOn ? "All notes" : (juce::String(onCount) + " of 12"),
                    header, juce::Justification::centredRight, true);
 
@@ -1877,16 +1878,18 @@ private:
      * 2) on + out of scale — tx3 / trk
      * 3) off — panel/ctl + slash
      */
-    static juce::Colour activeWhite()   { return ds::kfInW(); }
-    static juce::Colour activeBlack()   { return ds::kfInB(); }
-    static juce::Colour outScaleWhite() { return ds::kfOutW(); }
-    static juce::Colour outScaleBlack() { return ds::kfOutB(); }
-    static juce::Colour offWhiteKey()   { return ds::panel(); }
-    static juce::Colour offBlackKey()   { return ds::ctl(); }
+    // Levels: in key = primary, outside = ink 18% (opaque over surface so
+    // overlapping black keys stay solid), muted = surface + slash.
+    static juce::Colour activeWhite()   { return ds::primary(); }
+    static juce::Colour activeBlack()   { return ds::primary(); }
+    static juce::Colour outScaleWhite() { return ds::surface200().overlaidWith(ds::ink().withAlpha(0.18f)); }
+    static juce::Colour outScaleBlack() { return ds::surface200().overlaidWith(ds::ink().withAlpha(0.30f)); }
+    static juce::Colour offWhiteKey()   { return ds::surface200(); }
+    static juce::Colour offBlackKey()   { return ds::surface300(); }
 
     static void paintOffSlash(juce::Graphics& g, juce::Rectangle<float> key)
     {
-        g.setColour(ds::tx3().withAlpha(0.60f));
+        g.setColour(ds::inkMuted());
         const float inset = 4.0f;
         g.drawLine(key.getX() + inset, key.getBottom() - inset,
                    key.getRight() - inset, key.getY() + inset, 1.4f);
@@ -1932,13 +1935,13 @@ private:
             { offWhiteKey(), "Muted", true },
         };
         float x = row.getX();
-        g.setFont(uiFontFixed(10.5f));
+        g.setFont(monoFontFixed(12.0f));
         for (const auto& item : items)
         {
             auto sw = juce::Rectangle<float>(x, row.getCentreY() - 5.0f, 10.0f, 10.0f);
             g.setColour(item.fill);
             g.fillRoundedRectangle(sw, 2.0f);
-            g.setColour(ds::ctlb());
+            g.setColour(ds::edge());
             g.drawRoundedRectangle(sw.reduced(0.5f), 2.0f, 1.0f);
             if (item.slash)
                 paintOffSlash(g, sw);
@@ -1965,7 +1968,6 @@ private:
         const float whiteH = area.getHeight();
         const float blackW = (area.getWidth() / 7.0f) * 0.62f;
         const float blackH = whiteH * 0.58f;
-        const auto& t = inspectorTokens();
 
         auto enabled = [this](int pc)
         {
@@ -1988,11 +1990,10 @@ private:
             fillKey(g, key, true);
             if (!on)
                 paintOffSlash(g, key);
-            const auto border = !on ? ds::ctlb()
-                              : (scale ? t.accent.withAlpha(0.50f) : ds::ctlb());
+            const auto border = (on && scale) ? ds::primary() : ds::edge();
             strokeKey(g, key, true, border);
-            g.setFont(uiFontFixed(8.5f));
-            g.setColour(scale && on ? t.accent : t.valueText);
+            g.setFont(monoFontFixed(10.0f));
+            g.setColour(!on ? ds::inkMuted() : (scale ? ds::onPrimary() : ds::ink()));
             g.drawText(juce::String(kNoteNames[(size_t) pc]),
                        key.removeFromBottom(12.0f).toNearestInt(),
                        juce::Justification::centred, false);
@@ -2010,8 +2011,9 @@ private:
             fillKey(g, key, false);
             if (!on)
                 paintOffSlash(g, key);
-            const auto border = !on ? ds::ctlb()
-                              : (scale ? t.accent.withAlpha(0.50f) : ds::ctlb());
+            // Black keys sit on the whites: a surface-coloured outline keeps
+            // them separated from an in-key (primary) neighbour.
+            const auto border = (on && scale) ? ds::surface200() : ds::edge();
             strokeKey(g, key, false, border);
         }
     }
@@ -2076,11 +2078,13 @@ public:
 
     int idealHeight() const { return kRowMinH + 7 + kSliderRowH; }
 
+    void setControlWidth(int w) { controlW = w > 0 ? w : kSelectW; resized(); }
+
     void resized() override
     {
         auto r = getLocalBounds();
         auto head = r.removeFromTop(kRowMinH);
-        const int popW = juce::jmax(kSelectW, popup.idealWidth());
+        const int popW = controlW > 0 ? controlW : juce::jmax(kSelectW, popup.idealWidth());
         popup.setBounds(head.removeFromRight(popW).withSizeKeepingCentre(popW, kControlH));
         labelBounds = head.withTrimmedRight(8);
         r.removeFromTop(7);
@@ -2099,11 +2103,13 @@ private:
     FlatPopup& popup;
     FlatSliderRow& amount;
     juce::Rectangle<int> labelBounds;
+    int controlW = 0;
 };
 
 // ── Section (fold chevron + large title + refresh + lock) ────────────────────
 
-class Section : public juce::Component
+class Section : public juce::Component,
+                private juce::Timer
 {
 public:
     explicit Section(const juce::String& t) : title(t) {}
@@ -2152,6 +2158,7 @@ public:
     }
 
     bool isLocked() const { return locked; }
+    bool isDragging() const { return dragging; }
 
     /** Re-evaluate dirty-row visibility (call after param changes). */
     void refreshDirtyRows()
@@ -2180,19 +2187,27 @@ public:
 
     int idealHeight() const
     {
+        return idealHeightForState(open);
+    }
+
+    /** Height if the section were forced open or closed (ignores current fold). */
+    int idealHeightForState(bool forceOpen) const
+    {
         const int rowGap = toolkitRowGap();
         int shown = 0;
         int content = 0;
         for (const auto& r : rows)
         {
-            if (!isRowShowing(r)) continue;
+            if (r.forcedHidden) continue;
+            const bool show = forceOpen || (r.dirty && r.dirty());
+            if (!show) continue;
             if (shown > 0) content += rowGap;
             content += r.height();
             ++shown;
         }
         if (shown == 0)
             return kSectionHeaderH;
-        const int padB = open ? toolkitSectionPadB() : toolkitSectionPadBFolded();
+        const int padB = forceOpen ? toolkitSectionPadB() : toolkitSectionPadBFolded();
         return kSectionHeaderH + toolkitTitleGap() + content + padB;
     }
 
@@ -2220,22 +2235,57 @@ public:
         }
     }
 
+    // Header interaction: click the chevron/title to fold; click lock or reset;
+    // press and hold anywhere else on the header to pick the section up and reorder it.
     void mouseDown(const juce::MouseEvent& e) override
     {
+        pressInHeader = false;
         if (e.y > kSectionHeaderH) return;
 
-        if (lockBounds().contains(e.getPosition()) && onLockToggle)
+        if (showHeaderChrome && lockBounds().contains(e.getPosition()) && onLockToggle)
         {
             onLockToggle();
             return;
         }
-        if (resetBounds().contains(e.getPosition()) && onReset)
+        if (showHeaderChrome && resetBounds().contains(e.getPosition()))
         {
-            onReset();
+            if (onReset && modifiedCount() > 0 && !locked) onReset();
             return;
         }
         if (headerHitBounds().contains(e.getPosition()))
+        {
+            pressInHeader = true;
+            dragging = false;
+            if (onDragMove) startTimer(kHoldMs);
+        }
+    }
+
+    void mouseDrag(const juce::MouseEvent& e) override
+    {
+        if (!pressInHeader) return;
+        if (dragging)
+        {
+            if (onDragMove) onDragMove(e.getScreenY());
+            return;
+        }
+        if (e.getDistanceFromDragStart() > 6)
+            stopTimer();   // a drag that starts before the hold is not a reorder
+    }
+
+    void mouseUp(const juce::MouseEvent&) override
+    {
+        stopTimer();
+        if (dragging)
+        {
+            dragging = false;
+            repaint();
+            if (onDragEnd) onDragEnd();
+        }
+        else if (pressInHeader)
+        {
             setOpen(!open);
+        }
+        pressInHeader = false;
     }
 
     void mouseMove(const juce::MouseEvent& e) override
@@ -2262,60 +2312,91 @@ public:
 
     void paint(juce::Graphics& g) override
     {
-        const auto& t = inspectorTokens();
+        // Levels: raised section face (surface100) on surface000 body well.
         const int mods = modifiedCount();
-        auto titleR = getLocalBounds().removeFromTop(kSectionHeaderH);
+        auto b = getLocalBounds().toFloat();
+        g.setColour(ds::surface100());
+        g.fillRect(b);
+
+        auto header = getLocalBounds().removeFromTop(kSectionHeaderH);
+        if (headerHover || dragging)
+        {
+            g.setColour(ds::ink().withAlpha(dragging ? 0.07f : 0.04f));
+            g.fillRect(dragging ? getLocalBounds() : header);
+        }
         auto chev = chevronBounds().toFloat().withSizeKeepingCentre(10.0f, 10.0f);
-        drawStrokedChevron(g, chev, t.valueText, open);
+        drawStrokedChevron(g, chev, ds::inkMuted(), open);
 
-        titleR.removeFromLeft(kSectionPadH + 16 + 6);
-        titleR.removeFromRight(8 + 24 + 24);
-
+        auto titleR = header.withTrimmedLeft(chevronBounds().getRight() + 2);
+        if (showHeaderChrome)
+            titleR.setRight(resetBounds().getX() - 4);
+        else
+            titleR.removeFromRight(4);
         g.setFont(sectionTitleFont());
-        g.setColour(t.rowLabel);
-        const auto upper = title.toUpperCase();
-        const int titleW = (int) std::ceil(g.getCurrentFont().getStringWidthFloat(upper));
-        g.drawText(upper, titleR.removeFromLeft(titleW), juce::Justification::centredLeft, false);
+        g.setColour(ds::ink());
+        const auto titleCaps = title.toUpperCase();
+        const int titleW = (int) std::ceil(juce::GlyphArrangement::getStringWidth(g.getCurrentFont(), titleCaps)) + 2;
+        g.drawText(titleCaps, titleR.removeFromLeft(juce::jmin(titleW, titleR.getWidth())),
+                   juce::Justification::centredLeft, true);
 
-        if (mods > 0)
+        if (showHeaderChrome && mods > 0)
         {
-            titleR.removeFromLeft(6);
-            const auto badgeText = juce::String(mods);
-            g.setFont(uiFontFixed(10.0f, true));
-            const int textW = (int) std::ceil(g.getCurrentFont().getStringWidthFloat(badgeText));
-            const int badgeW = juce::jmax(16, textW + 10);
-            auto badge = titleR.removeFromLeft(badgeW).withSizeKeepingCentre(badgeW, 16).toFloat();
-            g.setColour(t.accent.withAlpha(usesDarkAppearance() ? 0.22f : 0.12f));
-            g.fillRoundedRectangle(badge, 8.0f);
-            g.setColour(t.accent);
-            g.drawText(badgeText, badge.toNearestInt(), juce::Justification::centred, false);
+            // Count-only badge: violet 12% tag, ink mono digits (Levels).
+            titleR.removeFromLeft(8);
+            const auto txt = juce::String(mods);
+            const auto bf = monoFontFixed(12.0f, true);
+            const float bw = juce::jmax(20.0f, juce::GlyphArrangement::getStringWidth(bf, txt) + 12.0f);
+            // Levels: the count sits at the right of the header, before reset/lock.
+            const float rightEdge = showHeaderChrome ? (float) resetBounds().getX() - 6.0f
+                                                     : (float) getWidth() - 12.0f;
+            auto badge = juce::Rectangle<float>(rightEdge - bw, (float) titleR.getCentreY() - 10.0f, bw, 20.0f);
+            if (badge.getX() >= (float) titleR.getX())
+            {
+                g.setColour(ds::acc().withAlpha(ds::dark() ? 0.22f : 0.12f));
+                g.fillRoundedRectangle(badge, ds::radius::sm);
+                g.setFont(bf);
+                g.setColour(ds::ink());
+                g.drawText(txt, badge.toNearestInt(), juce::Justification::centred, false);
+            }
         }
 
-        const bool dirty = mods > 0;
-        const float rest = 0.40f;
-        auto resetCol = t.chevron.withAlpha((headerHover || dirty) ? 1.0f : rest);
-        auto lockCol = locked ? t.accent
-                              : t.chevron.withAlpha(headerHover ? 1.0f : rest);
-        drawIcon(g, icons::undo,
-                 resetBounds().toFloat().withSizeKeepingCentre(14.0f, 14.0f), resetCol, 1.4f);
-        drawIcon(g, locked ? icons::lockClosed : icons::lockOpen,
-                 lockBounds().toFloat().withSizeKeepingCentre(14.0f, 14.0f), lockCol, 1.4f);
-
-        if (showBottomDivider)
+        if (showHeaderChrome)
         {
-            g.setColour(t.divider);
-            g.fillRect(0, getHeight() - 1, getWidth(), 1);
+            // Reset: live when this section has changes and is not locked.
+            const bool canReset = mods > 0 && !locked;
+            drawIcon(g, icons::undo, resetBounds().toFloat().withSizeKeepingCentre(10.0f, 10.0f),
+                     canReset ? ds::ink() : ds::inkFaint(), 1.3f);
+
+            // Lock: a control-sm toggle; lit (accent) while locked.
+            auto lock = lockBounds().toFloat().withSizeKeepingCentre(16.0f, 14.0f);
+            if (locked)
+            {
+                ds::drawActive(g, lock, ds::radius::sm);
+            }
+            // Unlocked: bare icon (Levels ghost icon button).
+            drawIcon(g, locked ? icons::lockClosed : icons::lockOpen, lock.withSizeKeepingCentre(9.0f, 9.0f),
+                     locked ? ds::acc() : ds::inkMuted(), 1.2f);
         }
+
+        g.setColour(dragging ? ds::acc() : ds::line());
+        g.fillRect(0, getHeight() - 1, getWidth(), 1);
     }
 
     juce::String title;
+    juce::String sectionId;
     /** Folded by default; when folded, dirty (changed) rows stay visible. */
     bool open = false;
     bool locked = false;
-    bool showBottomDivider = true;
+    /** When false, header omits lock / reset / "X changed" (generator sections). */
+    bool showHeaderChrome = true;
+    bool showBottomDivider = false;   // legacy; frames replace dividers
     std::function<void()> onToggle;
     std::function<void()> onReset;
     std::function<void()> onLockToggle;
+    /** Hold-to-reorder: fired once the hold completes, while dragging (screen Y), and on release. */
+    std::function<void()> onDragStart;
+    std::function<void(int)> onDragMove;
+    std::function<void()> onDragEnd;
 
     struct Row
     {
@@ -2329,41 +2410,48 @@ public:
     std::vector<Row> rows;
 
 private:
-    juce::Rectangle<int> headerBounds() const
+    static constexpr int kHoldMs = 380;
+
+    void timerCallback() override
     {
-        return getLocalBounds().withTrimmedTop(toolkitSectionPadT())
-            .removeFromTop(kSectionHeaderH)
-            .reduced(kSectionPadH, 0);
+        stopTimer();
+        if (!pressInHeader) return;
+        dragging = true;
+        repaint();
+        if (onDragStart) onDragStart();
     }
 
     juce::Rectangle<int> lockBounds() const
     {
         auto h = getLocalBounds().removeFromTop(kSectionHeaderH);
         h.removeFromRight(8);
-        return h.removeFromRight(24).withSizeKeepingCentre(24, 22);
+        return h.removeFromRight(20);
     }
 
     juce::Rectangle<int> resetBounds() const
     {
         auto h = getLocalBounds().removeFromTop(kSectionHeaderH);
-        h.removeFromRight(8 + 24);
-        return h.removeFromRight(24).withSizeKeepingCentre(24, 22);
+        h.removeFromRight(8 + 20 + 4);
+        return h.removeFromRight(20);
     }
 
     juce::Rectangle<int> chevronBounds() const
     {
-        return { kSectionPadH, 0, 16, kSectionHeaderH };
+        return { 8, 0, 16, kSectionHeaderH };
     }
 
-    /** Whole header except the reset and lock cells. */
+    /** Whole header except the reset and lock cells (when chrome is shown). */
     juce::Rectangle<int> headerHitBounds() const
     {
         auto h = getLocalBounds().removeFromTop(kSectionHeaderH);
-        h.removeFromRight(8 + 24 + 24);
+        if (showHeaderChrome)
+            h.removeFromRight(4 + 20 + 20);
         return h;
     }
 
     bool headerHover = false;
+    bool pressInHeader = false;
+    bool dragging = false;
 
     bool isRowShowing(const Row& r) const
     {

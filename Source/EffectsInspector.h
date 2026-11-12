@@ -8,7 +8,8 @@
 namespace pflow {
 
 /** Flat macOS-style effects inspector (Playback / Timing / Performance / Pitch & Scale / Effects). */
-class EffectsInspector : public juce::Component, public juce::SettableTooltipClient
+class EffectsInspector : public juce::Component, public juce::SettableTooltipClient,
+                         private juce::Timer
 {
 public:
     EffectsInspector();
@@ -43,23 +44,49 @@ public:
 
     std::function<void(const GrooveParams&)> onGrooveChanged;
     std::function<void(const ClipEdit&)> onEditChanged;
+    /** Fired after Generate rolls a new seed for one part (see gen::Part). */
+    std::function<void(int /*gen::Part*/)> onGeneratorGenerated;
     std::function<void(double)> onBpmMultiplierChanged;
     /** Fired when header or section lock bits change. */
     std::function<void(uint32_t)> onSectionLocksChanged;
     /** Reset unlocked sections only (header refresh). */
     std::function<void()> onResetUnlocked;
     std::function<void()> onTrimClicked;
+    bool isTrimOn() const { return trimSwitch.getToggleState(); }
     std::function<void()> onActivated;
     /** Transport + toolkit header + current section heights. */
     int contentHeight() const;
+    /** Screenshot fold: Timing + Performance open, Pitch & Effects closed (Playback hidden in live). */
+    int defaultFoldHeight() const;
     /** Fired when a section fold changes the preferred pane height. */
     std::function<void()> onContentHeightChanged;
+    /** 0 = Generators, 1 = Effects. Generators live in the left column when hosted externally. */
+    void setPaneTab(int tab);
+    int getPaneTab() const { return paneTab; }
+    void setGeneratorsEnabled(bool on);
+    bool getGeneratorsEnabled() const { return generatorsEnabled; }
+    /** Move the generator accordion into another column. Null returns it here. */
+    void setExternalGeneratorHost(juce::Component* host);
+    void layoutExternalGenerators();
+    bool generatorsAreExternal() const { return externalGeneratorHost != nullptr; }
+    std::function<void(int)> onPaneTabChanged;
+
+    /** Section order as comma-separated ids (playback,timing,performance,pitch,effects). */
+    void setSectionOrder(const juce::String& ids);
+    juce::String getSectionOrder() const;
+    std::function<void(const juce::String&)> onSectionOrderChanged;
 
     fx::Section& playbackSection() { return playback; }
     fx::Section& timingSection() { return timing; }
     fx::Section& performanceSection() { return performance; }
     fx::Section& pitchSection() { return pitchSec; }
+    fx::Section& formSection() { return formSec; }
     fx::Section& effectsSection() { return effectsSec; }
+    fx::Section& arpSection() { return arpSec; }
+    fx::Section& melodySection() { return melodySec; }
+    fx::Section& chordsSection() { return chordsSec; }
+    fx::Section& bassSection() { return bassSec; }
+    fx::Section& drumSection() { return drumSec; }
     bool delayPairVisible() const
     {
         return delayBlock.isVisible() && delayTimePopup.isVisible() && delayAmountSl.isVisible();
@@ -83,7 +110,9 @@ private:
     void resetPlaybackSection();
     void resetTimingSection();
     void resetPerformanceSection();
+    void resetFormSection();
     void resetEffectsSection();
+    void refreshFormClipGating();
     void toggleSectionLock(uint32_t bit);
     void setAllSectionsLocked(bool locked);
     void refreshHeaderLockButton();
@@ -91,6 +120,11 @@ private:
     void foldAllSections();
     bool anySectionOpen() const;
     void updateToolkitFoldBounds();
+    void timerCallback() override;
+    void beginSectionDrag(fx::Section* sec);
+    void moveSectionDrag(int screenY);
+    void endSectionDrag();
+    void refreshChangedButton();
     void refreshDependentEnables();
     void refreshOctaveSummary();
 
@@ -100,27 +134,47 @@ private:
     uint32_t sectionLocks = 0;
     bool hasClip = false;
     bool liveStream = false;
+    bool generatorsEnabled = false;
+    int paneTab = 1; // Effects by default; Generators is 0
+    juce::Component* externalGeneratorHost = nullptr;
     int clipRootPc = -1;
     int clipSourceOctave = 4;
     int clipComplexity = 50;
     uint16_t candidateKeyMask = 0;
     uint16_t candidateModeMask = 0;
 
-    IconBtn btnReset { icons::undo, "Reset effects to defaults" };
-    IconBtn btnEffectsLock { icons::lockOpen, "Lock effects while browsing" };
+    IconBtn btnReset { icons::undo, "Reset Toolkit to defaults" };
+    IconBtn btnEffectsLock { icons::lockOpen, "Lock Toolkit while browsing" };
     juce::Rectangle<int> toolkitFoldBounds;
+    juce::Rectangle<int> generatorsTabBounds, effectsTabBounds;
+    IconBtn btnChanged { icons::foldRows, "Hide Unused" };
+    std::vector<fx::Section*> sectionOrder;
+    fx::Section* draggedSection = nullptr;
+    double jiggleStartMs = 0.0;
 
+    fx::Section arpSec { "Arpeggiator" };
+    fx::Section melodySec { "Melody" };
+    fx::Section chordsSec { "Chords" };
+    fx::Section bassSec { "Bass" };
+    fx::Section drumSec { "Drums" };
     fx::Section playback { "Playback" };
     fx::Section timing { "Timing" };
     fx::Section performance { "Performance" };
     fx::Section pitchSec { "Pitch & Scale" };
-    fx::Section effectsSec { "Effects" };
+    fx::Section formSec { "Form" };
+    fx::Section effectsSec { "Delay" };
 
     fx::TempoToggle tempoToggle;
     fx::InlineRow tempoRow;
     fx::FlatSwitch trimSwitch;
+    fx::FlatSwitch reverseSwitch;
+    fx::FlatSwitch invertSwitch;
+    fx::FlatSwitch selectedNotesSwitch;
     fx::FlatPopup extendPopup;
     fx::InlineRow extendRow;
+    fx::InlineRow reverseRow;
+    fx::InlineRow invertRow;
+    fx::InlineRow selectedNotesRow;
 
     fx::FlatPopup swingTimePopup;
     fx::FlatPopup quantizeTimePopup;
@@ -134,25 +188,101 @@ private:
 
     fx::FlatSliderRow dynamicsSl;
     fx::FlatSliderRow intensitySl;
-    fx::ChipGrid articulationGrid;
+    fx::FlatPopup articulationPopup;
+    fx::InlineRow articulationRow;
     fx::FlatSliderRow articulationStrengthSl;
     fx::FlatRangeSliderRow velocityRangeSl;
     fx::FlatPopup sustainPopup;
     fx::InlineRow sustainRow;
 
     fx::FlatSliderRow complexitySl;
+    fx::FlatSliderRow syncopationSl;
     fx::FlatSliderRow variationsSl;
     fx::FlatPopup delayTimePopup;
     fx::FlatSliderRow delayAmountSl;
     fx::GridAmountBlock delayBlock { "Delay", delayTimePopup, delayAmountSl };
     fx::FlatSliderRow delayFeedbackSl;
 
-    fx::SegmentedSelector octaveSelector;
+    fx::FlatTextButton arpGenerateBtn { "New" };
+    fx::InlineRow arpGenerateRow;
+    fx::FlatSwitch arpInputSwitch;
+    fx::InlineRow arpInputRow;
+    fx::FlatPopup arpLengthPopup;
+    fx::InlineRow arpLengthRow;
+    fx::FlatPopup arpFormPopup;
+    fx::InlineRow arpFormRow;
+    fx::FlatPopup arpShapePopup; // Type / phrasing morph
+    fx::InlineRow arpShapeRow;
+    fx::FlatPopup arpRatePopup;
+    fx::InlineRow arpRateRow;
+    fx::FlatSliderRow arpDensitySl;
+    fx::FlatSliderRow arpIntensitySl;
+    fx::FlatSliderRow arpDynamicsSl;
+    fx::FlatSliderRow arpGateSl;
+
+    fx::FlatTextButton melodyGenerateBtn { "New" };
+    fx::InlineRow melodyGenerateRow;
+    fx::FlatSwitch melodyInputSwitch;
+    fx::InlineRow melodyInputRow;
+    fx::FlatPopup melodyLengthPopup;
+    fx::InlineRow melodyLengthRow;
+    fx::FlatPopup melodyFormPopup;
+    fx::InlineRow melodyFormRow;
+    fx::FlatPopup melodyStylePopup;
+    fx::InlineRow melodyStyleRow;
+    fx::FlatPopup melodyContourPopup;
+    fx::InlineRow melodyContourRow;
+    fx::FlatPopup melodySpeedPopup;
+    fx::InlineRow melodySpeedRow;
+
+    fx::FlatTextButton chordsGenerateBtn { "New" };
+    fx::InlineRow chordsGenerateRow;
+    fx::FlatSwitch chordsInputSwitch;
+    fx::InlineRow chordsInputRow;
+    fx::FlatPopup chordLengthPopup;
+    fx::InlineRow chordLengthRow;
+    fx::FlatPopup chordFormPopup;
+    fx::InlineRow chordFormRow;
+    fx::FlatPopup chordVoicingPopup;
+    fx::InlineRow chordVoicingRow;
+    fx::FlatPopup chordColorPopup;
+    fx::InlineRow chordColorRow;
+    fx::FlatPopup chordRhythmPopup;
+    fx::InlineRow chordRhythmRow;
+
+    fx::FlatTextButton bassGenerateBtn { "New" };
+    fx::InlineRow bassGenerateRow;
+    fx::FlatSwitch bassInputSwitch;
+    fx::InlineRow bassInputRow;
+    fx::FlatPopup bassLengthPopup;
+    fx::InlineRow bassLengthRow;
+    fx::FlatPopup bassFormPopup;
+    fx::InlineRow bassFormRow;
+    fx::FlatPopup bassMotionPopup;
+    fx::InlineRow bassMotionRow;
+
+    fx::FlatTextButton drumGenerateBtn { "New" };
+    fx::InlineRow drumGenerateRow;
+    fx::FlatPopup drumStylePopup;
+    fx::InlineRow drumStyleRow;
+    fx::FlatPopup drumLengthPopup;
+    fx::InlineRow drumLengthRow;
+    fx::FlatPopup drumFormPopup;
+    fx::InlineRow drumFormRow;
+    fx::FlatSliderRow drumDensitySl;
+    fx::FlatSliderRow drumFillSl;
+
+    fx::PitchRow octaveRow;
     fx::FlatPopup octaveRangePopup;
     fx::InlineRow octaveRangeRow;
+    fx::FlatPopup outsideRangePopup;
+    fx::InlineRow outsideRangeRow;
     fx::PitchRow pitchRow;
+    fx::FlatSwitch pitchInputSwitch;
+    fx::InlineRow pitchInputRow;
     fx::ChipGrid keyGrid;
-    fx::ChipGrid modeGrid;
+    fx::FlatPopup modePopup;
+    fx::InlineRow modeRow;
     fx::FlatSwitch fitSwitch;
     fx::FlatSwitch mapSwitch;
     fx::NoteFilterBlock noteFilter;
@@ -168,13 +298,17 @@ private:
     fx::Divider performanceDivider;
     fx::Divider pitchDividerA;
     fx::Divider pitchDividerB;
-    fx::Divider effectsDivider;
 
     juce::Viewport viewport;
-    juce::Component body;
+    /** Scroll body: surface000 ground; sections paint surface100 raised faces. */
+    struct BodyWell : juce::Component
+    {
+        void paint(juce::Graphics& g) override { g.fillAll(ds::surface000()); }
+    };
+    BodyWell body;
     bool notifyingHeight = false;
 
-    static constexpr int kPanelW = 300;
+    static constexpr int kPanelW = 275;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(EffectsInspector)
 };

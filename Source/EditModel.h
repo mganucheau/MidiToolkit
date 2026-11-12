@@ -3,6 +3,7 @@
 #include <array>
 #include <cstdint>
 #include <map>
+#include <optional>
 #include <set>
 #include <vector>
 
@@ -28,15 +29,53 @@ struct RollNote
     bool   moved = false;   // set by resolveClip when a manual move applies
 };
 
-enum class ClipKind { Bass, Piano, Lead, Drums, Single };
+enum class ClipKind { Bass, Keys, Lead, Arp, Drums };
+constexpr int kNumClipKinds = 5;
 
 const char* clipKindName(ClipKind k);
+
+/** Keyword lexicon from a file name / path. nullopt = no useful tag. */
+std::optional<ClipKind> kindKeywordFromFileName(const juce::String& nameOrPath);
+
+/** Best-effort kind guess from a file name / path (keywords like bass, kit, keys).
+    Falls back to Lead when no keyword matches. */
+ClipKind hintKindFromFileName(const juce::String& nameOrPath);
+
+/** Content tags derived from note analysis. Bitmask on StepClip / BrowserSearch. */
+namespace clipTag
+{
+    constexpr uint16_t Swing         = 1u << 0;
+    constexpr uint16_t SixteenthHats = 1u << 1;
+    constexpr uint16_t Backbeat      = 1u << 2;
+    constexpr uint16_t SeventhChords = 1u << 3;
+    constexpr uint16_t Sparse        = 1u << 4;
+    constexpr int kCount = 5;
+}
+
+inline const char* clipTagName(int bit)
+{
+    switch (bit)
+    {
+        case 0: return "Swing";
+        case 1: return "16th Hats";
+        case 2: return "Backbeat";
+        case 3: return "7ths";
+        case 4: return "Sparse";
+        default: return "";
+    }
+}
 
 struct StepClip
 {
     juce::String name;
     juce::String filePath;
     ClipKind kind = ClipKind::Lead;
+    /** 0..100 confidence in `kind`. Low values mean the nearest label is a guess. */
+    int    kindConfidence = 50;
+    /** True when a non-trivial share of notes sit on the GM drum map. */
+    bool   hasDrumContent = false;
+    /** Bitmask of clipTag::* derived from content. */
+    uint16_t tagMask = 0;
     int    root = -1;       // pitch-class 0..11, -1 = unknown
     double bpm  = 120.0;
     int    bars = 1;
@@ -49,6 +88,19 @@ struct StepClip
     bool   notesResident = false;
     std::vector<RollNote> notes;
 };
+
+/** If the name/path matches the lexicon, set kind (and drum flag) and return true. */
+bool applyFilenameKindTag(StepClip& clip);
+
+/** True when pitch is in the General MIDI percussion key map (35–81). */
+bool isGmDrumPitch(int midi);
+
+/** True for Ableton/GM kick seats: Acoustic Bass Drum (35) or Bass Drum 1 / C1 (36). */
+bool isKickC1Pitch(int midi);
+
+/** GM kit shape: majority on the drum map, opens on kick at C1, and has
+    at least one other kit voice (snare/hat/perc) so mono C2 basslines don't match. */
+bool fitsGmDrumStructure(const std::vector<RollNote>& notes);
 
 // ── Music theory ─────────────────────────────────────────────────────────────
 
@@ -112,6 +164,32 @@ juce::String scaleDegreeLabel(int midi, int rootPc, Mode mode);
 /** Note + degree annotation for the inspector, e.g. "B4 (3rd)". */
 juce::String pitchScaleAnnotation(int midi, int rootPc, Mode mode);
 
+/** What happens to notes that fall outside an Octave Range window. */
+enum class OutsideRangeMode { Clip = 0, Fold = 1 };
+
+/** MIDI note of C in scientific octave 0..6 (octave 4 → C4 = 60). */
+inline int octaveWindowBase(int octaveIndex)
+{
+    return juce::jlimit(0, 127, (juce::jlimit(0, 6, octaveIndex) + 1) * 12);
+}
+
+/** Map one pitch into the N-octave window that starts at C of octaveIndex.
+    Fold wraps by the window size (Ableton OctaveFold). Clip clamps to the edges. */
+inline int mapPitchToOctaveWindow(int pitch, int octaveIndex, int octaveRange, OutsideRangeMode mode)
+{
+    const int span = juce::jlimit(1, 3, octaveRange) * 12;
+    const int lo = octaveWindowBase(octaveIndex);
+    const int hi = juce::jmin(127, lo + span - 1);
+    if (mode == OutsideRangeMode::Clip)
+        return juce::jlimit(lo, hi, pitch);
+    const int usable = juce::jmax(1, hi - lo + 1);
+    int rel = pitch - lo;
+    int wrapped = rel % usable;
+    if (wrapped < 0)
+        wrapped += usable;
+    return lo + wrapped;
+}
+
 // ── Edit record (one per clip; the clip itself is never touched) ─────────────
 
 struct NoteMove { int dPitch = 0; int dStep = 0; };
@@ -121,13 +199,23 @@ struct ClipEdit
     /** Absolute target octave 0..6. -1 = keep the clip's native octave. */
     int  octave    = -1;
     int  pitchShift = 0;   // whole-file semitone transpose, -12..12
-    /** 0 = Off. 1..3 = fold/spread the clip into that many octaves. */
+    /** Keyboard latches a root for browsing / generator parts with Input off. */
+    bool pitchInput = false;
+    /** 0 = Off. 1..3 = keep notes inside that many octaves from the target C. */
     int  octaveRange = 0;
+    /** Clip clamps outside notes. Fold wraps them into the window. */
+    OutsideRangeMode outsideRange = OutsideRangeMode::Fold;
     /** Inclusive MIDI clamp/fold window. Defaults = full range (inactive). */
     int  pitchMin = 0;
     int  pitchMax = 127;
     /** Playback length multiplier: 1 (Off), 2, 4, or 8. Tiles the clip. */
     int  extendMult = 1;
+    /** Mirror note start times within the (post-trim) clip length. */
+    bool reverse = false;
+    /** Mirror pitches around the midpoint of the current note range. */
+    bool invert = false;
+    /** When true, Invert / Reverse only touch notes listed in resolveClip's selection. */
+    bool selectedNotesOnly = false;
     bool fitScale  = false;
     bool mapToRoot = false;
     int  root      = -1;            // target root pitch-class, -1 = unset
@@ -212,7 +300,8 @@ struct ResolvedClip
 /** Effective notes + bar count for display and playback. Order:
     per-note move + octave → map-to-root → fit-to-scale → octave-range
     → pitch-range fold → step move → trim. */
-ResolvedClip resolveClip(const StepClip& clip, const ClipEdit& edit);
+ResolvedClip resolveClip(const StepClip& clip, const ClipEdit& edit,
+                         const std::set<int>* selectedNoteIds = nullptr);
 
 struct EdgeBars { int lead = 0; int tail = 0; };
 

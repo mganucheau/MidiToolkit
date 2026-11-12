@@ -19,8 +19,20 @@ namespace icons {
     inline constexpr const char* arrowsOut     = "arrows-out-line-horizontal";
     /** Arrow into a tray — drag a clip out to the DAW. */
     inline constexpr const char* dragOut       = "drag-out";
+    /** Six-dot grip — “pick this up and drag it” (Drag Me). */
+    inline constexpr const char* grip          = "grip";
+    /** Signal line through a ring — live MIDI runs through the Toolkit. */
+    inline constexpr const char* through       = "through";
     inline constexpr const char* scissors      = "scissors";
     inline constexpr const char* sliders       = "sliders";
+    /** Vertical EQ bars — standard audio Effects glyph. */
+    inline constexpr const char* eq            = "eq";
+    /** Two rotary dials — Effects. */
+    inline constexpr const char* knobs         = "knobs";
+    /** Funnel — Filters. */
+    inline constexpr const char* funnel        = "funnel";
+    /** Wrench — Settings. */
+    inline constexpr const char* wrench        = "wrench";
     inline constexpr const char* folder        = "folder";
     inline constexpr const char* folderOpen    = "folder-open";
     inline constexpr const char* star          = "star";
@@ -53,6 +65,10 @@ namespace icons {
     /** Circular arrow — rescan the open folder. */
     inline constexpr const char* refresh       = "refresh";
     inline constexpr const char* gear          = "gear";
+    /** 2×2 cells — toggle list/grid browser view. */
+    inline constexpr const char* grid          = "grid";
+    /** Nested folders — include files from subdirectories. */
+    inline constexpr const char* subfolders    = "subfolders";
     inline constexpr const char* more          = "more";
     inline constexpr const char* lockOpen      = "lock-open";
     inline constexpr const char* lockClosed    = "lock-closed";
@@ -67,16 +83,17 @@ namespace icons {
 void drawIcon(juce::Graphics& g, const juce::String& name,
               juce::Rectangle<float> bounds, juce::Colour colour, float px = 1.6f);
 
-/** §9 focused: 2px accent ring at 40% opacity, 2px offset. */
+/** Groove focus: 1px solid `focus` outline, offset 1px. */
 inline void drawFocusRing(juce::Graphics& g, juce::Rectangle<float> bounds, float radius)
 {
-    g.setColour(ds::acc().withAlpha(0.40f));
-    g.drawRoundedRectangle(bounds.expanded(2.0f), radius + 2.0f, 2.0f);
+    // Levels focus: 2 px primary ring, offset 2 px.
+    g.setColour(ds::focus());
+    g.drawRoundedRectangle(bounds.expanded(2.5f), radius + 2.0f, 2.0f);
 }
 
 // ── Small controls ───────────────────────────────────────────────────────────
 
-/** Square icon button. Optional `active` accent state. */
+/** Icon-only button — no square face; `active` tints the glyph. */
 class IconBtn : public juce::Button
 {
 public:
@@ -84,9 +101,17 @@ public:
     void paintButton(juce::Graphics&, bool over, bool down) override;
 
     juce::String icon;
-    bool active = false;       // accent fill
-    bool ghost = true;         // no background when idle
-    bool headerChrome = false; // toolkit pane header: tx3, accent wash on hover
+    bool active = false;       // accent (or activeTint) glyph
+    bool ghost = true;         // retained for callers; faces are never drawn
+    bool headerChrome = false; // muted idle glyph in pane headers
+    /** Levels solid primary face (Play): primary fill, onPrimary glyph; activeTint fill while active. */
+    bool solid = false;
+    /** When solid: fill with accent (violet) instead of primary — Filters CTA, etc. */
+    bool accentSolid = false;
+    /** Levels outlined face (Record): surface + 18 % border; glyph in activeTint; filled while active. */
+    bool outlined = false;
+    /** Left cell of a joined group (Levels tempo group): left-rounded tint, no border. */
+    bool groupLeft = false;
     float iconScale = 1.0f;
     /** When set, the button draws this label beside the icon and grows to fit. */
     juce::String caption;
@@ -109,6 +134,8 @@ public:
     bool active = false;       // accent style
     bool accentText = false;   // accent-tinted text/icon when inactive
     bool mono = false;
+    /** Levels primary action (Drag Me): solid primary fill, onPrimary label. */
+    bool primaryStyle = false;
     /** If >= 0, use this corner radius; otherwise capsule (height/2). */
     float cornerRadius = -1.0f;
 };
@@ -122,6 +149,30 @@ public:
     int idealWidth() const;
 
     juce::String onLabel, offLabel;
+};
+
+/** Connected two-option text toggle — both labels always visible. */
+class SegmentToggle : public juce::Component,
+                      public juce::SettableTooltipClient
+{
+public:
+    SegmentToggle(juce::String leftLabel, juce::String rightLabel);
+    void setIndex(int i, juce::NotificationType notify = juce::dontSendNotification);
+    int getIndex() const { return index; }
+    int idealWidth() const;
+    std::function<void(int)> onChange;
+
+    void paint(juce::Graphics&) override;
+    void mouseDown(const juce::MouseEvent&) override;
+    void mouseMove(const juce::MouseEvent&) override;
+    void mouseExit(const juce::MouseEvent&) override;
+
+private:
+    int hitIndex(juce::Point<int> p) const;
+
+    juce::String left, right;
+    int index = 0;
+    int hover = -1;
 };
 
 /** Labelled mini switch (Fit to scale / Map to root): caption · track · value

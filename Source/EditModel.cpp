@@ -13,13 +13,246 @@ const char* clipKindName(ClipKind k)
 {
     switch (k)
     {
-        case ClipKind::Bass:   return "Bass";
-        case ClipKind::Piano:  return "Piano";
-        case ClipKind::Lead:   return "Lead";
-        case ClipKind::Drums:  return "Drums";
-        case ClipKind::Single: return "Single";
+        case ClipKind::Bass:  return "Bass";
+        case ClipKind::Keys:  return "Keys";
+        case ClipKind::Lead:  return "Lead";
+        case ClipKind::Arp:   return "Arp";
+        case ClipKind::Drums: return "Drums";
     }
     return "Lead";
+}
+
+bool isGmDrumPitch(int midi)
+{
+    return midi >= 35 && midi <= 81;
+}
+
+bool isKickC1Pitch(int midi)
+{
+    // Ableton C1 / GM Bass Drum 1 = 36; Acoustic Bass Drum = 35.
+    return midi == 35 || midi == 36;
+}
+
+bool fitsGmDrumStructure(const std::vector<RollNote>& notes)
+{
+    if (notes.empty())
+        return false;
+
+    int gm = 0, kick = 0, snare = 0, hat = 0, perc = 0, shortHits = 0;
+    double earliest = 1.0e9;
+    int earliestPitch = -1;
+
+    for (const auto& n : notes)
+    {
+        if (n.start < earliest)
+        {
+            earliest = n.start;
+            earliestPitch = n.pitch;
+        }
+        // RollNote lengths are in 16th-steps; kit hits are short (≤ half-beat).
+        if (n.len <= 2.0)
+            ++shortHits;
+
+        if (!isGmDrumPitch(n.pitch))
+            continue;
+        ++gm;
+
+        // Inline voice buckets (same map as classifyDrumVoice below).
+        switch (n.pitch)
+        {
+            case 35: case 36: ++kick; break;
+            case 37: case 38: case 40: ++snare; break;
+            case 42: case 44: case 46: ++hat; break;
+            default: ++perc; break;
+        }
+    }
+
+    const int total = (int) notes.size();
+    // Majority of hits must sit on the GM drum map.
+    if (gm * 2 < total)
+        return false;
+    // Sustained low chords also sit on 36/40/43 — require drum-like lengths.
+    if (shortHits * 2 < total)
+        return false;
+    if (kick < 1)
+        return false;
+
+    // Need another kit voice so a mono bassline parked on C2 (MIDI 36) fails.
+    if (snare + hat + perc < 1)
+        return false;
+
+    // Must start on the kick at C1 (first sounding note is kick near t0).
+    if (!isKickC1Pitch(earliestPitch) || earliest > 0.75)
+        return false;
+
+    return true;
+}
+
+namespace {
+
+bool tokenEquals(const juce::String& tok, const char* word)
+{
+    return tok.equalsIgnoreCase(word);
+}
+
+bool tokenStartsWith(const juce::String& tok, const char* prefix)
+{
+    return tok.startsWithIgnoreCase(prefix);
+}
+
+/** Split a file name into alphanumeric tokens (ba_bassline_01 → ba, bassline, 01). */
+juce::StringArray fileNameTokens(const juce::String& nameOrPath)
+{
+    juce::String leaf = juce::File(nameOrPath).getFileNameWithoutExtension();
+    if (leaf.isEmpty())
+        leaf = nameOrPath;
+    juce::String cleaned;
+    cleaned.preallocateBytes((size_t) leaf.length());
+    for (auto c : leaf)
+    {
+        if (juce::CharacterFunctions::isLetterOrDigit(c))
+            cleaned += c;
+        else
+            cleaned += ' ';
+    }
+    return juce::StringArray::fromTokens(cleaned, " ", "");
+}
+
+} // namespace
+
+std::optional<ClipKind> kindKeywordFromFileName(const juce::String& nameOrPath)
+{
+    if (nameOrPath.isEmpty())
+        return std::nullopt;
+
+    const auto tokens = fileNameTokens(nameOrPath);
+    const auto lower = juce::File(nameOrPath).getFileNameWithoutExtension().toLowerCase();
+    // Padded so " ba " / " sn " / " hh " style short tags match token boundaries.
+    const auto padded = " " + lower.replaceCharacters("_-.", "   ") + " ";
+
+    auto hasToken = [&](const char* w)
+    {
+        for (const auto& t : tokens)
+            if (tokenEquals(t, w))
+                return true;
+        return false;
+    };
+    auto hasTokenPrefix = [&](const char* p)
+    {
+        const int plen = juce::String(p).length();
+        for (const auto& t : tokens)
+            if (tokenStartsWith(t, p) && t.length() <= plen + 3)
+                return true;
+        return false;
+    };
+    auto hasPadded = [&](const char* w)
+    {
+        return padded.containsIgnoreCase(juce::String(" ") + w + " ");
+    };
+
+    // Bass first so Deep_Bass_Groove stays Bass (not Drums via "groove").
+    // "808" is treated as bass (sub/808 basslines), not kit percussion.
+    if (hasToken("bassline") || hasToken("basslin") || hasToken("bass")
+        || hasToken("bas") || hasToken("ba") || hasToken("sub") || hasToken("subbass")
+        || hasToken("808") || hasTokenPrefix("bass")
+        || hasPadded("ba") || hasPadded("bas") || hasPadded("808")
+        || lower.contains("bassline") || lower.contains("bass_line") || lower.contains("bass-line")
+        || lower.contains("subbass") || lower.contains("sub_bass")
+        || lower.contains("bass") || lower.contains("808"))
+        return ClipKind::Bass;
+
+    // Drums / kit / percussion lexicon.
+    // Keep this strict — words like "groove", "beat", "top", "rhythm", "fill"
+    // appear on melodic packs and must not force Drums. Content still has to
+    // look like a GM kit (kick at C1) before a drum keyword sticks on parse.
+    if (hasToken("drums") || hasToken("drum") || hasToken("drumkit") || hasToken("loopkit")
+        || hasToken("kit") || hasToken("drm") || hasToken("dr") || hasToken("perc")
+        || hasToken("percussion") || hasToken("break") || hasToken("breaks")
+        || hasToken("breakbeat") || hasToken("amen") || hasToken("boomBap") || hasToken("boombap")
+        || hasToken("hats") || hasToken("hat") || hasToken("hh") || hasToken("hihat")
+        || hasToken("hihats") || hasToken("highhat") || hasToken("kick") || hasToken("snare")
+        || hasToken("clap") || hasToken("claps") || hasToken("rim") || hasToken("rimshot")
+        || hasToken("conga") || hasToken("congas") || hasToken("djembe") || hasToken("tom")
+        || hasToken("toms") || hasToken("ride") || hasToken("crash") || hasToken("cymbal")
+        || hasToken("cymbals") || hasToken("shaker") || hasToken("tamb") || hasToken("tambourine")
+        || hasToken("sn") || hasToken("kickdrum") || hasToken("snr")
+        || hasPadded("sn") || hasPadded("hh") || hasPadded("dr") || hasPadded("drm")
+        || hasPadded("kick") || hasPadded("kit")
+        || lower.contains("drumkit") || lower.contains("drum_kit") || lower.contains("drum-kit")
+        || lower.contains("hi-hat") || lower.contains("hi_hat") || lower.contains("highhat")
+        || lower.contains("high-hat") || lower.contains("high_hat")
+        || lower.contains("breakbeat") || lower.contains("boom-bap") || lower.contains("boom_bap"))
+        return ClipKind::Drums;
+
+    // Arp / sequencer — before Lead so "arp" doesn't fall through as melody.
+    if (hasToken("arp") || hasToken("arps") || hasToken("arpeggio") || hasToken("arpeggios")
+        || hasToken("arpeggiation") || hasToken("arppegio") || hasToken("arppegiation")
+        || hasToken("arpseq") || hasToken("seq") || hasToken("sequencer") || hasToken("sq")
+        || hasTokenPrefix("arp")
+        || hasPadded("sq") || hasPadded("seq") || hasPadded("arp")
+        || lower.contains("arpeggio") || lower.contains("arpeggi") || lower.contains("arppegio"))
+        return ClipKind::Arp;
+
+    // Keys / chords (formerly Piano).
+    if (hasToken("piano") || hasToken("keys") || hasToken("key") || hasToken("keyz")
+        || hasToken("ky") || hasToken("chord") || hasToken("chords") || hasToken("pad")
+        || hasToken("pads") || hasToken("rhodes") || hasToken("epiano") || hasToken("ep")
+        || hasTokenPrefix("key")
+        || hasPadded("ky") || hasPadded("ep")
+        || lower.contains("e-piano") || lower.contains("e_piano") || lower.contains("keys_")
+        || lower.contains("piano") || lower.contains("chord"))
+        return ClipKind::Keys;
+
+    // Lead / synth / melody.
+    if (hasToken("lead") || hasToken("ld") || hasToken("melody") || hasToken("melo")
+        || hasToken("mel") || hasToken("motif") || hasToken("riff") || hasToken("topline")
+        || hasToken("synth") || hasToken("sy") || hasToken("syn") || hasToken("hook")
+        || hasToken("pluck") || hasToken("plk")
+        || hasTokenPrefix("lead") || hasTokenPrefix("mel") || hasTokenPrefix("synth")
+        || hasPadded("ld") || hasPadded("sy") || hasPadded("syn") || hasPadded("plk")
+        || lower.contains("synth") || lower.contains("melody") || lower.contains("pluck"))
+        return ClipKind::Lead;
+
+    return std::nullopt;
+}
+
+ClipKind hintKindFromFileName(const juce::String& nameOrPath)
+{
+    if (auto k = kindKeywordFromFileName(nameOrPath))
+        return *k;
+    return ClipKind::Lead;
+}
+
+bool applyFilenameKindTag(StepClip& clip)
+{
+    const juce::String src = clip.filePath.isNotEmpty() ? clip.filePath : clip.name;
+    auto tagged = kindKeywordFromFileName(src);
+    if (!tagged && clip.name.isNotEmpty() && clip.name != src)
+        tagged = kindKeywordFromFileName(clip.name);
+    if (!tagged)
+        return false;
+
+    // Never let a drum keyword overwrite a content-analyzed non-drum kind when
+    // resident notes are present but don't look like a GM kit.
+    if (*tagged == ClipKind::Drums
+        && clip.notesResident
+        && !clip.notes.empty()
+        && !fitsGmDrumStructure(clip.notes))
+        return false;
+
+    // Indexed browse stubs already carry makeStepClip's kind. A drum keyword
+    // must not clobber that when notes aren't loaded here.
+    if (*tagged == ClipKind::Drums
+        && !clip.notesResident
+        && clip.kind != ClipKind::Drums
+        && clip.kindConfidence >= 70)
+        return false;
+
+    clip.kind = *tagged;
+    clip.kindConfidence = juce::jmax(clip.kindConfidence, 95);
+    if (clip.kind == ClipKind::Drums)
+        clip.hasDrumContent = true;
+    return true;
 }
 
 namespace {
@@ -266,7 +499,9 @@ void applyPitchLock(const ClipEdit& locked, ClipEdit& target)
 {
     target.octave = locked.octave;
     target.pitchShift = locked.pitchShift;
+    target.pitchInput = locked.pitchInput;
     target.octaveRange = locked.octaveRange;
+    target.outsideRange = locked.outsideRange;
     target.pitchMin = locked.pitchMin;
     target.pitchMax = locked.pitchMax;
     target.fitScale = locked.fitScale;
@@ -280,6 +515,9 @@ void applyPitchLock(const ClipEdit& locked, ClipEdit& target)
 void applyPlaybackLock(const ClipEdit& locked, ClipEdit& target, bool autoTrim, const StepClip& clip)
 {
     target.extendMult = locked.extendMult;
+    target.reverse = locked.reverse;
+    target.invert = locked.invert;
+    target.selectedNotesOnly = locked.selectedNotesOnly;
     if (!autoTrim)
     {
         target.clearTrim();
@@ -296,7 +534,7 @@ void applyPlaybackLock(const ClipEdit& locked, ClipEdit& target, bool autoTrim, 
 bool editIsClean(const ClipEdit& e)
 {
     if (e.octave >= 0 || e.pitchShift != 0 || e.octaveRange != 0 || e.hasPitchRange()
-        || e.extendMult > 1
+        || e.extendMult > 1 || e.reverse || e.invert || e.selectedNotesOnly
         || e.fitScale || e.mapToRoot || e.hasNoteFilter() || e.hasTrim()
         || e.legacyTrimLead != 0 || e.legacyTrimTail != 0)
         return false;
@@ -325,7 +563,8 @@ static std::vector<int> effectiveRemovedBars(const StepClip& clip, const ClipEdi
     return removed;
 }
 
-ResolvedClip resolveClip(const StepClip& clip, const ClipEdit& e)
+ResolvedClip resolveClip(const StepClip& clip, const ClipEdit& e,
+                         const std::set<int>* selectedNoteIds)
 {
     ResolvedClip out;
     out.notes.reserve(clip.notes.size());
@@ -342,7 +581,11 @@ ResolvedClip resolveClip(const StepClip& clip, const ClipEdit& e)
         if (auto it = e.moves.find(n.id); it != e.moves.end())
             mv = it->second;
 
-        int pitch = n.pitch + mv.dPitch + octDelta + e.pitchShift;
+        // Octave Range owns the register: the window is absolute, so a second
+        // transpose would move notes and then wrap them a second time.
+        int pitch = n.pitch + mv.dPitch + e.pitchShift;
+        if (e.octaveRange <= 0)
+            pitch += octDelta;
 
         if (e.mapToRoot && e.root >= 0 && clip.root >= 0)
         {
@@ -368,27 +611,11 @@ ResolvedClip resolveClip(const StepClip& clip, const ClipEdit& e)
         out.notes.push_back(r);
     }
 
-    // Octave Range: fold/spread the clip's pitch span into N octaves.
+    // Octave Range: wrap or clamp every note into N octaves starting at the target C.
     if (e.octaveRange > 0 && !out.notes.empty())
     {
-        const int numOct = juce::jlimit(1, 3, e.octaveRange);
-        int srcMin = 127, srcMax = 0;
-        for (const auto& n : out.notes)
-        {
-            srcMin = std::min(srcMin, n.pitch);
-            srcMax = std::max(srcMax, n.pitch);
-        }
-        const int srcSpan = srcMax - srcMin;
-        const int targetSpan = numOct * 12;
-        if (srcSpan > 0)
-        {
-            for (auto& n : out.notes)
-            {
-                const double t = (double) (n.pitch - srcMin) / (double) srcSpan;
-                n.pitch = juce::jlimit(0, 127,
-                    srcMin + (int) std::lround(t * (double) (targetSpan - 1)));
-            }
-        }
+        for (auto& n : out.notes)
+            n.pitch = mapPitchToOctaveWindow(n.pitch, tgtOct, e.octaveRange, e.outsideRange);
     }
 
     // Pitch Range: wrap notes into [pitchMin, pitchMax] by octave folds.
@@ -459,6 +686,49 @@ ResolvedClip resolveClip(const StepClip& clip, const ClipEdit& e)
         bars = clip.bars - (int) removed.size();
     }
     out.bars = std::max(1, bars);
+
+    auto formTargets = [&](const RollNote& n) -> bool
+    {
+        if (!e.selectedNotesOnly || selectedNoteIds == nullptr || selectedNoteIds->empty())
+            return true;
+        return selectedNoteIds->count(n.id) > 0;
+    };
+
+    // Invert: mirror pitches around the midpoint of the (targeted) range.
+    if (e.invert && !out.notes.empty())
+    {
+        int lo = 127, hi = 0;
+        int count = 0;
+        for (const auto& n : out.notes)
+        {
+            if (!formTargets(n)) continue;
+            lo = std::min(lo, n.pitch);
+            hi = std::max(hi, n.pitch);
+            ++count;
+        }
+        if (count > 0)
+        {
+            const int pivot = lo + hi;
+            for (auto& n : out.notes)
+            {
+                if (!formTargets(n)) continue;
+                n.pitch = juce::jlimit(0, 127, pivot - n.pitch);
+                n.moved = true;
+            }
+        }
+    }
+
+    // Reverse: flip note starts within the post-trim length.
+    if (e.reverse && !out.notes.empty())
+    {
+        const double total = (double) out.bars * (double) kStepsPerBar;
+        for (auto& n : out.notes)
+        {
+            if (!formTargets(n)) continue;
+            n.start = juce::jmax(0.0, total - n.start - n.len);
+            n.moved = true;
+        }
+    }
 
     // Extend: tile the resolved clip so delays can evolve past the file length.
     const int mult = (e.extendMult == 2 || e.extendMult == 4 || e.extendMult == 8)
@@ -558,10 +828,17 @@ std::vector<EditBadge> editBadges(const StepClip& clip, const ClipEdit& e)
         out.push_back({ "oct", "Oct " + juce::String(e.octave) });
 
     if (e.octaveRange > 0)
-        out.push_back({ "octRange", juce::String(e.octaveRange) + " oct" });
+        out.push_back({ "octRange", juce::String(e.octaveRange) + " oct "
+                                    + (e.outsideRange == OutsideRangeMode::Clip ? "clip" : "fold") });
 
     if (e.extendMult > 1)
         out.push_back({ "extend", "x" + juce::String(e.extendMult) });
+
+    if (e.reverse)
+        out.push_back({ "reverse", "Reverse" });
+
+    if (e.invert)
+        out.push_back({ "invert", "Invert" });
 
     if (e.hasPitchRange())
         out.push_back({ "range", pitchName(e.pitchMin) + "-" + pitchName(e.pitchMax) });
@@ -674,31 +951,212 @@ Polyphony measurePolyphony(const std::vector<NoteEvent>& notes)
     return out;
 }
 
-void applyKind(StepClip& s, int meanPitch, bool anyDrum, const Polyphony& poly)
+enum class DrumVoice { Kick, Snare, Hat, Perc, Other };
+
+DrumVoice classifyDrumVoice(int pitch)
 {
-    if (anyDrum)
-        s.kind = ClipKind::Drums;
-    else if (s.difNotes <= 2 && poly.maxPoly <= 1)
-        s.kind = ClipKind::Single;
-    else if (meanPitch < 48)
-        s.kind = ClipKind::Bass;
-    else if (poly.meanPoly >= 2.5 || poly.frequentChords)
-        s.kind = ClipKind::Piano;
-    else
-        s.kind = ClipKind::Lead;
+    switch (pitch)
+    {
+        case 35: case 36: return DrumVoice::Kick;
+        case 37: case 38: case 40: return DrumVoice::Snare;
+        case 42: case 44: case 46: return DrumVoice::Hat;
+        default:
+            if (isGmDrumPitch(pitch))
+                return DrumVoice::Perc;
+            return DrumVoice::Other;
+    }
 }
 
-/** 1..100 from several musical features, each normalized so a busy clip
-    does not pin at 100 the way note-count × pitch-count did. */
-int scoreClipComplexity(const std::vector<RollNote>& notes, int bars, double meanPoly)
+void applyKind(StepClip& s, int meanPitch, int drumHits, int totalHits, const Polyphony& poly,
+               int channel10Hits, const std::vector<RollNote>& notes)
+{
+    const double drumFrac = totalHits > 0 ? (double) drumHits / (double) totalHits : 0.0;
+    s.hasDrumContent = channel10Hits > 0 || drumFrac >= 0.10;
+
+    const juce::String nameSrc = s.filePath.isNotEmpty() ? s.filePath : s.name;
+    const bool gmKit = fitsGmDrumStructure(notes);
+
+    // Pass 1: non-drum keywords win. Drum keywords only stick when the notes
+    // look like a GM kit starting on kick at C1 (or there are no notes yet).
+    if (auto tagged = kindKeywordFromFileName(nameSrc))
+    {
+        if (*tagged != ClipKind::Drums || notes.empty() || gmKit)
+        {
+            s.kind = *tagged;
+            s.kindConfidence = (*tagged == ClipKind::Drums && gmKit) ? 98 : 95;
+            if (s.kind == ClipKind::Drums)
+                s.hasDrumContent = true;
+            return;
+        }
+        // Drum keyword without GM/C1 shape — fall through to content analysis.
+    }
+
+    // Pass 2: note analysis for untagged (or false-positive drum-tagged) files.
+    const bool chords = poly.frequentChords || poly.meanPoly >= 2.2 || poly.maxPoly >= 3;
+    const bool mono = poly.maxPoly <= 1 && poly.meanPoly < 1.35;
+    const bool bassRegister = meanPitch >= 24 && meanPitch <= 52;
+    const double ch10Frac = totalHits > 0 ? (double) channel10Hits / (double) totalHits : 0.0;
+
+    // Require GM kit shape (kick at C1 + other voices). Dense drumFrac alone is
+    // not enough — basslines also live around MIDI 36–48.
+    if (gmKit)
+    {
+        s.kind = ClipKind::Drums;
+        s.kindConfidence = 92;
+        s.hasDrumContent = true;
+        return;
+    }
+    if (ch10Frac >= 0.70 && drumFrac >= 0.70)
+    {
+        s.kind = ClipKind::Drums;
+        s.kindConfidence = 80;
+        s.hasDrumContent = true;
+        return;
+    }
+
+    if (chords)
+    {
+        s.kind = ClipKind::Keys;
+        s.kindConfidence = (poly.frequentChords || poly.meanPoly >= 3.0) ? 90 : 75;
+        return;
+    }
+
+    if (mono && bassRegister)
+    {
+        s.kind = ClipKind::Bass;
+        s.kindConfidence = meanPitch < 42 ? 86 : 70;
+        return;
+    }
+
+    // Rapid mono mid/high lines without an arp keyword still read as Lead.
+    if (mono && meanPitch > 52)
+    {
+        s.kind = ClipKind::Lead;
+        s.kindConfidence = 75;
+        return;
+    }
+
+    s.kind = ClipKind::Lead;
+    s.kindConfidence = 50;
+}
+
+double onsetSlotShare(const std::vector<RollNote>& notes)
+{
+    if (notes.empty()) return 0.0;
+    std::set<int> slots;
+    for (const auto& n : notes)
+    {
+        int slot = ((int) std::lround(n.start)) % kStepsPerBar;
+        if (slot < 0) slot += kStepsPerBar;
+        slots.insert(slot);
+    }
+    return (double) slots.size() / (double) kStepsPerBar;
+}
+
+double offbeatRatio(const std::vector<RollNote>& notes)
+{
+    if (notes.empty()) return 0.0;
+    int off = 0;
+    for (const auto& n : notes)
+    {
+        int slot = ((int) std::lround(n.start)) % kStepsPerBar;
+        if (slot < 0) slot += kStepsPerBar;
+        if ((slot % 2) != 0)
+            ++off;
+    }
+    return (double) off / (double) notes.size();
+}
+
+int scoreClipComplexity(const std::vector<RollNote>& notes, int bars, double meanPoly, ClipKind kind)
 {
     if (notes.empty())
         return 1;
 
     const double notesPerBar = (double) notes.size() / (double) juce::jmax(1, bars);
-    // 1 note/bar ≈ 0.2, 4 ≈ 0.46, 16 ≈ 0.80. The log keeps dense files from saturating.
     const double density = std::log2(1.0 + notesPerBar) / std::log2(33.0);
+    const double rhythm = onsetSlotShare(notes);
+    const double syncop = offbeatRatio(notes);
 
+    if (kind == ClipKind::Drums)
+    {
+        std::set<int> voices;
+        int hatHits = 0, ghost = 0, finest = 4;
+        for (const auto& n : notes)
+        {
+            voices.insert((int) classifyDrumVoice(n.pitch));
+            if (classifyDrumVoice(n.pitch) == DrumVoice::Hat)
+                ++hatHits;
+            if (n.fileVelocity < 50)
+                ++ghost;
+            const int slot = ((int) std::lround(n.start * 2.0)) % (kStepsPerBar * 2);
+            if ((slot % 2) != 0)
+                finest = 1; // 32nd-ish grid activity
+            else if ((slot % 2) == 0 && (((int) std::lround(n.start)) % 2) != 0)
+                finest = std::min(finest, 2); // 16ths
+        }
+        const double voiceScore = juce::jlimit(0.0, 1.0, (double) voices.size() / 4.0);
+        const double hatScore = notes.empty() ? 0.0
+            : juce::jlimit(0.0, 1.0, (double) hatHits / (double) notes.size() * 2.0);
+        const double ghostScore = juce::jlimit(0.0, 1.0, (double) ghost / (double) notes.size() * 3.0);
+        const double subdiv = finest <= 1 ? 1.0 : (finest <= 2 ? 0.7 : 0.35);
+        const double score = 100.0 * (0.28 * voiceScore
+                                     + 0.22 * subdiv
+                                     + 0.20 * syncop
+                                     + 0.15 * ghostScore
+                                     + 0.15 * hatScore);
+        return juce::jlimit(1, 100, (int) std::lround(score));
+    }
+
+    if (kind == ClipKind::Keys)
+    {
+        // Chord size, extensions past triad, harmonic rhythm, attack syncopation.
+        std::vector<RollNote> sorted = notes;
+        std::stable_sort(sorted.begin(), sorted.end(),
+                         [](const RollNote& a, const RollNote& b) { return a.start < b.start; });
+        double chordSizeSum = 0.0;
+        int chordGroups = 0;
+        int extensionHits = 0;
+        int chordChanges = 0;
+        int prevBass = -1;
+        for (size_t i = 0; i < sorted.size();)
+        {
+            const double t = sorted[i].start;
+            std::vector<int> pcs;
+            while (i < sorted.size() && std::abs(sorted[i].start - t) < 0.35)
+            {
+                pcs.push_back(wrapPc(sorted[i].pitch));
+                ++i;
+            }
+            std::sort(pcs.begin(), pcs.end());
+            pcs.erase(std::unique(pcs.begin(), pcs.end()), pcs.end());
+            const int size = (int) pcs.size();
+            chordSizeSum += (double) size;
+            ++chordGroups;
+            if (size >= 4)
+                ++extensionHits;
+            if (!pcs.empty())
+            {
+                const int bass = pcs.front();
+                if (prevBass >= 0 && bass != prevBass)
+                    ++chordChanges;
+                prevBass = bass;
+            }
+        }
+        const double avgChord = chordGroups > 0 ? chordSizeSum / (double) chordGroups : 1.0;
+        const double chordScore = juce::jlimit(0.0, 1.0, (avgChord - 1.0) / 4.0);
+        const double extScore = chordGroups > 0
+            ? juce::jlimit(0.0, 1.0, (double) extensionHits / (double) chordGroups)
+            : 0.0;
+        const double harmRhythm = juce::jlimit(0.0, 1.0,
+            (double) chordChanges / (double) juce::jmax(1, bars * 2));
+        const double score = 100.0 * (0.30 * chordScore
+                                     + 0.25 * extScore
+                                     + 0.25 * harmRhythm
+                                     + 0.20 * syncop);
+        return juce::jlimit(1, 100, (int) std::lround(score));
+    }
+
+    // Bass / Lead: pickups, interval variety, subdivision — not kit size.
     std::vector<const RollNote*> order;
     order.reserve(notes.size());
     for (const auto& n : notes)
@@ -710,22 +1168,17 @@ int scoreClipComplexity(const std::vector<RollNote>& notes, int bars, double mea
         return a->pitch < b->pitch;
     });
 
-    std::set<int> pitchClasses;
-    std::set<int> onsetSlots;
-    int minVel = 127;
-    int maxVel = 1;
     double intervalSum = 0.0;
     int intervalN = 0;
+    int pickups = 0;
     int prevPitch = -1;
     double prevStart = -1.0e9;
-
     for (const auto* n : order)
     {
-        pitchClasses.insert(n->pitch % 12);
-        minVel = std::min(minVel, n->fileVelocity);
-        maxVel = std::max(maxVel, n->fileVelocity);
-        const int slot = ((int) std::lround(n->start)) % kStepsPerBar;
-        onsetSlots.insert(slot < 0 ? slot + kStepsPerBar : slot);
+        int slot = ((int) std::lround(n->start)) % kStepsPerBar;
+        if (slot < 0) slot += kStepsPerBar;
+        if ((slot % 4) == 3 || (slot % 2) != 0)
+            ++pickups;
         if (prevPitch >= 0 && n->start > prevStart + 0.01)
         {
             intervalSum += (double) std::abs(n->pitch - prevPitch);
@@ -734,24 +1187,93 @@ int scoreClipComplexity(const std::vector<RollNote>& notes, int bars, double mea
         prevPitch = n->pitch;
         prevStart = n->start;
     }
-
-    const double pitchVar = (double) pitchClasses.size() / 12.0;
-    const double poly = juce::jlimit(0.0, 1.0, (meanPoly - 1.0) / 3.5);
-    const double rhythm = (double) onsetSlots.size() / (double) kStepsPerBar;
+    const double pickupScore = juce::jlimit(0.0, 1.0, (double) pickups / (double) notes.size());
     const double interval = intervalN > 0
         ? juce::jlimit(0.0, 1.0, (intervalSum / (double) intervalN) / 8.0)
         : 0.0;
-    const double vel = notes.size() > 1
-        ? juce::jlimit(0.0, 1.0, (double) (maxVel - minVel) / 90.0)
-        : 0.0;
-
+    const double poly = juce::jlimit(0.0, 1.0, (meanPoly - 1.0) / 3.5);
     const double score = 100.0 * (0.30 * density
-                                 + 0.18 * pitchVar
-                                 + 0.20 * poly
-                                 + 0.18 * rhythm
-                                 + 0.08 * interval
-                                 + 0.06 * vel);
+                                 + 0.25 * rhythm
+                                 + 0.20 * pickupScore
+                                 + 0.15 * interval
+                                 + 0.10 * poly);
     return juce::jlimit(1, 100, (int) std::lround(score));
+}
+
+uint16_t analyseClipTags(const std::vector<RollNote>& notes, int bars, ClipKind kind)
+{
+    if (notes.empty())
+        return 0;
+
+    uint16_t tags = 0;
+    const double notesPerBar = (double) notes.size() / (double) juce::jmax(1, bars);
+    if (notesPerBar < 4.0)
+        tags |= clipTag::Sparse;
+
+    // Swing: notes clustering near the late half of each 8th pair.
+    int swingish = 0, evenPairs = 0;
+    for (const auto& n : notes)
+    {
+        const double inPair = std::fmod(n.start, 2.0);
+        if (inPair > 0.55 && inPair < 1.45)
+        {
+            ++evenPairs;
+            if (inPair > 0.85 && inPair < 1.25)
+                ++swingish;
+        }
+    }
+    if (evenPairs > 4 && swingish * 2 >= evenPairs)
+        tags |= clipTag::Swing;
+
+    if (kind == ClipKind::Drums)
+    {
+        int hat16 = 0, snare2 = 0, snare4 = 0;
+        for (const auto& n : notes)
+        {
+            const auto v = classifyDrumVoice(n.pitch);
+            int slot = ((int) std::lround(n.start)) % kStepsPerBar;
+            if (slot < 0) slot += kStepsPerBar;
+            if (v == DrumVoice::Hat && (slot % 2) != 0)
+                ++hat16;
+            if (v == DrumVoice::Snare)
+            {
+                if (slot == 4) ++snare2;
+                if (slot == 12) ++snare4;
+            }
+        }
+        if (hat16 >= juce::jmax(2, bars * 2))
+            tags |= clipTag::SixteenthHats;
+        if (snare2 > 0 && snare4 > 0)
+            tags |= clipTag::Backbeat;
+    }
+
+    if (kind == ClipKind::Keys)
+    {
+        std::vector<RollNote> sorted = notes;
+        std::stable_sort(sorted.begin(), sorted.end(),
+                         [](const RollNote& a, const RollNote& b) { return a.start < b.start; });
+        int seventhChords = 0, groups = 0;
+        for (size_t i = 0; i < sorted.size();)
+        {
+            const double t = sorted[i].start;
+            std::set<int> pcs;
+            while (i < sorted.size() && std::abs(sorted[i].start - t) < 0.35)
+            {
+                pcs.insert(wrapPc(sorted[i].pitch));
+                ++i;
+            }
+            if (pcs.size() < 2)
+                continue;
+            ++groups;
+            // Four distinct pitch classes ≈ triad + 7th/9th.
+            if (pcs.size() >= 4)
+                ++seventhChords;
+        }
+        if (groups > 0 && seventhChords * 3 >= groups)
+            tags |= clipTag::SeventhChords;
+    }
+
+    return tags;
 }
 
 } // namespace
@@ -768,8 +1290,9 @@ StepClip makeStepClip(const MidiClip& clip)
     constexpr double stepsPerBeat = 4.0;
 
     double maxEnd = 0.0;
-    bool anyDrumChannel = false;
     int pitchSum = 0;
+    int drumHits = 0;
+    int channel10Hits = 0;
     std::set<int> distinctPitches;
 
     int nextId = 0;
@@ -786,7 +1309,19 @@ StepClip makeStepClip(const MidiClip& clip)
         s.notes.push_back(r);
 
         maxEnd = std::max(maxEnd, r.start + r.len);
-        anyDrumChannel = anyDrumChannel || (n.channel == 10);
+        if (n.channel == 10)
+            ++channel10Hits;
+        // Count only clear kit voices (or channel 10). Bass notes also sit in
+        // MIDI 36–48, so "any short GM pitch" false-positives basslines as drums.
+        {
+            const auto voice = classifyDrumVoice(n.noteNumber);
+            const bool kitVoice = voice == DrumVoice::Kick
+                               || voice == DrumVoice::Snare
+                               || voice == DrumVoice::Hat
+                               || (voice == DrumVoice::Perc && n.lengthBeats <= 0.35);
+            if (n.channel == 10 || kitVoice)
+                ++drumHits;
+        }
         pitchSum += n.noteNumber;
         distinctPitches.insert(n.noteNumber);
     }
@@ -801,12 +1336,26 @@ StepClip makeStepClip(const MidiClip& clip)
         s.root = estimatePitchClassFromNotes(clip.notes);
         const int meanPitch = pitchSum / (int) clip.notes.size();
         const auto poly = measurePolyphony(clip.notes);
-        applyKind(s, meanPitch, anyDrumChannel, poly);
-        s.complexity = scoreClipComplexity(s.notes, s.bars, poly.meanPoly);
+        applyKind(s, meanPitch, drumHits, (int) clip.notes.size(), poly, channel10Hits, s.notes);
+        s.complexity = scoreClipComplexity(s.notes, s.bars, poly.meanPoly, s.kind);
+        s.tagMask = analyseClipTags(s.notes, s.bars, s.kind);
     }
     else
     {
+        // Still tag from the filename when MIDI has no note events.
+        if (auto tagged = kindKeywordFromFileName(s.filePath.isNotEmpty() ? s.filePath : s.name))
+        {
+            s.kind = *tagged;
+            s.kindConfidence = 90;
+            if (s.kind == ClipKind::Drums)
+                s.hasDrumContent = true;
+        }
+        else
+        {
+            s.kindConfidence = 0;
+        }
         s.complexity = 1;
+        s.tagMask = 0;
     }
     s.notesResident = true;
     return s;

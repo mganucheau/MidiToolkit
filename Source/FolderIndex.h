@@ -15,6 +15,9 @@ struct FolderIndexEntry
     juce::int64 modMs = 0;
     juce::int64 sizeBytes = 0;
     int kind = (int) ClipKind::Lead;
+    int kindConfidence = 50;
+    bool hasDrumContent = false;
+    uint16_t tagMask = 0;
     int root = -1;
     double bpm = 120.0;
     int bars = 1;

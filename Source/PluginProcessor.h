@@ -10,6 +10,10 @@
 #include <atomic>
 #include <map>
 
+#ifndef MIDITOOLKIT_MIDI_FX
+ #define MIDITOOLKIT_MIDI_FX 0
+#endif
+
 namespace pflow {
 
 /** Lightweight MIDI-file browser: session-synced preview only (no arrangement). */
@@ -25,8 +29,17 @@ public:
 
     bool acceptsMidi() const override { return true; }
     bool producesMidi() const override { return true; }
+   #if JucePlugin_IsMidiEffect
+    bool isMidiEffect() const override { return true; }
+   #endif
+    /** Midi Toolkit FX (Logic AU MIDI effect and Live instrument-style VST3):
+        always Through, never writes the instrument's shared passthrough flag. */
+    static constexpr bool kMidiFxBuild = MIDITOOLKIT_MIDI_FX != 0;
 
-    const juce::String getName() const override { return "Midi Toolkit"; }
+    const juce::String getName() const override
+    {
+        return kMidiFxBuild ? "Midi Toolkit FX" : "Midi Toolkit";
+    }
 
     bool hasEditor() const override { return true; }
     juce::AudioProcessorEditor* createEditor() override;
@@ -39,10 +52,24 @@ public:
 
     bool isBusesLayoutSupported(const BusesLayout& layouts) const override
     {
+       #if defined(MIDITOOLKIT_FX_LIVE_VST3)
+        const auto in = layouts.getMainInputChannelSet();
+        const auto out = layouts.getMainOutputChannelSet();
+        const bool inOk = in.isDisabled()
+                       || in == juce::AudioChannelSet::stereo()
+                       || in == juce::AudioChannelSet::mono();
+        const bool outOk = out == juce::AudioChannelSet::stereo()
+                        || out == juce::AudioChannelSet::mono();
+        return inOk && outOk;
+       #elif JucePlugin_IsMidiEffect
+        juce::ignoreUnused(layouts);
+        return true;
+       #else
         const auto mainOut = layouts.getMainOutputChannelSet();
         if (mainOut.isDisabled()) return false;
         return mainOut == juce::AudioChannelSet::stereo()
             || mainOut == juce::AudioChannelSet::mono();
+       #endif
     }
 
     double getTailLengthSeconds() const override { return 0.0; }
@@ -94,6 +121,8 @@ public:
     // stamped onto every clip while browsing. lockAutoTrim reapplies empty-bar
     // trim on each file while Playback is locked with trim engaged.
     uint32_t sectionLocks = 0;
+    /** Toolkit section order, comma-separated ids (empty = default order). */
+    juce::String toolkitSectionOrder;
     bool lockAutoTrim = false;
     ClipEdit lockedEdit;
     GrooveParams lockedGroove;
@@ -114,7 +143,8 @@ public:
     bool effectsOpen = false;
     bool previewOpen = true;
     bool sidebarCollapsed = false;
-    /** Live MIDI through Toolkit effects (replaces clip preview while on). */
+    /** Effect mode: transform MIDI in; no file/generator playback.
+        Off = generate-only: play clips/generators out; ignore MIDI input. */
     bool passthrough = false;
     std::atomic<bool> passthroughActive { false };
     BrowserColumnVisibility columnVisibility;
@@ -144,11 +174,12 @@ public:
     juce::StringArray savedBrowserDirs;
     std::vector<SavedLibraryFolder> savedLibraries;
     juce::StringArray starredFiles;   // favourites — mirrored from LibraryStore
+    juce::StringArray starredFolders;
     std::vector<SavedSearchEntry> savedSearches;
 
     /** Browser UI session mirrored from the editor so it survives UI teardown
         (hosts destroy the editor when you click another plugin) and host save. */
-    int browseMode = 0;                 // 0 folder, 1 starred, 2 search
+    int browseMode = 0;                 // 0 folder, 1 starred files, 2 search, 3 starred folders
     bool starredFilter = false;
     bool includeSubdirs = false;
     BrowserSearch browserSessionSearch;
@@ -168,7 +199,9 @@ public:
     void updateSavedSearchResults(int index, const juce::StringArray& resultPaths,
                                   const juce::String& rootPath = {});
     bool isStarred(const juce::String& path) const { return starredFiles.contains(path); }
+    bool isStarredFolder(const juce::String& path) const { return starredFolders.contains(path); }
     void toggleStarred(const juce::String& path);
+    void toggleStarredFolder(const juce::String& path);
 
     /** App-owned library (stars, saved searches, search result cache). */
     LibraryStore& library() { return library_; }
@@ -188,9 +221,15 @@ public:
 
     /** Publish Toolkit pitch/groove snapshot for Passthrough mode. */
     void setLiveFxState(const LiveFxState& state);
+    /** Latched MIDI note from Pitch Input (-1 if none). */
+    int liveFxPitchLatch() const { return liveFx_.pitchLatchMidi(); }
 
-    /** Enable/disable passthrough; flushes held notes on transition. */
+    /** Enable/disable passthrough; flushes held notes on transition.
+        The MIDI FX build ignores attempts to turn this off. */
     void setPassthroughEnabled(bool enabled);
+
+    /** MIDI FX stays in passthrough and never writes that into the shared UI session. */
+    void lockMidiFxPassthrough();
 
     /** Capture incoming MIDI while on. Stopping closes held notes. */
     void setRecordingEnabled(bool enabled);

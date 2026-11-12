@@ -1,4 +1,5 @@
 #include "LibraryStore.h"
+#include "Theme.h"
 #include <algorithm>
 
 namespace pflow {
@@ -23,6 +24,7 @@ bool LibraryStore::searchesEqual(const BrowserSearch& a, const BrowserSearch& b)
         && a.complexityMin == b.complexityMin
         && a.complexityMax == b.complexityMax
         && a.kindMask == b.kindMask
+        && a.tagMask == b.tagMask
         && a.timeSigMask == b.timeSigMask
         && a.subdirs == b.subdirs
         && a.removeDuplicates == b.removeDuplicates;
@@ -40,7 +42,9 @@ BrowserSearch LibraryStore::browserSearchFromXml(const juce::XmlElement& el)
     s.removeDuplicates = el.getIntAttribute("removeDuplicates", 1) != 0;
     s.complexityMin = juce::jmax(0, el.getIntAttribute("complexityMin", 0));
     s.complexityMax = juce::jmax(0, el.getIntAttribute("complexityMax", 0));
-    s.kindMask = (uint8_t) juce::jlimit(0, 0x1F, el.getIntAttribute("kindMask", 0));
+    // Mask to the four kinds (Bass/Piano/Lead/Drums); drop legacy Single bit.
+    s.kindMask = (uint8_t) (el.getIntAttribute("kindMask", 0) & 0x0F);
+    s.tagMask = (uint16_t) juce::jlimit(0, 0xFFFF, el.getIntAttribute("tagMask", 0));
     s.timeSigMask = (uint16_t) juce::jlimit(0, 0xFFFF, el.getIntAttribute("timeSigMask", 0));
 
     if (el.hasAttribute("bpmMin") || el.hasAttribute("bpmMax"))
@@ -84,6 +88,7 @@ void LibraryStore::browserSearchToXml(juce::XmlElement& el, const BrowserSearch&
     el.setAttribute("complexityMin", s.complexityMin);
     el.setAttribute("complexityMax", s.complexityMax);
     el.setAttribute("kindMask", (int) s.kindMask);
+    el.setAttribute("tagMask", (int) s.tagMask);
     el.setAttribute("timeSigMask", (int) s.timeSigMask);
     el.setAttribute("subdirs", s.subdirs ? 1 : 0);
     el.setAttribute("removeDuplicates", s.removeDuplicates ? 1 : 0);
@@ -135,8 +140,31 @@ SharedUiSession LibraryStore::uiSessionFromXml(const juce::XmlElement& el)
     s.tweakDensity = juce::jlimit(0, 1, el.getIntAttribute("tweakDensity", 1));
     s.tweakSize = juce::jlimit(0, 2, el.getIntAttribute("tweakSize", 1));
     s.tweakTextScalePct = juce::jlimit(60, 150, el.getIntAttribute("tweakTextScalePct", 100));
-    s.tweakAppearance = juce::jlimit(0, 2, el.getIntAttribute("tweakAppearance", 0));
+    const int themeCatalog = el.getIntAttribute("themeCatalog", 0);
+    if (themeCatalog >= 2)
+    {
+        s.tweakAppearance = juce::jlimit(0, 2, el.getIntAttribute("tweakAppearance", 0));
+        s.tweakLightTheme = juce::jlimit(0, 9, el.getIntAttribute("tweakLightTheme", 5));
+        s.tweakDarkTheme = juce::jlimit(0, 9, el.getIntAttribute("tweakDarkTheme", 0));
+    }
+    else if (themeCatalog == 1)
+    {
+        const int named = juce::jlimit(0, 19, el.getIntAttribute("tweakAppearance", 5));
+        s.tweakAppearance = named >= 10 ? (int) Appearance::Dark : (int) Appearance::Light;
+        s.tweakLightTheme = named < 10 ? named : 5;
+        s.tweakDarkTheme = named >= 10 ? named - 10 : 0;
+    }
+    else
+    {
+        s.tweakAppearance = migrateThemeIndex(el.getIntAttribute("tweakAppearance", 0), false);
+        s.tweakLightTheme = 5;
+        s.tweakDarkTheme = 0;
+    }
     s.tweakShowTooltips = el.getIntAttribute("tweakShowTooltips", 1) != 0 ? 1 : 0;
+    s.tweakFontFamily = juce::jlimit(0, 3, el.getIntAttribute("tweakFontFamily", 0));
+    s.tweakSurfaceStyle = juce::jlimit(0, 2, el.getIntAttribute("tweakSurfaceStyle", 0));
+    s.tweakAlternateRows = el.getIntAttribute("tweakAlternateRows", 1) != 0 ? 1 : 0;
+    s.tweakSeparationPct = juce::jlimit(50, 300, el.getIntAttribute("tweakSeparationPct", 100));
     s.hasDefaultView = el.getIntAttribute("hasDefaultView", 0) != 0;
     s.defEditorOpen = el.getIntAttribute("defEditorOpen", 0) != 0;
     s.defEffectsOpen = el.getIntAttribute("defEffectsOpen", 0) != 0;
@@ -157,7 +185,9 @@ SharedUiSession LibraryStore::uiSessionFromXml(const juce::XmlElement& el)
     s.defTweakSize = juce::jlimit(0, 2, el.getIntAttribute("defTweakSize", 1));
     s.defTweakTextScalePct = juce::jlimit(60, 150, el.getIntAttribute("defTweakText", 100));
     s.defTweakDensity = juce::jlimit(0, 1, el.getIntAttribute("defTweakDensity", 1));
-    s.defTweakAppearance = juce::jlimit(0, 2, el.getIntAttribute("defTweakAppearance", 0));
+    s.defTweakAppearance = themeCatalog >= 2
+        ? juce::jlimit(0, 2, el.getIntAttribute("defTweakAppearance", 0))
+        : migrateThemeIndex(el.getIntAttribute("defTweakAppearance", 0), themeCatalog != 0);
     s.browserSessionSearch = browserSearchFromXml(el);
 
     for (auto* child : el.getChildIterator())
@@ -207,8 +237,15 @@ void LibraryStore::uiSessionToXml(juce::XmlElement& el, const SharedUiSession& s
     el.setAttribute("tweakDensity", s.tweakDensity);
     el.setAttribute("tweakSize", s.tweakSize);
     el.setAttribute("tweakTextScalePct", s.tweakTextScalePct);
+    el.setAttribute("themeCatalog", 2); // Appearance mode + light/dark theme pairs
     el.setAttribute("tweakAppearance", s.tweakAppearance);
+    el.setAttribute("tweakLightTheme", s.tweakLightTheme);
+    el.setAttribute("tweakDarkTheme", s.tweakDarkTheme);
     el.setAttribute("tweakShowTooltips", s.tweakShowTooltips);
+    el.setAttribute("tweakFontFamily", s.tweakFontFamily);
+    el.setAttribute("tweakSurfaceStyle", s.tweakSurfaceStyle);
+    el.setAttribute("tweakAlternateRows", s.tweakAlternateRows);
+    el.setAttribute("tweakSeparationPct", s.tweakSeparationPct);
     el.setAttribute("hasDefaultView", s.hasDefaultView ? 1 : 0);
     el.setAttribute("defEditorOpen", s.defEditorOpen ? 1 : 0);
     el.setAttribute("defEffectsOpen", s.defEffectsOpen ? 1 : 0);
@@ -263,6 +300,7 @@ void LibraryStore::uiSessionToXml(juce::XmlElement& el, const SharedUiSession& s
 void LibraryStore::load()
 {
     starredFiles.clear();
+    starredFolders.clear();
     savedSearches.clear();
     searchCache.clear();
     uiSession = {};
@@ -284,6 +322,12 @@ void LibraryStore::load()
                 const auto path = child->getStringAttribute("path");
                 if (path.isNotEmpty() && !starredFiles.contains(path))
                     starredFiles.add(path);
+            }
+            else if (child->hasTagName("StarredFolder"))
+            {
+                const auto path = child->getStringAttribute("path");
+                if (path.isNotEmpty() && !starredFolders.contains(path))
+                    starredFolders.add(path);
             }
             else if (child->hasTagName("SavedSearch"))
             {
@@ -352,6 +396,7 @@ juce::StringArray LibraryStore::readStarsFromDisk()
 }
 
 void LibraryStore::writeLibraryFile(juce::StringArray stars,
+                                    juce::StringArray folders,
                                     std::vector<SavedSearchEntry> searches,
                                     std::vector<CachedSearch> cache,
                                     SharedUiSession session,
@@ -365,6 +410,12 @@ void LibraryStore::writeLibraryFile(juce::StringArray stars,
         if (star.isEmpty()) continue;
         auto* child = xml.createNewChildElement("StarredFile");
         child->setAttribute("path", star);
+    }
+    for (const auto& folder : folders)
+    {
+        if (folder.isEmpty()) continue;
+        auto* child = xml.createNewChildElement("StarredFolder");
+        child->setAttribute("path", folder);
     }
 
     for (const auto& ss : searches)
@@ -416,7 +467,7 @@ void LibraryStore::writeLibraryFile(juce::StringArray stars,
 void LibraryStore::save() const
 {
     const auto gen = ++saveGeneration_;
-    writeLibraryFile(starredFiles, savedSearches, searchCache, uiSession, hasUiSession);
+    writeLibraryFile(starredFiles, starredFolders, savedSearches, searchCache, uiSession, hasUiSession);
     saveCompleted_.store(gen);
 }
 
@@ -427,6 +478,7 @@ void LibraryStore::saveAsync() const
     auto* doneAtom = &saveCompleted_;
     juce::Thread::launch([gen, genAtom, doneAtom,
                           stars = starredFiles,
+                          folders = starredFolders,
                           searches = savedSearches,
                           cache = searchCache,
                           session = uiSession,
@@ -434,7 +486,7 @@ void LibraryStore::saveAsync() const
     {
         if (gen != genAtom->load())
             return;
-        writeLibraryFile(std::move(stars), std::move(searches), std::move(cache),
+        writeLibraryFile(std::move(stars), std::move(folders), std::move(searches), std::move(cache),
                         std::move(session), writeSession);
         if (gen == genAtom->load())
             doneAtom->store(gen);
@@ -480,6 +532,25 @@ void LibraryStore::setStarredFiles(const juce::StringArray& paths)
     for (const auto& p : paths)
         if (p.isNotEmpty() && !starredFiles.contains(p))
             starredFiles.add(p);
+    save();
+}
+
+void LibraryStore::toggleStarredFolder(const juce::String& path)
+{
+    if (path.isEmpty()) return;
+    if (!starredFolders.contains(path))
+        starredFolders.add(path);
+    else
+        starredFolders.removeString(path);
+    save();
+}
+
+void LibraryStore::setStarredFolders(const juce::StringArray& paths)
+{
+    starredFolders.clear();
+    for (const auto& p : paths)
+        if (p.isNotEmpty() && !starredFolders.contains(p))
+            starredFolders.add(p);
     save();
 }
 

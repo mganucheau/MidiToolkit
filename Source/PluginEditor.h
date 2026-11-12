@@ -3,6 +3,7 @@
 #include <functional>
 #include <memory>
 #include <map>
+#include <set>
 #include <vector>
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_gui_extra/juce_gui_extra.h>
@@ -43,6 +44,13 @@ public:
     void ensureAndSelectFile(const juce::File& file);
     void toggleEditorFold();
 
+    // Test / snapshot hooks.
+    void toggleEffectsForTesting() { toggleEffectsFold(); }
+    void setGridViewForTesting(bool on) { if (gridView != on && browserBar.onToggleGrid) browserBar.onToggleGrid(); }
+    void setFilterOpenForTesting(bool on) { sidebar.setFilterOpen(on); }
+    void setSidebarCollapsedForTesting(bool on) { sidebar.setCollapsed(on); }
+    void setPassthroughForTesting(bool on) { if (processorRef.passthrough != on) togglePassthrough(); }
+
 private:
     void applyNativeWindowChrome();
     /** Async folder scan — never parses MIDI on the message thread. */
@@ -71,6 +79,7 @@ private:
     void pushPreviewToProcessor();
     void pushLiveFxToProcessor();
     void applyPassthroughUi();
+    void setLeftPaneTab(int tab);
     void togglePassthrough();
     void toggleRecord();
     void refreshRecordingRoll(const RecordingSnapshot& snap);
@@ -83,6 +92,8 @@ private:
     void applyLayoutState();
     void updateWindowLimits();
     void layoutContent();
+    /** Push folder / count / subfolder / saved / filter state into the browser toolbar. */
+    void refreshBrowserBar();
     void applySavedDefaultView();
     void saveCurrentViewAsDefault();
     void toggleEffectsFold();
@@ -138,6 +149,7 @@ private:
     void syncEffectsInspector();
     void setBrowseMode(int mode);
     void loadStarredClips(const juce::String& preferredPath = {});
+    void loadStarredFolders();
     /** Mirror browser UI into the processor (survives editor teardown / host save). */
     void persistBrowserSession();
     /** Write the shared session. Debounced so arrow-key browsing does not hit disk. */
@@ -179,6 +191,8 @@ private:
     const StepClip* selectedClip() const;
     ClipEdit selectedEdit() const;
     GrooveParams selectedGroove() const;
+    /** Note ids for Form → Selected notes only; nullptr when the option is off / empty. */
+    const std::set<int>* formSelectionIds() const;
 
     MidiToolkitProcessor& processorRef;
     PatternFlowLookAndFeel lnf;
@@ -187,7 +201,10 @@ private:
     struct AppTooltipWindow : juce::TooltipWindow
     {
         AppTooltipWindow(juce::Component* parent, int delayMs)
-            : juce::TooltipWindow(parent, delayMs) {}
+            : juce::TooltipWindow(parent, delayMs)
+        {
+            setOpaque(false);
+        }
 
         juce::String getTipFor(juce::Component& c) override
         {
@@ -197,6 +214,7 @@ private:
         }
     };
     AppTooltipWindow tooltips { this, 450 };
+    void syncTooltipHighlight();
 
     struct ContentHolder : juce::Component
     {
@@ -206,21 +224,81 @@ private:
     ContentHolder content;
 
     TransportBar transport;
+
+    /** Files | Generator toggles for the left column (fold lives in the sidebar). */
+    class LeftPaneTabs : public juce::Component
+    {
+    public:
+        LeftPaneTabs();
+        std::function<void(int)> onTab;
+        std::function<void()> onTogglePreview;
+        std::function<void()> onToggleGrid;
+        void setTab(int t);
+        void setPreviewOpen(bool on);
+        void setGrid(bool on);
+        void resized() override;
+        void paint(juce::Graphics&) override;
+    private:
+        int tab = 0;
+        SegmentToggle tabToggle { "Browser", "Generator" };
+        IconBtn btnGrid { icons::grid, "Grid" };
+        IconBtn btnPreview { icons::noteKeys, "Preview" };
+    };
+
     FavoritesSidebar sidebar;
+    BrowserToolbar browserBar;
+    FilterPopover filterPopover;
     FileListPanel fileList;
     PianoRollMini miniRoll;
     PianoRollEditor rollEditor;
     EffectsInspector effectsInspector;
+    LeftPaneTabs leftPaneTabs;
+    juce::Viewport generatorViewport;
+    juce::Component generatorBody;
+    /** 0 = file browser, 1 = generators. */
+    int leftPaneTab = 0;
 
+    /** Groove preview header: clip name · bars · key, then Vel · Trim · Mute · Drag. */
     class PreviewHeader : public juce::Component
     {
     public:
-        explicit PreviewHeader(MidiToolkitEditor& o) : owner(o) {}
+        explicit PreviewHeader(MidiToolkitEditor& o);
         void paint(juce::Graphics&) override;
-        void mouseDown(const juce::MouseEvent&) override;
+        void resized() override;
+        void refresh();
         MidiToolkitEditor& owner;
+
+        struct DragBtn : ChipBtn
+        {
+            using ChipBtn::ChipBtn;
+            std::function<void()> onDragStart;
+            bool started = false;
+            void mouseDrag(const juce::MouseEvent& e) override
+            {
+                if (!started && e.getDistanceFromDragStart() > 4 && onDragStart)
+                {
+                    started = true;
+                    onDragStart();
+                }
+            }
+            void mouseUp(const juce::MouseEvent& e) override
+            {
+                started = false;
+                ChipBtn::mouseUp(e);
+            }
+        };
+        ChipBtn btnVel { "Vel" };
+        ChipBtn btnTrim { "Trim" };
+        ChipBtn btnMute { "Mute" };
+        DragBtn btnDrag { "Drag", icons::dragOut };
+        juce::String name, meta;
     };
     PreviewHeader previewHeader { *this };
+    KindGridView kindGrid;
+    bool gridView = false;
+    bool showPreviewVelocity = false;
+    bool previewMuted = false;
+    int browserContentWidth() const;
 
     juce::File rootDir;
     std::vector<StepClip> clips;
@@ -239,7 +317,7 @@ private:
         juce::File file;
     };
     std::vector<DisplayRow> displayRows;
-    int browseMode = 0;   // 0 folder, 2 search
+    int browseMode = 0;   // 0 folder, 1 starred files, 2 search, 3 starred folders
     bool starredFilter = false;
     BrowserSearch activeSearch;
     int activeSavedSearchIdx = -1;
@@ -280,6 +358,7 @@ private:
     int openedWindowH = 0;
     int trackedBrowserContentW = -1;
     int chromeApplyAttempts = 0;
+    void* spaceToHostMonitor = nullptr;
     int browserColW = metrics::fileTableW;
     /** User-dragged browser width while the piano roll is open. 0 keeps the default split. */
     int browserPaneW = 0;
@@ -292,15 +371,27 @@ private:
     bool trackedEffects = false;
     bool trackedSidebar = false;
     bool trackedPassthrough = false;
+    int trackedLeftPaneTab = 0;
     bool recording = false;
     bool hasRecording = false;
     bool trackedRecording = false;
     int savedNonRecordW = 0;
     StepClip recordedClip;
+    /** Part index from the last Generate; -1 = take/import (do not live-regenerate). */
+    int lastGeneratedPart = -1;
+    void regenerateGeneratedClip(const GrooveParams& groove);
     int savedNonPassW = 0;
     int savedNonPassH = 0;
     int passthroughWindowHeight() const;
+    int passthroughDefaultHeight() const;
+    int passthroughMinHeight() const;
+    int passthroughMaxHeight() const;
+    /** Through mode fits the file browser, the Toolkit, and the roll when it is open. */
+    int passthroughWindowWidth() const;
+    bool recordFromThrough = false;
     void syncPassthroughWindowHeight();
+    /** User-dragged passthrough height above the default fold. 0 = use default. */
+    int userPassthroughH = 0;
     double layoutAnimStartMs = 0.0;
     static constexpr double kLayoutAnimMs = 220.0;
 

@@ -38,7 +38,25 @@ public:
     void setTimeStretch(double stretch);
     void paint(juce::Graphics&) override;
 
+    /** Groove: notes take the clip's kind colour; optional velocity lane under the roll. */
+    void setNoteColour(juce::Colour c) { noteColour = c; repaint(); }
+    void setShowVelocity(bool on) { showVelocity = on; repaint(); }
+    bool isShowingVelocity() const { return showVelocity; }
+    /** 0..1 position of the playhead through the (stretched) clip. */
+    double playheadFraction() const;
+    static constexpr int kRulerH = 14;
+    static constexpr int kVelocityH = 40;
+    /** Right-click on the preview (Levels: the preview has no header row, so
+        Mute lives in this context menu). */
+    std::function<void(const juce::MouseEvent&)> onContextClick;
+    void mouseDown(const juce::MouseEvent& e) override
+    {
+        if (e.mods.isPopupMenu() && onContextClick) onContextClick(e);
+    }
+
 private:
+    juce::Colour noteColour { 0xff6fb5f0 };
+    bool showVelocity = false;
     std::vector<RollNote> notes;
     std::vector<RollNote> frameNotes; // stable pitch frame (usually source clip)
     GrooveParams knobs;
@@ -50,7 +68,7 @@ private:
     double playheadStep = 0.0;
     bool playing = false;
     double timeStretch = 1.0;
-    static constexpr float kGutterW = 28.0f;
+    static constexpr float kGutterW = 0.0f; // Levels preview: no key gutter
 };
 
 // Cupertino editor: clip header · toolbar · roll · velocity lane.
@@ -70,6 +88,14 @@ public:
     /** Feed the selected clip + its edit + groove. The editor never mutates
         the clip; user actions come back through the callbacks. */
     void setClip(const StepClip& clip, const ClipEdit& edit, const GrooveParams& groove);
+    /** Notes take the clip kind's colour (Groove clip-1 … clip-8). */
+    juce::Colour noteColour { 0xff6fb5f0 };
+    /** Shown over an empty roll (e.g. "Play MIDI in, then press record" in Through). */
+    void setEmptyHint(const juce::String& h) { emptyHint = h; repaint(); }
+    juce::String emptyHint;
+    /** Input mode (Through): header reads "Input" with a record status instead of clip tools. */
+    void setInputMode(bool isInput, const juce::String& subtitle);
+    bool isInputMode() const { return inputMode; }
     void clearClip();
     /** Live take: notes grow in place and loop handles stay hidden. */
     void beginRecording(const StepClip& clip);
@@ -82,6 +108,7 @@ public:
     void setTimeStretch(double stretch);   // 1/bpmMultiplier — stretches roll + export view
     void setScalePlacement(ScalePlacement placement);
     bool hasSelection() const { return !selection.empty(); }
+    const std::set<int>& selectedNoteIds() const { return selection; }
     void deleteSelectedNotes();   // non-destructive (edit.deleted)
     void toggleTrim();
 
@@ -196,19 +223,27 @@ private:
     void refreshControls();
     void updateRollSize();
     void scrollToContent();
-    /** Fit horizontal width to the clip and vertical zoom to the note range (centered if sparse). */
+    /** Fit horizontal width to the clip and vertical zoom to one lane above and below the notes. */
     void zoomToClip();
     void layoutScaleControls(juce::Rectangle<int> area);
     void nudgeSelection(int dPitch, int dStep);
 
     // ── row geometry ──
     float pxPerStep() const { return pxPerStepBase * zoomX; }
-    float effRowH() const { return folded ? rowH * 2.0f : rowH; }   // folded rows are 2x tall
+    bool rowsCollapsed() const { return folded || scaleFiltered; }
+    float effRowH() const { return rowsCollapsed() ? rowH * 2.0f : rowH; }   // folded rows are 2x tall
     int totalSteps() const
     {
         return juce::jmax(1, (int) std::lround((double) resolved.bars * kStepsPerBar * timeStretch));
     }
-    int numRows() const { return folded ? juce::jmax(1, (int) foldPitches.size()) : 128; }
+    int numRows() const
+    {
+        if (rowsCollapsed())
+            return juce::jmax(1, (int) foldPitches.size());
+        if (pitchWindowActive)
+            return juce::jmax(1, pitchWindowHi - pitchWindowLo + 1);
+        return 128;
+    }
     int rowForPitch(int pitch) const;
     int pitchForRow(int row) const;
     juce::Rectangle<float> noteRect(const RollNote&, int rowOffset = 0, double stepOffset = 0.0) const;
@@ -251,10 +286,16 @@ private:
     std::set<int> selection;
     std::vector<int> foldPitches;           // ascending note-bearing pitches
     bool folded = false;
+    /** When true, hide pitches/rows that are outside the selected scale. */
+    bool scaleFiltered = false;
     float pxPerStepBase = 6.0f;             // fit-to-width at zoomX 1
     float zoomX = 1.0f;                     // horizontal zoom, 1..6
     int visibleBarsZoom = -1;               // -1 = Clip (fit width + notes); else 2/4/8/16
     float rowH = 13.0f;                     // vertical zoom (px per semitone)
+    /** When true, only pitches [pitchWindowLo, pitchWindowHi] are shown (clip vertical fit). */
+    bool pitchWindowActive = false;
+    int pitchWindowLo = 0;
+    int pitchWindowHi = 127;
     int divisionSteps = 4;                  // grid + snap (1/4 default)
     double playheadStep = 0.0;
     bool playing = false;
@@ -278,11 +319,17 @@ private:
     MiniSwitch mapSwitch { "Map to root" };
     IconBtn btnLock { icons::lockOpen, "Lock pitch edits while browsing" };
     IconBtn btnRevert { icons::undo, "Revert all edits" };
-    ChipBtn btnTrim { "Trim", icons::scissors };
     ChipBtn btnFold { "Fold", icons::foldRows };
+    ChipBtn btnScale { "Scale" };
     IconBtn btnZoomOut { icons::zoomOut, "Zoom out" };
     IconBtn btnZoomIn { icons::zoomIn, "Zoom in" };
     ChipBtn selBadge { "0 sel" };
+    ChipBtn btnRevertNotes { "Revert" };
+    bool inputMode = false;
+    juce::String inputSub;
+    bool hasNoteEdits() const;
+    void revertNoteEdits();
+    void layoutHeaderTools();
     std::vector<std::unique_ptr<ChipBtn>> badgeChips;
 
     KeyGutter gutter { *this };
@@ -290,14 +337,15 @@ private:
     NotifyingViewport rollViewport;
     RollContent rollContent { *this };
     VelocityLane velocityLane { *this };
-    bool velocityOpen = true;
+    bool velocityOpen = false;
     ScalePanel scalePanel { *this };
 
     static constexpr int stripH = 0;
-    static constexpr int toolbarH = 40; // match Toolkit / browser headers
+    /** Matches Files / Generator and Effects headers (metrics::paneHeaderH). */
+    int toolbarHeight() const { return metrics::paneHeaderH(); }
     static constexpr int gutterW = 56;
 
-    juce::Rectangle<int> zoomLabelBounds, gridLabelBounds;
+    juce::Rectangle<int> zoomLabelBounds, gridLabelBounds, titleBounds;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(PianoRollEditor)
 };

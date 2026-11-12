@@ -55,6 +55,9 @@ FolderIndexEntry clipToEntry(const StepClip& clip)
     e.path = clip.filePath;
     e.name = clip.name;
     e.kind = (int) clip.kind;
+    e.kindConfidence = clip.kindConfidence;
+    e.hasDrumContent = clip.hasDrumContent;
+    e.tagMask = clip.tagMask;
     e.root = clip.root;
     e.bpm = clip.bpm;
     e.bars = clip.bars;
@@ -288,7 +291,14 @@ StepClip FolderIndex::entryToClip(const FolderIndexEntry& e)
     c.filePath = e.path;
     c.name = e.name.isNotEmpty() ? e.name
                                  : juce::File(e.path).getFileNameWithoutExtension();
-    c.kind = (ClipKind) juce::jlimit(0, (int) ClipKind::Single, e.kind);
+    int kind = e.kind;
+    if (kind < 0 || kind >= kNumClipKinds)
+        kind = (int) ClipKind::Lead;
+    c.kind = (ClipKind) kind;
+    applyFilenameKindTag(c);
+    c.kindConfidence = juce::jlimit(0, 100, e.kindConfidence);
+    c.hasDrumContent = e.hasDrumContent;
+    c.tagMask = e.tagMask;
     c.root = e.root;
     c.bpm = e.bpm > 0.0 ? e.bpm : 120.0;
     c.bars = juce::jmax(1, e.bars);
@@ -313,7 +323,7 @@ bool FolderIndex::save() const
 {
     juce::MemoryOutputStream out;
     out.writeInt((int) 0x4D424958);
-    out.writeInt(1);
+    out.writeInt(3); // v3: Keys/Arp kinds + keyword-first tagging
     writeString(out, rootPath);
     out.writeBool(recursive);
     out.writeInt64(scannedAtMs);
@@ -328,6 +338,9 @@ bool FolderIndex::save() const
         out.writeInt64(f.modMs);
         out.writeInt64(f.sizeBytes);
         out.writeInt(f.kind);
+        out.writeInt(f.kindConfidence);
+        out.writeBool(f.hasDrumContent);
+        out.writeInt((int) f.tagMask);
         out.writeInt(f.root);
         out.writeDouble(f.bpm);
         out.writeInt(f.bars);
@@ -352,7 +365,11 @@ std::optional<FolderIndex> FolderIndex::load(const juce::File& root, bool recurs
         return std::nullopt;
 
     juce::MemoryInputStream in(mb, false);
-    if (in.readInt() != (int) 0x4D424958 || in.readInt() != 1)
+    if (in.readInt() != (int) 0x4D424958)
+        return std::nullopt;
+    const int version = in.readInt();
+    // v3 remapped kinds (Piano→Keys, added Arp). Older caches still load; keywords re-tag on read.
+    if (version != 1 && version != 2 && version != 3)
         return std::nullopt;
 
     FolderIndex idx;
@@ -377,6 +394,15 @@ std::optional<FolderIndex> FolderIndex::load(const juce::File& root, bool recurs
         e.modMs = in.readInt64();
         e.sizeBytes = in.readInt64();
         e.kind = in.readInt();
+        // v1/v2: Bass=0 Piano=1 Lead=2 Drums=3. v3 inserts Arp at 3 and shifts Drums to 4.
+        if (version < 3 && e.kind == 3)
+            e.kind = (int) ClipKind::Drums;
+        if (version >= 2)
+        {
+            e.kindConfidence = in.readInt();
+            e.hasDrumContent = in.readBool();
+            e.tagMask = (uint16_t) juce::jlimit(0, 0xFFFF, in.readInt());
+        }
         e.root = in.readInt();
         e.bpm = in.readDouble();
         e.bars = in.readInt();

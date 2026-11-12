@@ -5,7 +5,7 @@
 
 namespace pflow {
 
-/** Cupertino 52px header: lights zone · app name · transport · drag chip · toggles. */
+/** Groove Panel 40px header: wordmark · BPM · play/stop · record · sync · through · panel toggles. */
 class TransportBar : public juce::Component,
                      private juce::Timer
 {
@@ -14,6 +14,7 @@ public:
 
     void resized() override;
     void paint(juce::Graphics&) override;
+    void paintOverChildren(juce::Graphics&) override;
     void mouseDown(const juce::MouseEvent&) override;
     void mouseDrag(const juce::MouseEvent&) override;
     void mouseDoubleClick(const juce::MouseEvent&) override;
@@ -28,6 +29,12 @@ public:
     void setEditorOpen(bool);
     void setEffectsOpen(bool);
     void setPassthrough(bool);
+    /** Hide the Through toggle. The MIDI FX build is always in that mode. */
+    void setPassthroughLocked(bool locked);
+    /** Hide play/record (Generator view). */
+    void setTransportControlsVisible(bool visible);
+    /** Single-column chrome: hide BPM pill; Drag Me becomes icon-only. */
+    void setCompactChrome(bool compact);
     void setHasClip(bool has);
     void setClipName(const juce::String& name);
     /** Standalone macOS reserves a traffic-light gutter; plugins must not. */
@@ -38,7 +45,7 @@ public:
     juce::Rectangle<int> getTitleBounds() const { return titleBounds; }
     /** Glyph + gap + “MIDI Toolkit”, independent of the current squeeze. */
     int logoIdealWidth() const;
-    /** 2 = MIDI Toolkit, 1 = MIDI, 0 = glyph only. */
+    /** 2 = MIDI Toolkit, 1 = MIDI, 0 = hidden. */
     int logoWordmarkLevel() const { return logoLevel; }
 
     std::function<void()> onPlayPause;
@@ -51,17 +58,22 @@ public:
     std::function<void(double)> onFreeBpmChanged;
     std::function<void()> onDragToDaw;
     std::function<void()> onCopyToFolder;
+    std::function<void()> onOpenSettings;
 
 private:
     void applyHeaderCaptions(bool withText);
+    /** 2 = Through+Piano roll+Toolkit, 1 = Through+Toolkit, 0 = icons only. */
+    void applyHeaderCaptionsTier(int tier);
     void refreshBpm();
     void timerCallback() override;
     bool hitInteractive(juce::Point<int> p) const;
     void paintLogo(juce::Graphics&, juce::Rectangle<int> area, float alpha) const;
+    juce::Rectangle<int> tempoGroupBounds;
     void paintLogoGlyph(juce::Graphics&, juce::Point<float> origin, float alpha) const;
     int logoMidiWidth() const;
 
     class StatusPill : public juce::Component,
+                       public juce::SettableTooltipClient,
                        private juce::Timer
     {
     public:
@@ -69,12 +81,18 @@ private:
         std::function<void(double)> onCommitBpm;
         bool synced = true;
         bool editable = false;
+        bool grouped = false; // right cell of the tempo group (parent draws the frame)
         float foregroundAlpha = 1.0f;
 
         void setText(const juce::String& t);
         void paint(juce::Graphics&) override;
+        int idealWidth() const;
         void mouseDown(const juce::MouseEvent&) override;
+        void mouseDrag(const juce::MouseEvent&) override;
+        void mouseEnter(const juce::MouseEvent&) override;
+        void mouseExit(const juce::MouseEvent&) override;
         void mouseDoubleClick(const juce::MouseEvent&) override;
+        void beginEditing();
         bool keyPressed(const juce::KeyPress&) override;
         void focusLost(FocusChangeType) override;
         void timerCallback() override;
@@ -83,6 +101,8 @@ private:
         bool editing = false;
         juce::String editBuffer;
         bool pendingSyncToggle = false;
+        double value = 124.0;
+        double dragStartBpm = 124.0;
     };
 
     class DragChip : public ChipBtn
@@ -93,6 +113,7 @@ private:
         std::function<void()> onCopyToFolder;
         juce::String clipName;
         float foregroundAlpha = 1.0f;
+        bool iconOnly = false;
 
         void paintButton(juce::Graphics& g, bool over, bool down) override;
         int idealWidth() const;
@@ -137,10 +158,13 @@ private:
     IconBtn btnRecord { icons::record, "Record" };
     StatusPill statusPill;
     IconBtn btnSync { icons::sync, "Sync to host tempo" };
-    DragChip btnDragToDaw { "Drag to DAW" };
-    IconBtn btnPassthrough { icons::midi, "Through" };
+    IconBtn btnPassthrough { icons::through, "Through" };
+    DragChip btnDragToDaw { "Drag Me" };
     IconBtn btnEditor { icons::noteKeys, "Piano Roll" };
-    IconBtn btnEffects { icons::sliders, "Effects" };
+    IconBtn btnEffects { icons::knobs, "Toolkit" };
+    IconBtn btnSettings { icons::gear, "Settings" };
+    bool transportControlsVisible = true;
+    bool compactChrome = false;
 
     juce::Rectangle<int> titleBounds, transportGroupBounds, dividerBounds;
 
@@ -149,6 +173,7 @@ private:
     bool editorOpen = false;
     bool effectsOpen = false;
     bool passthrough = false;
+    bool passthroughLocked = false;
     bool hasClip = false;
     bool windowActive = true;
     bool reserveTrafficLights = false;

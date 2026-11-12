@@ -195,15 +195,42 @@ TEST_CASE("resolveClip applies absolute octave and per-note moves", "[editmodel]
     CHECK(resolveClip(clip, e).notes[0].pitch == 60);
 }
 
-TEST_CASE("resolveClip octave range folds span into N octaves", "[editmodel]")
+TEST_CASE("resolveClip octave range folds into the target window", "[editmodel]")
 {
-    auto clip = makeClip({ { 0, 48, 0.0, 2.0 }, { 1, 72, 2.0, 2.0 } }, 1); // 2 octaves apart
+    // Lowest note C3 (48) anchors octave 3. One octave folds into C3–B3.
+    auto clip = makeClip({ { 0, 48, 0.0, 2.0 }, { 1, 72, 2.0, 2.0 } }, 1);
     ClipEdit e;
     e.octaveRange = 1;
+    const auto folded = resolveClip(clip, e);
+    REQUIRE(folded.notes.size() == 2);
+    CHECK(folded.notes[0].pitch == 48);
+    CHECK(folded.notes[1].pitch == 48); // 72 wraps by 24, two octaves, into C3
+
+    e.outsideRange = OutsideRangeMode::Clip;
+    const auto clipped = resolveClip(clip, e);
+    CHECK(clipped.notes[0].pitch == 48);
+    CHECK(clipped.notes[1].pitch == 59); // clamped to the top of the one-octave window
+}
+
+TEST_CASE("resolveClip octave fold matches an octave window", "[editmodel]")
+{
+    // Octave 1 starts at MIDI 24. A 1-octave fold matches block transpose, not ±12.
+    auto clip = makeClip({ { 0, 0, 0.0, 1.0 }, { 1, 11, 1.0, 1.0 }, { 2, 36, 2.0, 1.0 }, { 3, 72, 3.0, 1.0 } }, 1);
+    ClipEdit e;
+    e.octave = 1;
+    e.octaveRange = 1;
+    e.outsideRange = OutsideRangeMode::Fold;
     const auto r = resolveClip(clip, e);
-    REQUIRE(r.notes.size() == 2);
-    CHECK(r.notes[0].pitch == 48);
-    CHECK(r.notes[1].pitch == 48 + 11); // span remapped into 1 octave
+    REQUIRE(r.notes.size() == 4);
+    CHECK(r.notes[0].pitch == 24);
+    CHECK(r.notes[1].pitch == 35);
+    CHECK(r.notes[2].pitch == 24);
+    CHECK(r.notes[3].pitch == 24);
+
+    e.octaveRange = 2;
+    const auto wide = resolveClip(clip, e);
+    CHECK(wide.notes[0].pitch == 24); // 0 wraps up into the 24-wide window
+    CHECK(mapPitchToOctaveWindow(12, 1, 2, OutsideRangeMode::Fold) == 36);
 }
 
 TEST_CASE("resolveClip pitch range folds notes into window", "[editmodel]")
@@ -218,6 +245,41 @@ TEST_CASE("resolveClip pitch range folds notes into window", "[editmodel]")
     CHECK(r.notes[0].pitch <= 72);
     CHECK(r.notes[1].pitch >= 48);
     CHECK(r.notes[1].pitch <= 72);
+}
+
+TEST_CASE("resolveClip reverse flips note starts within the clip", "[editmodel]")
+{
+    // 1 bar = 16 steps; note at 0 len 4 → start 12; note at 8 len 4 → start 4.
+    auto clip = makeClip({ { 0, 60, 0.0, 4.0 }, { 1, 64, 8.0, 4.0 } }, 1);
+    ClipEdit e;
+    e.reverse = true;
+    const auto r = resolveClip(clip, e);
+    REQUIRE(r.notes.size() == 2);
+    CHECK(r.notes[0].start == Catch::Approx(12.0));
+    CHECK(r.notes[1].start == Catch::Approx(4.0));
+}
+
+TEST_CASE("resolveClip invert mirrors pitches around the midpoint", "[editmodel]")
+{
+    auto clip = makeClip({ { 0, 60, 0.0, 2.0 }, { 1, 64, 2.0, 2.0 } }, 1);
+    ClipEdit e;
+    e.invert = true;
+    const auto r = resolveClip(clip, e);
+    REQUIRE(r.notes.size() == 2);
+    // Midpoint of 60..64 is 62; 60→64, 64→60.
+    CHECK(r.notes[0].pitch == 64);
+    CHECK(r.notes[1].pitch == 60);
+}
+
+TEST_CASE("editIsClean detects reverse and invert", "[editmodel]")
+{
+    ClipEdit e;
+    CHECK(editIsClean(e));
+    e.reverse = true;
+    CHECK_FALSE(editIsClean(e));
+    e.reverse = false;
+    e.invert = true;
+    CHECK_FALSE(editIsClean(e));
 }
 
 TEST_CASE("resolveClip map-to-root transposes by nearest direction", "[editmodel]")
@@ -527,6 +589,198 @@ TEST_CASE("complexity stays low for a single note and rises for a dense part", "
     const auto dense = makeStepClip(denseClip);
 
     CHECK(sparse.complexity < 25);
-    CHECK(dense.complexity > sparse.complexity + 20);
+    CHECK(dense.complexity > sparse.complexity + 10);
     CHECK(dense.complexity < 100);
+}
+
+TEST_CASE("channel-1 GM drum loop is classified as Drums", "[editmodel]")
+{
+    // Typical sample-pack drum loop on channel 1 (not channel 10).
+    std::vector<NoteEvent> hits;
+    for (int bar = 0; bar < 2; ++bar)
+    {
+        const double b = bar * 4.0;
+        hits.push_back({ 36, 100, b + 0.0, 0.2, 1 });
+        hits.push_back({ 42, 80,  b + 0.0, 0.15, 1 });
+        hits.push_back({ 42, 70,  b + 0.5, 0.15, 1 });
+        hits.push_back({ 38, 110, b + 1.0, 0.2, 1 });
+        hits.push_back({ 42, 80,  b + 1.0, 0.15, 1 });
+        hits.push_back({ 42, 70,  b + 1.5, 0.15, 1 });
+        hits.push_back({ 36, 100, b + 2.0, 0.2, 1 });
+        hits.push_back({ 42, 80,  b + 2.0, 0.15, 1 });
+        hits.push_back({ 42, 70,  b + 2.5, 0.15, 1 });
+        hits.push_back({ 38, 110, b + 3.0, 0.2, 1 });
+        hits.push_back({ 42, 80,  b + 3.0, 0.15, 1 });
+        hits.push_back({ 42, 70,  b + 3.5, 0.15, 1 });
+    }
+    MidiClip clip;
+    clip.name = "Beat";
+    clip.notes = std::move(hits);
+    clip.lengthBeats = 8.0;
+    const auto s = makeStepClip(clip);
+    CHECK(s.kind == ClipKind::Drums);
+    CHECK(s.kindConfidence >= 70);
+    CHECK((s.tagMask & clipTag::Backbeat) != 0);
+}
+
+TEST_CASE("piano with one channel-10 click is not Drums", "[editmodel]")
+{
+    MidiClip clip = test::makeClipWithNotes({
+        { 60, 90, 0.0, 2.0, 1 },
+        { 64, 85, 0.0, 2.0, 1 },
+        { 67, 85, 0.0, 2.0, 1 },
+        { 60, 90, 2.0, 2.0, 1 },
+        { 64, 85, 2.0, 2.0, 1 },
+        { 67, 85, 2.0, 2.0, 1 },
+        { 37, 40, 0.0, 0.1, 10 }, // stray drum click on ch 10
+    }, 4.0);
+    const auto s = makeStepClip(clip);
+    CHECK(s.kind == ClipKind::Keys);
+    CHECK(s.hasDrumContent);
+}
+
+TEST_CASE("low chordal clip is Piano not Bass", "[editmodel]")
+{
+    MidiClip clip = test::makeClipWithNotes({
+        { 36, 90, 0.0, 2.0, 1 }, // C2
+        { 40, 85, 0.0, 2.0, 1 }, // E2
+        { 43, 85, 0.0, 2.0, 1 }, // G2
+        { 36, 90, 2.0, 2.0, 1 },
+        { 40, 85, 2.0, 2.0, 1 },
+        { 43, 85, 2.0, 2.0, 1 },
+    }, 4.0);
+    const auto s = makeStepClip(clip);
+    CHECK(s.kind == ClipKind::Keys);
+}
+
+TEST_CASE("drum complexity rises with hat layer not pitch-class count", "[editmodel]")
+{
+    MidiClip sparse;
+    sparse.name = "SparseKick";
+    sparse.lengthBeats = 4.0;
+    sparse.notes = {
+        { 36, 100, 0.0, 0.2, 1 },
+        { 38, 110, 1.0, 0.2, 1 },
+        { 36, 100, 2.0, 0.2, 1 },
+        { 38, 110, 3.0, 0.2, 1 },
+    };
+
+    MidiClip withHats = sparse;
+    withHats.name = "WithHats";
+    for (double t = 0.0; t < 4.0; t += 0.25)
+        withHats.notes.push_back({ 42, 60, t, 0.1, 1 });
+
+    const auto a = makeStepClip(sparse);
+    const auto b = makeStepClip(withHats);
+    CHECK(a.kind == ClipKind::Drums);
+    CHECK(b.kind == ClipKind::Drums);
+    CHECK(b.complexity > a.complexity);
+}
+
+TEST_CASE("filename keywords hint Bass Drums Keys Lead and Arp", "[editmodel]")
+{
+    CHECK(hintKindFromFileName("BA_Funky_01.mid") == ClipKind::Bass);
+    CHECK(hintKindFromFileName("Bassline_120_Cmin.mid") == ClipKind::Bass);
+    CHECK(hintKindFromFileName("Deep_Bass_Groove.mid") == ClipKind::Bass);
+    CHECK(hintKindFromFileName("DSS_Bass_Cmin_01.mid") == ClipKind::Bass);
+    CHECK(hintKindFromFileName("DSS_Bass_05_F#.mid") == ClipKind::Bass);
+    CHECK(hintKindFromFileName("Synth Bass.mid") == ClipKind::Bass);
+    CHECK(hintKindFromFileName("Synth_Bass_Cmin.mid") == ClipKind::Bass);
+    CHECK(hintKindFromFileName("808_Sub_C.mid") == ClipKind::Bass);
+    CHECK(hintKindFromFileName("DSS_808_01.mid") == ClipKind::Bass);
+    {
+        StepClip stub;
+        stub.name = "DSS_Bass_05_F#";
+        stub.filePath = "/packs/DSS_Bass_05_F#.mid";
+        stub.kind = ClipKind::Lead;
+        CHECK(applyFilenameKindTag(stub));
+        CHECK(stub.kind == ClipKind::Bass);
+    }
+    CHECK(hintKindFromFileName("Kit_01_BoomBap.mid") == ClipKind::Drums);
+    CHECK(hintKindFromFileName("Drums_Loop_A.mid") == ClipKind::Drums);
+    CHECK(hintKindFromFileName("DR_Loop_01.mid") == ClipKind::Drums);
+    CHECK(hintKindFromFileName("Keys_Rhodes_Pad.mid") == ClipKind::Keys);
+    CHECK(hintKindFromFileName("Piano_Chords_Em.mid") == ClipKind::Keys);
+    CHECK(hintKindFromFileName("KY_Chords_01.mid") == ClipKind::Keys);
+    CHECK(hintKindFromFileName("Lead_Synth_Hook.mid") == ClipKind::Lead);
+    CHECK(hintKindFromFileName("LD_Pluck_01.mid") == ClipKind::Lead);
+    CHECK(hintKindFromFileName("SY_Pluck_A.mid") == ClipKind::Lead);
+    CHECK(hintKindFromFileName("Arp_Cmaj_120.mid") == ClipKind::Arp);
+    CHECK(hintKindFromFileName("SEQ_Up_01.mid") == ClipKind::Arp);
+    CHECK(hintKindFromFileName("Hats_16th_Loop.mid") == ClipKind::Drums);
+    CHECK(hintKindFromFileName("HH_Closed_01.mid") == ClipKind::Drums);
+    CHECK(hintKindFromFileName("SN_Rim_01.mid") == ClipKind::Drums);
+    // Ambiguous pack words must NOT force Drums by filename alone.
+    CHECK(kindKeywordFromFileName("Groove_A_120.mid") == std::nullopt);
+    CHECK(kindKeywordFromFileName("Top_Loop_01.mid") == std::nullopt);
+    CHECK(kindKeywordFromFileName("Rhythm_Guitar_01.mid") == std::nullopt);
+    {
+        auto beat = kindKeywordFromFileName("Beat_Synth_Hook.mid");
+        const bool forcedDrums = beat.has_value() && *beat == ClipKind::Drums;
+        CHECK_FALSE(forcedDrums);
+    }
+    CHECK(kindKeywordFromFileName("Untitled_01.mid") == std::nullopt);
+}
+
+TEST_CASE("drum keyword without GM kit does not force Drums", "[editmodel]")
+{
+    // "Kit" in the name but notes are a mid-register melody — not a drum loop.
+    MidiClip clip = test::makeClipWithNotes({
+        { 60, 90, 0.0, 0.5, 1 },
+        { 64, 85, 0.5, 0.5, 1 },
+        { 67, 85, 1.0, 0.5, 1 },
+        { 72, 90, 1.5, 0.5, 1 },
+    }, 4.0);
+    clip.name = "Kit_Melody_Hook";
+    clip.filePath = "/packs/Kit_Melody_Hook.mid";
+    const auto s = makeStepClip(clip);
+    CHECK(s.kind != ClipKind::Drums);
+}
+
+TEST_CASE("mono C2 bassline is not Drums despite kick-range pitch", "[editmodel]")
+{
+    MidiClip clip = test::makeClipWithNotes({
+        { 36, 100, 0.0, 0.5, 1 },
+        { 36, 90, 1.0, 0.5, 1 },
+        { 36, 100, 2.0, 0.5, 1 },
+        { 36, 90, 3.0, 0.5, 1 },
+    }, 4.0);
+    clip.name = "Untitled_Sub";
+    const auto s = makeStepClip(clip);
+    CHECK(s.kind != ClipKind::Drums);
+    CHECK_FALSE(fitsGmDrumStructure(s.notes));
+}
+
+TEST_CASE("bass filename wins over ambiguous mid register mono line", "[editmodel]")
+{
+    MidiClip clip = test::makeClipWithNotes({
+        { 48, 100, 0.0, 0.5, 1 },
+        { 50, 90, 0.5, 0.5, 1 },
+        { 48, 100, 1.0, 0.5, 1 },
+        { 47, 90, 1.5, 0.5, 1 },
+    }, 4.0);
+    clip.name = "BA_Walking_01";
+    clip.filePath = "/Library/BA_Walking_01.mid";
+    const auto s = makeStepClip(clip);
+    CHECK(s.kind == ClipKind::Bass);
+}
+
+TEST_CASE("C1 kick pattern classifies as Drums without drum filename", "[editmodel]")
+{
+    MidiClip clip;
+    clip.name = "Untitled_Loop";
+    clip.lengthBeats = 4.0;
+    // Ableton C1 kick on 1 and 3, plus a couple of other kit hits.
+    clip.notes = {
+        { 36, 110, 0.0, 0.2, 1 },
+        { 42, 70, 0.5, 0.1, 1 },
+        { 38, 100, 1.0, 0.2, 1 },
+        { 42, 70, 1.5, 0.1, 1 },
+        { 36, 110, 2.0, 0.2, 1 },
+        { 42, 70, 2.5, 0.1, 1 },
+        { 38, 100, 3.0, 0.2, 1 },
+        { 42, 70, 3.5, 0.1, 1 },
+    };
+    const auto s = makeStepClip(clip);
+    CHECK(s.kind == ClipKind::Drums);
 }

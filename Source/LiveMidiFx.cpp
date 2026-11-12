@@ -1,4 +1,6 @@
 #include "LiveMidiFx.h"
+#include "GeneratorEngines.h"
+#include <algorithm>
 #include <cmath>
 
 namespace pflow {
@@ -121,16 +123,17 @@ int timingOffsetSamplesFor(const GrooveParams& k, double stepPos, int noteId,
 
 } // namespace
 
-int transformLivePitch(int midi, const ClipEdit& edit, int sourceRoot, int sourceOctave)
+int transformLivePitch(int midi, const ClipEdit& edit, int sourceRoot, int sourceOctave,
+                       bool drumChannel)
 {
     int pitch = juce::jlimit(0, 127, midi);
+    if (drumChannel)
+        return pitch;
 
-    if (edit.octave >= 0)
-    {
-        const int srcOct = juce::jlimit(0, 6, sourceOctave);
-        const int tgtOct = juce::jlimit(0, 6, edit.octave);
+    const int srcOct = juce::jlimit(0, 6, sourceOctave);
+    const int tgtOct = edit.octave >= 0 ? juce::jlimit(0, 6, edit.octave) : srcOct;
+    if (edit.octaveRange <= 0 && edit.octave >= 0)
         pitch += (tgtOct - srcOct) * 12;
-    }
 
     pitch += edit.pitchShift;
 
@@ -146,6 +149,9 @@ int transformLivePitch(int midi, const ClipEdit& edit, int sourceRoot, int sourc
         pitch = fitToScale(pitch, edit.root, edit.mode);
 
     pitch = juce::jlimit(0, 127, pitch);
+
+    if (edit.octaveRange > 0)
+        pitch = mapPitchToOctaveWindow(pitch, tgtOct, edit.octaveRange, edit.outsideRange);
 
     if (edit.hasPitchRange())
         pitch = foldPitchIntoRange(pitch, edit.pitchMin, edit.pitchMax);
@@ -294,14 +300,178 @@ void LiveMidiFx::flush(juce::MidiBuffer& out, int samplePosition)
         out.addEvent(juce::MidiMessage::controllerEvent(ch + 1, 64, 0), samplePosition);
         out.addEvent(juce::MidiMessage::allNotesOff(ch + 1), samplePosition);
     }
+    for (auto& n : inputHeld_) n = {};
     pending_.clear();
     freeBeat_ = 0.0;
     sustainDown_.fill(false);
     sustainLatched_.fill(false);
 }
 
+std::vector<int> LiveMidiFx::heldPitchesSorted(bool asPlayed) const
+{
+    struct Item { int pitch; int order; };
+    std::vector<Item> items;
+    for (int p = 0; p < 128; ++p)
+        if (inputHeld_[(size_t) p].active)
+            items.push_back({ p, inputHeld_[(size_t) p].order });
+    if (asPlayed)
+        std::sort(items.begin(), items.end(), [](const Item& a, const Item& b) { return a.order < b.order; });
+    else
+        std::sort(items.begin(), items.end(), [](const Item& a, const Item& b) { return a.pitch < b.pitch; });
+    std::vector<int> out;
+    out.reserve(items.size());
+    for (const auto& it : items) out.push_back(it.pitch);
+    return out;
+}
+
+int LiveMidiFx::effectiveKeyRoot(const LiveFxState& snap) const
+{
+    if (snap.edit.pitchInput && !snap.recording)
+    {
+        const int latch = pitchLatchMidi_.load();
+        if (latch >= 0)
+            return latch % 12;
+    }
+    if (snap.edit.root >= 0)
+        return snap.edit.root;
+    if (snap.sourceRoot >= 0)
+        return snap.sourceRoot;
+    return 0;
+}
+
+void LiveMidiFx::emitTransformed(juce::MidiBuffer& out, const LiveFxState& snap, int channel,
+                                 int inPitch, int velocity, int samplePos, int numSamples,
+                                 double sampleRate, double bpm, double beatPos, bool isNoteOn,
+                                 bool drumChannel)
+{
+    const double beatsIntoBlock = (sampleRate > 0.0)
+        ? ((double) samplePos / sampleRate) * (bpm / 60.0) : 0.0;
+    const double stepPos = (beatPos + beatsIntoBlock) * 4.0;
+    const int noteId = nextNoteId_++;
+    const int outPitch = transformLivePitch(inPitch, snap.edit, snap.sourceRoot, snap.sourceOctave,
+                                            drumChannel);
+    const int vel = transformLiveVelocity(velocity, noteId, stepPos, snap.groove);
+    const int timing = timingOffsetSamplesFor(snap.groove, stepPos, noteId, sampleRate, bpm);
+    const int emitAt = juce::jmax(0, samplePos + timing);
+    const int ch = juce::jlimit(1, 16, channel);
+
+    if (isNoteOn)
+    {
+        auto& slot = held_[(size_t) (ch - 1)][(size_t) juce::jlimit(0, 127, inPitch)];
+        if (slot.active)
+            emitOrQueue(out, juce::MidiMessage::noteOff(ch, slot.outPitch), samplePos, numSamples);
+        slot.active = true;
+        slot.outPitch = outPitch;
+        slot.timingOffsetSamples = timing;
+        slot.noteId = noteId;
+        slot.onBeat = beatPos + beatsIntoBlock;
+        emitOrQueue(out, juce::MidiMessage::noteOn(ch, outPitch, (juce::uint8) juce::jlimit(1, 127, vel)),
+                    emitAt, numSamples);
+        scheduleDelayTaps(snap.groove, out, true, ch, outPitch, vel, emitAt, numSamples, sampleRate, bpm);
+    }
+    else
+    {
+        auto& slot = held_[(size_t) (ch - 1)][(size_t) juce::jlimit(0, 127, inPitch)];
+        if (!slot.active) return;
+        const double lenMul = std::max(0.05, snap.groove.length / 100.0);
+        const double offBeat = beatPos + beatsIntoBlock;
+        const double durBeats = juce::jmax(0.001, offBeat - slot.onBeat);
+        const double remainingBeats = durBeats * lenMul - durBeats;
+        const int offAt = samplePos + slot.timingOffsetSamples
+                        + stepsToSamples(remainingBeats * 4.0, sampleRate, bpm);
+        const int pitch = slot.outPitch;
+        emitOrQueue(out, juce::MidiMessage::noteOff(ch, pitch), juce::jmax(0, offAt), numSamples);
+        scheduleDelayTaps(snap.groove, out, false, ch, pitch, 0, juce::jmax(0, offAt), numSamples,
+                          sampleRate, bpm);
+        slot = {};
+    }
+}
+
+void LiveMidiFx::runGenerators(juce::MidiBuffer& out, const LiveFxState& snap, double sampleRate,
+                               double bpm, double beatPos, int numSamples,
+                               bool allowGeneratorPlayback)
+{
+    if (sampleRate <= 0.0 || bpm <= 0.0) return;
+
+    const double startPpq = beatPos;
+    const double endPpq = beatPos + (double) numSamples * (bpm / 60.0) / sampleRate;
+    const auto held = heldPitchesSorted(false);
+    const int* chordPtr = held.empty() ? nullptr : held.data();
+    const int chordCount = (int) held.size();
+    const int keyRoot = effectiveKeyRoot(snap);
+    const Mode mode = snap.edit.mode;
+
+    arpNonce_ = snap.groove.arpNonce;
+    melodyNonce_ = snap.groove.melodyNonce;
+    chordNonce_ = snap.groove.chordNonce;
+    bassNonce_ = snap.groove.bassNonce;
+    drumNonce_ = snap.groove.drumNonce;
+
+    auto emitEvents = [&](const std::vector<gen::Event>& events, int channel, bool drumChannel)
+    {
+        for (const auto& ev : events)
+        {
+            const double beatsIntoBlock = ev.ppq - startPpq;
+            const int samplePos = juce::jlimit(0, juce::jmax(0, numSamples - 1),
+                (int) std::lround(beatsIntoBlock * sampleRate * 60.0 / bpm));
+            if (ev.velocity > 0)
+            {
+                emitTransformed(out, snap, channel, ev.note, ev.velocity, samplePos, numSamples,
+                                sampleRate, bpm, beatPos, true, drumChannel);
+            }
+            else
+            {
+                const int outPitch = transformLivePitch(ev.note, snap.edit, snap.sourceRoot,
+                                                        snap.sourceOctave, drumChannel);
+                emitOrQueue(out, juce::MidiMessage::noteOff(channel, outPitch),
+                            samplePos, numSamples);
+            }
+        }
+    };
+
+    // Effect mode: only input-driven generators (held notes → pattern). Freerun
+    // parts are playback and belong in generate-only / preview.
+    const bool inputOnly = !allowGeneratorPlayback;
+
+    std::vector<gen::Event> events;
+    if (snap.groove.arpEnabled && (!inputOnly || snap.groove.arpInput))
+    {
+        const int* arpChord = snap.groove.arpInput ? chordPtr : nullptr;
+        const int arpCount = snap.groove.arpInput ? chordCount : 0;
+        gen::renderArp(snap.groove, startPpq, endPpq, arpChord, arpCount, keyRoot, mode, events);
+        emitEvents(events, 1, false);
+    }
+    if (snap.groove.melodyEnabled && (!inputOnly || snap.groove.melodyInput))
+    {
+        const int* melChord = snap.groove.melodyInput ? chordPtr : nullptr;
+        const int melCount = snap.groove.melodyInput ? chordCount : 0;
+        gen::renderMelody(snap.groove, startPpq, endPpq, melChord, melCount, keyRoot, mode, events);
+        emitEvents(events, 1, false);
+    }
+    if (snap.groove.chordsEnabled && (!inputOnly || snap.groove.chordsInput))
+    {
+        const int* chChord = snap.groove.chordsInput ? chordPtr : nullptr;
+        const int chCount = snap.groove.chordsInput ? chordCount : 0;
+        gen::renderChords(snap.groove, startPpq, endPpq, chChord, chCount, keyRoot, mode, events);
+        emitEvents(events, 1, false);
+    }
+    if (snap.groove.bassEnabled && (!inputOnly || snap.groove.bassInput))
+    {
+        const int* bChord = snap.groove.bassInput ? chordPtr : nullptr;
+        const int bCount = snap.groove.bassInput ? chordCount : 0;
+        gen::renderBass(snap.groove, startPpq, endPpq, bChord, bCount, keyRoot, mode, events);
+        emitEvents(events, 1, false);
+    }
+    if (snap.groove.drumsEnabled && allowGeneratorPlayback)
+    {
+        gen::renderDrums(snap.groove, startPpq, endPpq, events);
+        emitEvents(events, 10, true);
+    }
+}
+
 void LiveMidiFx::process(juce::MidiBuffer& midi, double sampleRate, double hostBpm,
-                         double hostBeatPos, int numSamples, bool hostIsPlaying)
+                         double hostBeatPos, int numSamples, bool hostIsPlaying,
+                         bool allowGeneratorPlayback)
 {
     LiveFxState snap;
     {
@@ -309,7 +479,6 @@ void LiveMidiFx::process(juce::MidiBuffer& midi, double sampleRate, double hostB
         snap = state_;
     }
 
-    // Half/double tempo belongs to Playback, which does not apply to a live stream.
     const double bpm = juce::jmax(1.0, hostBpm);
     double beatPos = hostBeatPos;
     if (!hostIsPlaying)
@@ -322,10 +491,8 @@ void LiveMidiFx::process(juce::MidiBuffer& midi, double sampleRate, double hostB
     }
     else
         freeBeat_ = 0.0;
-    const double lenMul = std::max(0.05, snap.groove.length / 100.0);
 
     juce::MidiBuffer out;
-
     {
         std::vector<Pending> keep;
         keep.reserve(pending_.size());
@@ -342,6 +509,8 @@ void LiveMidiFx::process(juce::MidiBuffer& midi, double sampleRate, double hostB
         pending_.swap(keep);
     }
 
+    const bool arpConsumes = snap.groove.arpEnabled && snap.groove.arpInput;
+
     for (const auto metadata : midi)
     {
         auto msg = metadata.getMessage();
@@ -351,36 +520,24 @@ void LiveMidiFx::process(juce::MidiBuffer& midi, double sampleRate, double hostB
         {
             const int ch = juce::jlimit(1, 16, msg.getChannel());
             const int inPitch = juce::jlimit(0, 127, msg.getNoteNumber());
+            if (ch != 10)
+            {
+                inputHeld_[(size_t) inPitch].active = true;
+                inputHeld_[(size_t) inPitch].velocity = msg.getVelocity();
+                inputHeld_[(size_t) inPitch].order = inputOrder_++;
+                if (snap.edit.pitchInput && !snap.recording)
+                    pitchLatchMidi_.store(inPitch);
+            }
 
-            if (liveNoteMuted(inPitch, snap.edit))
+            // Arp with Input on consumes melodic input; drums / CC still pass.
+            if (arpConsumes && ch != 10)
                 continue;
 
-            const int noteId = nextNoteId_++;
-            const double beatsIntoBlock = (sampleRate > 0.0)
-                ? ((double) samplePos / sampleRate) * (bpm / 60.0) : 0.0;
-            const double stepPos = (beatPos + beatsIntoBlock) * 4.0;
+            if (liveNoteMuted(inPitch, snap.edit) && ch != 10)
+                continue;
 
-            const int outPitch = transformLivePitch(inPitch, snap.edit, snap.sourceRoot,
-                                                    snap.sourceOctave);
-            const int velocity = transformLiveVelocity(msg.getVelocity(), noteId, stepPos,
-                                                       snap.groove);
-            const int timing = timingOffsetSamplesFor(snap.groove, stepPos, noteId, sampleRate, bpm);
-            const int emitAt = juce::jmax(0, samplePos + timing);
-
-            auto& slot = held_[(size_t) (ch - 1)][(size_t) inPitch];
-            if (slot.active)
-                emitOrQueue(out, juce::MidiMessage::noteOff(ch, slot.outPitch), samplePos, numSamples);
-
-            slot.active = true;
-            slot.outPitch = outPitch;
-            slot.timingOffsetSamples = timing;
-            slot.noteId = noteId;
-            slot.onBeat = beatPos + beatsIntoBlock;
-
-            emitOrQueue(out, juce::MidiMessage::noteOn(ch, outPitch, (juce::uint8) velocity),
-                        emitAt, numSamples);
-            scheduleDelayTaps(snap.groove, out, true, ch, outPitch, velocity, emitAt, numSamples,
-                              sampleRate, bpm);
+            emitTransformed(out, snap, ch, inPitch, msg.getVelocity(), samplePos, numSamples,
+                            sampleRate, bpm, beatPos, true, ch == 10);
             continue;
         }
 
@@ -388,34 +545,24 @@ void LiveMidiFx::process(juce::MidiBuffer& midi, double sampleRate, double hostB
         {
             const int ch = juce::jlimit(1, 16, msg.getChannel());
             const int inPitch = juce::jlimit(0, 127, msg.getNoteNumber());
-            auto& slot = held_[(size_t) (ch - 1)][(size_t) inPitch];
-            if (!slot.active)
-            {
-                out.addEvent(msg, samplePos);
-                continue;
-            }
+            if (ch != 10)
+                inputHeld_[(size_t) inPitch] = {};
 
-            const double beatsIntoBlock = (sampleRate > 0.0)
-                ? ((double) samplePos / sampleRate) * (bpm / 60.0) : 0.0;
-            const double offBeat = beatPos + beatsIntoBlock;
-            const double durBeats = juce::jmax(0.001, offBeat - slot.onBeat);
-            const double remainingBeats = durBeats * lenMul - durBeats;
-            const int emitAt = samplePos + slot.timingOffsetSamples
-                             + stepsToSamples(remainingBeats * 4.0, sampleRate, bpm);
-            const int outPitch = slot.outPitch;
-            emitOrQueue(out, juce::MidiMessage::noteOff(ch, outPitch), juce::jmax(0, emitAt),
-                        numSamples);
-            scheduleDelayTaps(snap.groove, out, false, ch, outPitch, 0, juce::jmax(0, emitAt),
-                              numSamples, sampleRate, bpm);
-            slot = {};
+            if (arpConsumes && ch != 10)
+                continue;
+
+            emitTransformed(out, snap, ch, inPitch, 0, samplePos, numSamples, sampleRate, bpm,
+                            beatPos, false, ch == 10);
             continue;
         }
 
         out.addEvent(msg, samplePos);
     }
 
+    runGenerators(out, snap, sampleRate, bpm, beatPos, numSamples, allowGeneratorPlayback);
     syncSustain(snap.groove, out, numSamples);
     midi.swapWith(out);
 }
 
 } // namespace pflow
+

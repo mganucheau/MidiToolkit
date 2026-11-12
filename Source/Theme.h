@@ -10,11 +10,67 @@ namespace pflow {
 
 enum class Density { Compact, Comfortable };
 enum class ContentSize { Small, Medium, Large };
+/** Settings → Appearance: Auto follows the OS; Light/Dark pick a family. */
 enum class Appearance { System = 0, Light = 1, Dark = 2 };
+
+/** Named themes. Indexes 0–9 are light, 10–19 are dark. */
+struct ThemeSpec
+{
+    const char* name;
+    bool dark;
+    float hue;
+    float amount;
+    float lift;
+};
+
+inline constexpr ThemeSpec kThemes[] = {
+    { "Paper",    false, 0.00f, 0.00f,  0.00f },
+    { "Fog",      false, 0.58f, 0.22f,  0.00f },
+    { "Bone",     false, 0.09f, 0.18f,  0.02f },
+    { "Sand",     false, 0.10f, 0.28f,  0.00f },
+    { "Mist",     false, 0.56f, 0.16f,  0.03f },
+    { "Pearl",    false, 0.60f, 0.08f,  0.05f },
+    { "Linen",    false, 0.08f, 0.14f,  0.01f },
+    { "Ice",      false, 0.55f, 0.30f,  0.02f },
+    { "Sage",     false, 0.33f, 0.22f,  0.01f },
+    { "Blush",    false, 0.97f, 0.20f,  0.02f },
+    { "Ink",      true,  0.00f, 0.00f,  0.00f },
+    { "Carbon",   true,  0.00f, 0.00f, -0.04f },
+    { "Slate",    true,  0.58f, 0.28f,  0.00f },
+    { "Navy",     true,  0.62f, 0.38f, -0.02f },
+    { "Plum",     true,  0.78f, 0.30f,  0.00f },
+    { "Forest",   true,  0.36f, 0.28f, -0.02f },
+    { "Ember",    true,  0.06f, 0.32f,  0.00f },
+    { "Graphite", true,  0.58f, 0.10f, -0.02f },
+    { "Midnight", true,  0.64f, 0.42f, -0.04f },
+    { "Cocoa",    true,  0.07f, 0.26f, -0.01f },
+};
+
+inline constexpr int kNumThemes = (int) (sizeof(kThemes) / sizeof(kThemes[0]));
+inline constexpr int kNumThemesPerFamily = 10;
+inline constexpr int kPearlTheme = 5;
+inline constexpr int kInkTheme = 10;
+
+inline const ThemeSpec& themeAt(int index)
+{
+    return kThemes[(size_t) juce::jlimit(0, kNumThemes - 1, index)];
+}
+
+/** Map legacy stored ids → Appearance Auto/Light/Dark. */
+inline int migrateThemeIndex(int stored, bool themeCatalog)
+{
+    if (!themeCatalog)
+        return juce::jlimit(0, 2, stored);
+    if (stored >= 10) return (int) Appearance::Dark;
+    return (int) Appearance::Light;
+}
+
+/** Favorite / starred glyph — solid gold, independent of accent tint. */
+inline juce::Colour favoriteGold() { return ds::warning(); } // Levels amber
 enum class ScalePlacement { Top, Bottom };   // legacy; Pitch & Scale lives in inspector
 
 constexpr int kNumContentSizes = 3;
-constexpr int kNumAppearances = 3;
+constexpr int kNumAppearances = 3; // Auto / Light / Dark
 constexpr int kNumScalePlacements = 2;
 
 /** Legacy aggregate mapped 1:1 from ds::Palette — prefer ds:: accessors in new code. */
@@ -67,8 +123,11 @@ const ThemeTokens& themeTokens();
 const AccentTokens& accentTokens();
 const InspectorTokens& inspectorTokens();
 
-/** Resolves System → macOS setting; Light/Dark force appearance. */
+/** True for the ten dark themes (indexes 10–19). */
 bool usesDarkAppearance();
+
+/** Shift a base light/dark colour toward the active theme. Paper and Ink pass through. */
+juce::Colour tintForTheme(juce::Colour c);
 
 /** @deprecated Use usesDarkAppearance() */
 inline bool inspectorUsesDarkPalette() { return usesDarkAppearance(); }
@@ -78,6 +137,9 @@ void drawInspectorControlSurface(juce::Graphics& g, juce::Rectangle<float> bound
 void drawInspectorDivider(juce::Graphics& g, juce::Rectangle<int> bounds);
 
 /** App-level runtime Tweaks (density / content size / appearance). */
+enum class FontFamily : int { Archivo = 0, System = 1, Helvetica = 2, Avenir = 3, Count };
+enum class SurfaceStyle : int { Flat = 0, Depth = 1, Liquid = 2, Count };
+
 struct Tweaks
 {
     std::atomic<int> density { (int) Density::Comfortable };
@@ -85,8 +147,33 @@ struct Tweaks
     /** Type + icon glyph scale as percent; 100% = former 115% size. Independent of UI size. */
     std::atomic<int> textScalePct { 100 };
     std::atomic<int> appearance { (int) Appearance::System };
+    /** Light-family theme index 0–9 (Paper…Blush). */
+    std::atomic<int> lightTheme { kPearlTheme };
+    /** Dark-family theme index 0–9 (Ink…Cocoa) → absolute 10–19. */
+    std::atomic<int> darkTheme { 0 };
     std::atomic<int> showTooltips { 1 }; // 1 = on
+    std::atomic<int> fontFamily { (int) FontFamily::Archivo };
+    std::atomic<int> surfaceStyle { (int) SurfaceStyle::Flat };
+    /** Shade every other file-list row for readability. */
+    std::atomic<int> alternateRows { 1 }; // 1 = on (default)
+    /** Surface separation, 50–300 %. Scales how far neutral layers (sidebar, section
+        cards, wells, lines, borders, selection tints) sit from the window background.
+        Text and accents are untouched. 100 = Levels default. */
+    std::atomic<int> separationPct { 100 };
 };
+
+/** Standout amber used for tip bubbles and the control highlight under them. */
+inline juce::Colour tooltipAccent() { return juce::Colour(0xffffb020); }
+
+/** Contrast-aware ink against a surface (approx WCAG AA for small text). */
+juce::Colour contrastInkOn(juce::Colour surface);
+/** Contrast-aware line / note edge against a surface. */
+juce::Colour contrastLineOn(juce::Colour surface);
+
+SurfaceStyle currentSurfaceStyle();
+
+void setTooltipHighlightTarget(juce::Component* c);
+bool hasTooltipHighlight(const juce::Component* c);
 
 Tweaks& tweaks();
 
@@ -97,7 +184,51 @@ inline Density currentDensity()
 
 inline Appearance currentAppearance()
 {
-    return (Appearance) juce::jlimit(0, kNumAppearances - 1, tweaks().appearance.load());
+    return (Appearance) juce::jlimit(0, 2, tweaks().appearance.load());
+}
+
+inline int lightThemeIndex()
+{
+    return juce::jlimit(0, kNumThemesPerFamily - 1, tweaks().lightTheme.load());
+}
+
+inline int darkThemeIndex()
+{
+    return kNumThemesPerFamily
+         + juce::jlimit(0, kNumThemesPerFamily - 1, tweaks().darkTheme.load());
+}
+
+/** Resolve Appearance + light/dark theme prefs (Auto follows the OS). */
+inline int themeIndex()
+{
+    switch (currentAppearance())
+    {
+        case Appearance::Light: return lightThemeIndex();
+        case Appearance::Dark:  return darkThemeIndex();
+        case Appearance::System:
+        default:
+            return juce::Desktop::getInstance().isDarkModeActive()
+                       ? darkThemeIndex() : lightThemeIndex();
+    }
+}
+
+/** Absolute theme index for the family currently shown in Settings. */
+inline int settingsThemeFamilyIndex()
+{
+    switch (currentAppearance())
+    {
+        case Appearance::Light: return lightThemeIndex();
+        case Appearance::Dark:  return darkThemeIndex();
+        case Appearance::System:
+        default:
+            return juce::Desktop::getInstance().isDarkModeActive()
+                       ? darkThemeIndex() : lightThemeIndex();
+    }
+}
+
+inline bool settingsThemeFamilyIsDark()
+{
+    return themeAt(settingsThemeFamilyIndex()).dark;
 }
 
 /** UI scale for the Small / Medium / Large content-size tweak (layout / chrome). */
@@ -122,6 +253,8 @@ inline float textIconScale()
 
 // ── Fonts (system stack) ─────────────────────────────────────────────────────
 
+/** Groove Panel faces. weight: 400 / 500 / 600 / 700. mono = IBM Plex Mono (400 / 500). */
+juce::Font grooveFont(float height, int weight, bool mono = false);
 juce::Font uiFont(float pt, bool semibold = false);
 juce::Font monoFont(float pt, bool semibold = false);   // tabular-nums system font
 /** Same stack as uiFont/monoFont but ignores content-size scaling (Caps B2 inspector). */
@@ -162,10 +295,7 @@ namespace colours {
 
     inline juce::Colour accent()        { return ds::acc(); }
     /** Text/icons on accent fills — dark in dark mode for contrast on blue. */
-    inline juce::Colour accentInk()
-    {
-        return usesDarkAppearance() ? ds::bg() : juce::Colours::white;
-    }
+    inline juce::Colour accentInk()     { return ds::onAccent(); }
     inline juce::Colour accentSoft()    { return ds::selsoft(); }
     inline juce::Colour accentLine()    { return ds::acc().withAlpha(0.40f); }
     inline juce::Colour accentBright()  { return ds::note(); }
@@ -188,7 +318,7 @@ namespace colours {
     inline juce::Colour windowBorder()  { return ds::winbrd(); }
 
     /** Flagged: traffic-light red is allowed by §1 but not named in §2 — keep as system red. */
-    inline juce::Colour playhead()      { return ds::acc(); } // playhead uses accent per §1
+    inline juce::Colour playhead()      { return ds::play(); } // Groove: the playhead moves with the music
 
     inline juce::Colour bgLight()       { return panel2(); }
     inline juce::Colour bgLighter()     { return elev(); }
@@ -210,10 +340,10 @@ namespace colours {
     inline juce::Colour selection()     { return accentSoft(); }
     inline juce::Colour muteInactive()  { return controlFill(); }
     /** Flagged: traffic yellow/green (§1) — not in §2 table; derived as stron / kindKeys. */
-    inline juce::Colour muteYellow()    { return ds::stron(); }
-    inline juce::Colour soloBlue()      { return accent(); }
-    inline juce::Colour recordRed()     { return ds::kindPerc(); } // closest warm signal in §2
-    inline juce::Colour activeGreen()   { return ds::kindKeys(); }
+    inline juce::Colour muteYellow()    { return ds::active(); }
+    inline juce::Colour soloBlue()      { return ds::solo(); }
+    inline juce::Colour recordRed()     { return ds::record(); }
+    inline juce::Colour activeGreen()   { return ds::play(); }
     inline juce::Colour muteRed()       { return muteYellow(); }
     inline juce::Colour soloGreen()     { return activeGreen(); }
 
@@ -235,11 +365,11 @@ namespace metrics {
 
     constexpr float uiScale         = 1.0f;
 
-    constexpr float cornerRadius    = 10.0f;
+    constexpr float cornerRadius    = ds::radius::md;
     constexpr float windowRadius    = 12.0f;
-    constexpr float groupedRadius   = 8.0f;
-    constexpr float chipRadius      = 6.0f;
-    constexpr float controlRadius   = 5.0f;
+    constexpr float groupedRadius   = ds::radius::md;
+    constexpr float chipRadius      = ds::radius::sm;
+    constexpr float controlRadius   = ds::radius::sm;
     constexpr float browserFontSize = 12.0f;
 
     constexpr int grid              = 8;
@@ -250,7 +380,7 @@ namespace metrics {
     constexpr int previewH          = ds::region::previewH;
     constexpr int previewControlsH  = 32;
     constexpr int editorHeaderH     = 48;
-    constexpr int iconButtonSize    = 28;
+    constexpr int iconButtonSize    = 24;
     constexpr int comboTextPadding  = 6;
 
     // Logical (unscaled) layout widths — §5 regions.
@@ -270,15 +400,16 @@ namespace metrics {
     constexpr int foldedWindowW     = sidebarRailW + fileTableW;
     constexpr int openWindowW       = sidebarExpandedW + fileTableW + editorPaneW;
     /** Header chrome icon button (play / effects / etc.). */
-    constexpr int chromeIconBtn     = 28;
-    /** Drawn glyph size inside a chromeIconBtn with iconScale 1. */
-    constexpr int chromeIconGlyph   = 18;
+    constexpr int chromeIconBtn     = 24;   // control-lg
+    /** Drawn glyph size inside a chromeIconBtn with iconScale 1 (box stays 24). */
+    constexpr int chromeIconGlyph   = 15;
 
     inline int transportH()       { return scaled(toolbarH); }
     inline int listRowH()         { return scaled(ds::region::listRowH); }
     inline int listHeaderH()      { return scaled(ds::region::listHeaderH); }
-    inline int paneHeaderH()      { return scaled(28); }
-    inline int toolkitHeaderH()   { return scaled(44); }
+    /** Matches the transport header so Files / Generator / roll / Effects share one band. */
+    inline int paneHeaderH()      { return transportH(); }
+    inline int toolkitHeaderH()   { return paneHeaderH(); }
     inline int padS()             { return scaled(currentDensity() == Density::Comfortable ? 12 : 8); }
     inline int miniRollH()        { return scaled(ds::region::previewH); }
     /** Scale with Text & icons setting so chrome stays proportional. */

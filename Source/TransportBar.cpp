@@ -4,8 +4,8 @@ namespace pflow {
 
 namespace {
 constexpr float kHeaderIconScale = 1.0f;
-constexpr int kBtnW = 34;
-constexpr int kBtnH = 24;
+
+constexpr int kBtnH = 30;   // Mockup: ~30 px controls in 40 px header (5 px inset)
 }
 
 // ── StatusPill ───────────────────────────────────────────────────────────────
@@ -19,32 +19,86 @@ void TransportBar::StatusPill::setText(const juce::String& t)
 
 void TransportBar::StatusPill::paint(juce::Graphics& g)
 {
-    constexpr float kRadius = 5.0f;
+    // Levels tempo readout: surface + 18 % border (radius-md), sits flush right of the Sync
+    // toggle so the two read as one group. Editing = 2 px primary inner ring.
     auto r = getLocalBounds().toFloat();
-    g.setColour(ds::ctl().withMultipliedAlpha(foregroundAlpha > 0.9f ? 1.0f : 0.85f));
-    g.fillRoundedRectangle(r, kRadius);
-    g.setColour(ds::ctlb().withMultipliedAlpha(foregroundAlpha));
-    g.drawRoundedRectangle(r.reduced(0.5f), kRadius, 1.0f);
+    if (!grouped)
+    {
+        g.setColour(ds::surface200());
+        g.fillRoundedRectangle(r, ds::radius::md);
+    }
+    if (grouped)
+    {
+        if (editable && editing)
+        {
+            g.setColour(ds::primary());
+            g.drawRoundedRectangle(r.reduced(1.0f), ds::radius::sm, 2.0f);
+        }
+    }
+    else if (editable && editing)
+    {
+        g.setColour(ds::primary());
+        g.drawRoundedRectangle(r.reduced(1.0f), ds::radius::md, 2.0f);
+    }
+    else
+    {
+        g.setColour((editable && isMouseOverOrDragging()) ? ds::inkMuted() : ds::edge());
+        g.drawRoundedRectangle(r.reduced(0.5f), ds::radius::md, 1.0f);
+    }
 
-    auto inner = r.reduced(12.0f, 0.0f);
-    const auto value = editing ? editBuffer + "|"
-                               : text.upToFirstOccurrenceOf(" ", false, false);
+    auto inner = r.reduced(8.0f, 0.0f);
+    const auto shownText = editing ? editBuffer + "|"
+                                   : text.upToFirstOccurrenceOf(" ", false, false);
     const auto valueFont = ds::font(ds::Type::NumericDisplay);
-    g.setColour(ds::tx().withMultipliedAlpha(foregroundAlpha));
+    g.setColour(ds::ink().withMultipliedAlpha(foregroundAlpha));
     g.setFont(valueFont);
-    const float valueW = juce::GlyphArrangement::getStringWidth(valueFont, value) + 4.0f;
-    g.drawText(value, inner.removeFromLeft(valueW), juce::Justification::centredLeft, false);
-    g.setColour(ds::tx3().withMultipliedAlpha(foregroundAlpha));
-    g.setFont(ds::font(ds::Type::Caption).withHeight(9.0f).withExtraKerningFactor(0.08f));
+    const float valueW = juce::GlyphArrangement::getStringWidth(valueFont, shownText) + 4.0f;
+    g.drawText(shownText, inner.removeFromLeft(valueW), juce::Justification::centredLeft, false);
+    g.setColour(ds::inkMuted().withMultipliedAlpha(foregroundAlpha));
+    g.setFont(monoFontFixed(12.0f));
     g.drawText("BPM", inner, juce::Justification::centredLeft, false);
+    if (hasKeyboardFocus(false))
+        drawFocusRing(g, r, ds::radius::sm);
 }
+
+int TransportBar::StatusPill::idealWidth() const
+{
+    const auto shownText = text.upToFirstOccurrenceOf(" ", false, false);
+    const float v = juce::GlyphArrangement::getStringWidth(ds::font(ds::Type::NumericDisplay),
+                                                           shownText.length() < 3 ? juce::String("000") : shownText);
+    const float l = juce::GlyphArrangement::getStringWidth(monoFontFixed(12.0f), "BPM");
+    // Matches paint(): 8 px inset each side + 6 px gap between value and unit.
+    return (int) std::ceil(8.0f + v + 6.0f + l + 8.0f + 2.0f);
+}
+
+void TransportBar::StatusPill::mouseDrag(const juce::MouseEvent& e)
+{
+    // Drag vertically like a NumberBox: 2 px per BPM, Shift for ten times finer.
+    if (synced || editing || !onCommitBpm) return;
+    const float perBpm = e.mods.isShiftDown() ? 20.0f : 2.0f;
+    const double v = juce::jlimit(20.0, 300.0, dragStartBpm - (double) e.getDistanceFromDragStartY() / perBpm);
+    const double rounded = e.mods.isShiftDown() ? std::round(v * 10.0) / 10.0 : std::round(v);
+    if (std::abs(rounded - value) > 1.0e-6)
+        onCommitBpm(rounded);
+}
+
+void TransportBar::StatusPill::mouseEnter(const juce::MouseEvent&) { repaint(); }
+void TransportBar::StatusPill::mouseExit(const juce::MouseEvent&) { repaint(); }
 
 void TransportBar::StatusPill::mouseDown(const juce::MouseEvent&)
 {
     if (editing || synced) return;
+    dragStartBpm = value;
+    setWantsKeyboardFocus(true);
+    grabKeyboardFocus();
 }
 
 void TransportBar::StatusPill::mouseDoubleClick(const juce::MouseEvent&)
+{
+    beginEditing();
+}
+
+void TransportBar::StatusPill::beginEditing()
 {
     if (synced) return;
     pendingSyncToggle = false;
@@ -73,7 +127,19 @@ void TransportBar::StatusPill::focusLost(FocusChangeType)
 
 bool TransportBar::StatusPill::keyPressed(const juce::KeyPress& key)
 {
-    if (!editing) return false;
+    if (!editing)
+    {
+        if (synced || !onCommitBpm) return false;
+        double d = 0.0;
+        if (key == juce::KeyPress::upKey)            d = key.getModifiers().isShiftDown() ? 0.1 : 1.0;
+        else if (key == juce::KeyPress::downKey)     d = key.getModifiers().isShiftDown() ? -0.1 : -1.0;
+        else if (key == juce::KeyPress::pageUpKey)   d = 10.0;
+        else if (key == juce::KeyPress::pageDownKey) d = -10.0;
+        else if (key == juce::KeyPress::returnKey)   { beginEditing(); return true; }
+        else return false;
+        onCommitBpm(juce::jlimit(20.0, 300.0, value + d));
+        return true;
+    }
     if (key == juce::KeyPress::returnKey || key == juce::KeyPress::escapeKey)
     {
         if (key == juce::KeyPress::returnKey)
@@ -106,73 +172,76 @@ bool TransportBar::StatusPill::keyPressed(const juce::KeyPress& key)
 
 int TransportBar::DragChip::idealWidth() const
 {
-    const float s = juce::jmax(0.5f, contentScale());
-    const auto font = uiFont(11.5f, true);
-    juce::GlyphArrangement glyphs;
-    glyphs.addLineOfText(font, "Drag to DAW", 0.0f, 0.0f);
-    float right = 72.0f;
-    if (glyphs.getNumGlyphs() > 0)
-    {
-        right = 0.0f;
-        for (int i = 0; i < glyphs.getNumGlyphs(); ++i)
-            right = juce::jmax(right, glyphs.getGlyph(i).getRight());
-    }
-    // Ink bounds stop short of the last glyph's advance, which was clipping the W.
-    const int textW = (int) std::ceil(right) + 6;
-    const int pad = juce::roundToInt(10.0f * s);
-    const int icon = juce::roundToInt(16.0f * s);
-    const int gap = juce::roundToInt(6.0f * s);
-    return pad + icon + gap + textW + pad;
+    const float sc = juce::jmax(0.5f, contentScale());
+    if (iconOnly)
+        return juce::roundToInt(8.0f * sc) * 2 + juce::roundToInt(14.0f * sc);
+    const juce::String label = getButtonText().isNotEmpty() ? getButtonText() : "Drag Me";
+    const int textW = (int) std::ceil(juce::GlyphArrangement::getStringWidth(uiFont(12.0f, true), label)) + 2;
+    // Match caption chips: 8 px pad + grip + 5 gap + label.
+    return juce::roundToInt(8.0f * sc) * 2 + juce::roundToInt(14.0f * sc) + juce::roundToInt(5.0f * sc) + textW;
 }
 
 void TransportBar::DragChip::paintButton(juce::Graphics& g, bool over, bool down)
 {
     auto face = getLocalBounds().toFloat();
-    juce::Colour fill = ds::ctl();
-    if (down) fill = usesDarkAppearance() ? fill.brighter(0.06f) : fill.darker(0.06f);
-    else if (over) fill = usesDarkAppearance() ? fill.brighter(0.03f) : fill.darker(0.03f);
-    g.setColour(fill.withMultipliedAlpha(foregroundAlpha > 0.9f ? 1.0f : 0.85f));
-    g.fillRoundedRectangle(face, 6.0f);
-    g.setColour(ds::ctlb().withMultipliedAlpha(foregroundAlpha));
-    g.drawRoundedRectangle(face.reduced(0.5f), 6.0f, 1.0f);
+    // Levels primary action: solid primary fill, radius-md, six-dot grip + "Drag Me".
+    const auto base = ds::primary();
+    const auto fill = down ? base.interpolatedWith(ds::bg(), 0.15f) : base;
+    juce::ignoreUnused(over);
+    g.setColour(fill.withMultipliedAlpha(foregroundAlpha));
+    g.fillRoundedRectangle(face, ds::radius::md);
 
-    const float s = juce::jmax(0.5f, contentScale());
-    auto inner = face.reduced(10.0f * s, 0.0f);
-    auto glyph = inner.removeFromLeft(16.0f * s).withSizeKeepingCentre(16.0f * s, 16.0f * s);
-    drawIcon(g, icons::dragOut, glyph, ds::tx2().withMultipliedAlpha(foregroundAlpha),
-             juce::jlimit(1.2f, 1.6f, 1.3f * s));
-    inner.removeFromLeft(6.0f * s);
-    const auto font = uiFont(11.5f, true);
-    g.setColour(ds::tx2().withMultipliedAlpha(foregroundAlpha));
-    const float baseline = inner.getCentreY() + (font.getAscent() - font.getDescent()) * 0.5f;
-    juce::GlyphArrangement glyphs;
-    glyphs.addLineOfText(font, "Drag to DAW", inner.getX(), baseline);
-    glyphs.draw(g);
+    const float sc = juce::jmax(0.5f, contentScale());
+    const auto ink = ds::onPrimary().withMultipliedAlpha(foregroundAlpha);
+    if (iconOnly)
+    {
+        auto glyph = face.withSizeKeepingCentre(14.0f * sc, 14.0f * sc);
+        drawIcon(g, icons::grip, glyph, ink, 1.3f);
+    }
+    else
+    {
+        auto inner = face.reduced(8.0f * sc, 0.0f);
+        auto glyph = inner.removeFromLeft(14.0f * sc).withSizeKeepingCentre(14.0f * sc, 14.0f * sc);
+        drawIcon(g, icons::grip, glyph, ink, 1.3f);
+        inner.removeFromLeft(5.0f * sc);
+        g.setFont(uiFont(12.0f, true));
+        g.setColour(ink);
+        const juce::String label = getButtonText().isNotEmpty() ? getButtonText() : "Drag Me";
+        g.drawText(label, inner, juce::Justification::centredLeft, false);
+    }
+    if (hasKeyboardFocus(true))
+        drawFocusRing(g, face, ds::radius::md);
 }
 
 // ── TransportBar ─────────────────────────────────────────────────────────────
 
 TransportBar::TransportBar()
 {
-    auto prep = [](IconBtn& b, bool ghost)
+    auto prep = [](IconBtn& b)
     {
-        b.ghost = ghost;
+        b.ghost = false;            // every header control is a Groove toggle face
         b.iconScale = kHeaderIconScale;
         b.setWantsKeyboardFocus(true);
     };
 
-    prep(btnPlay, true);
-    btnPlay.setTooltip("Play / pause preview (Space)");
-    btnPlay.onClick = [this] { if (onPlayPause) onPlayPause(); };
+    // Play and stop share one button: play glyph while stopped, stop glyph while playing.
+    prep(btnPlay);
+    btnPlay.activeTint = ds::play();
+    btnPlay.solid = true;         // Levels: the one solid transport control
+    btnPlay.setTooltip("Play preview (Space)");
+    btnPlay.onClick = [this]
+    {
+        if (playing) { if (onStop) onStop(); }
+        else if (onPlayPause) onPlayPause();
+    };
     addAndMakeVisible(btnPlay);
 
-    prep(btnStop, true);
-    btnStop.setTooltip("Stop preview");
-    btnStop.onClick = [this] { if (onStop) onStop(); };
-    addAndMakeVisible(btnStop);
+    btnStop.setVisible(false);      // folded into btnPlay
+    addChildComponent(btnStop);
 
-    prep(btnRecord, true);
-    btnRecord.activeTint = juce::Colour(0xffe5484d);
+    prep(btnRecord);
+    btnRecord.activeTint = ds::record();
+    btnRecord.outlined = true;    // Levels: outline with a danger dot
     btnRecord.setTooltip("Record MIDI input");
     btnRecord.onClick = [this] { if (onToggleRecord) onToggleRecord(); };
     addAndMakeVisible(btnRecord);
@@ -185,8 +254,7 @@ TransportBar::TransportBar()
     };
     addAndMakeVisible(statusPill);
 
-    prep(btnSync, false);
-    btnSync.setTooltip("Sync to host tempo");
+    prep(btnSync);
     btnSync.onClick = [this]
     {
         synced = !synced;
@@ -196,31 +264,35 @@ TransportBar::TransportBar()
     };
     addAndMakeVisible(btnSync);
 
+    prep(btnPassthrough);
+    btnPassthrough.setComponentID("btnPassthrough");
+    btnPassthrough.icon = icons::through;
+    btnPassthrough.setTooltip("Through: live MIDI input runs through the Toolkit — no file/generator playback (P)");
+    btnPassthrough.onClick = [this] { if (onTogglePassthrough) onTogglePassthrough(); };
+    addAndMakeVisible(btnPassthrough);
+
     btnDragToDaw.accentText = false;
-    btnDragToDaw.cornerRadius = 6.0f;
-    btnDragToDaw.setTooltip("Drag edited clip onto a DAW track (or right-click to copy)");
+    btnDragToDaw.setButtonText("Drag Me");
+    btnDragToDaw.setTooltip("Drag the current effected clip onto a DAW track (or right-click to copy)");
     btnDragToDaw.setMouseCursor(juce::MouseCursor::DraggingHandCursor);
     btnDragToDaw.onDragStart = [this] { if (onDragToDaw) onDragToDaw(); };
     btnDragToDaw.onCopyToFolder = [this] { if (onCopyToFolder) onCopyToFolder(); };
     addAndMakeVisible(btnDragToDaw);
 
-    prep(btnPassthrough, false);
-    btnPassthrough.caption = "Through";
-    btnPassthrough.setTooltip("Through\nLive input through effects\nShortcut: P");
-    btnPassthrough.onClick = [this] { if (onTogglePassthrough) onTogglePassthrough(); };
-    addAndMakeVisible(btnPassthrough);
-
-    prep(btnEditor, false);
-    btnEditor.caption = "Piano Roll";
-    btnEditor.setTooltip("Piano Roll\nShortcut: E");
+    prep(btnEditor);
+    btnEditor.setTooltip("Piano Roll (E)");
     btnEditor.onClick = [this] { if (onToggleEditor) onToggleEditor(); };
     addAndMakeVisible(btnEditor);
 
-    prep(btnEffects, false);
-    btnEffects.caption = "Effects";
-    btnEffects.setTooltip("Effects\nShortcut: F");
+    prep(btnEffects);
+    btnEffects.setTooltip("Toolkit (F)");
     btnEffects.onClick = [this] { if (onToggleEffects) onToggleEffects(); };
     addAndMakeVisible(btnEffects);
+
+    prep(btnSettings);
+    btnSettings.setTooltip("Settings");
+    btnSettings.onClick = [this] { if (onOpenSettings) onOpenSettings(); };
+    addAndMakeVisible(btnSettings);
 
     setOpaque(true);
     refreshBpm();
@@ -232,11 +304,15 @@ void TransportBar::setPlaying(bool p)
     if (playing == p) return;
     playing = p;
     btnPlay.active = playing;
+    btnPlay.activeTint = ds::play();
+    btnPlay.icon = playing ? icons::stop : icons::play;
+    btnPlay.setTooltip(playing ? "Stop preview (Space)" : "Play preview (Space)");
     btnPlay.repaint();
 }
 
 void TransportBar::setRecording(bool on)
 {
+    btnRecord.activeTint = ds::record();
     btnRecord.active = on;
     btnRecord.repaint();
 }
@@ -281,6 +357,11 @@ void TransportBar::setEditorOpen(bool open)
 {
     editorOpen = open;
     btnEditor.active = open;
+    // Levels toggle chip (LvApp): active = violet border + 12 % tint, ink label;
+    // idle = ghost at 64 %.
+    btnEditor.solid = false;
+    btnEditor.accentSolid = false;
+    btnEditor.outlined = false;
     btnEditor.repaint();
     resized();
 }
@@ -289,6 +370,11 @@ void TransportBar::setEffectsOpen(bool open)
 {
     effectsOpen = open;
     btnEffects.active = open;
+    // Levels toggle chip (LvApp): active = violet border + 12 % tint, ink label;
+    // idle = ghost at 64 %.
+    btnEffects.solid = false;
+    btnEffects.accentSolid = false;
+    btnEffects.outlined = false;
     btnEffects.repaint();
     resized();
 }
@@ -297,17 +383,39 @@ void TransportBar::setPassthrough(bool on)
 {
     passthrough = on;
     btnPassthrough.active = on;
-    const bool show = !on;
-    btnPlay.setVisible(show);
-    btnStop.setVisible(show);
-    btnRecord.setVisible(show);
-    statusPill.setVisible(show);
-    btnSync.setVisible(show);
-    btnEditor.setVisible(show);
-    btnEffects.setVisible(show);
-    btnDragToDaw.setVisible(show && hasClip);
+    // Levels toggle chip (LvApp): active = violet border + 12 % tint, ink label;
+    // idle = ghost at 64 %.
+    btnPassthrough.solid = false;
+    btnPassthrough.accentSolid = false;
+    btnPassthrough.outlined = false;
+    btnPassthrough.repaint();
     resized();
     repaint();
+}
+
+void TransportBar::setPassthroughLocked(bool locked)
+{
+    if (passthroughLocked == locked)
+        return;
+    passthroughLocked = locked;
+    resized();
+}
+
+void TransportBar::setTransportControlsVisible(bool visible)
+{
+    if (transportControlsVisible == visible)
+        return;
+    transportControlsVisible = visible;
+    resized();
+}
+
+void TransportBar::setCompactChrome(bool compact)
+{
+    if (compactChrome == compact)
+        return;
+    compactChrome = compact;
+    btnDragToDaw.iconOnly = compact;
+    resized();
 }
 
 void TransportBar::setHasClip(bool has)
@@ -343,7 +451,7 @@ float glyphLineWidth(const juce::Font& font, const juce::String& text)
 
 juce::Font toolkitWordFont()
 {
-    return uiFontFixed(14.0f, false).withExtraKerningFactor(-0.02f);
+    return ds::font(ds::Type::Logo);
 }
 
 } // namespace
@@ -354,13 +462,12 @@ int TransportBar::logoIdealWidth() const
     const float text = glyphLineWidth(midi, "MIDI")
                      + glyphLineWidth(midi, " ")
                      + glyphLineWidth(toolkitWordFont(), "Toolkit");
-    return 16 + 6 + (int) std::ceil(text);
+    return (int) std::ceil(text);
 }
 
 int TransportBar::logoMidiWidth() const
 {
-    const float text = glyphLineWidth(ds::font(ds::Type::Logo), "MIDI");
-    return 16 + 6 + (int) std::ceil(text);
+    return (int) std::ceil(glyphLineWidth(ds::font(ds::Type::Logo), "MIDI"));
 }
 
 void TransportBar::paintLogoGlyph(juce::Graphics& g, juce::Point<float> origin, float alpha) const
@@ -412,17 +519,13 @@ void TransportBar::paintLogoGlyph(juce::Graphics& g, juce::Point<float> origin, 
 
 void TransportBar::paintLogo(juce::Graphics& g, juce::Rectangle<int> area, float alpha) const
 {
-    if (area.getWidth() < 16 || area.getHeight() <= 0)
+    if (logoLevel <= 0 || area.getWidth() <= 0 || area.getHeight() <= 0)
         return;
 
-    const float centreY = area.getCentreY();
-    paintLogoGlyph(g, { (float) area.getX(), centreY - 8.0f }, alpha);
-    if (logoLevel <= 0)
-        return;
-
+    const float centreY = (float) area.getCentreY();
     const auto midiFont = ds::font(ds::Type::Logo);
     const auto toolFont = toolkitWordFont();
-    float x = (float) area.getX() + 16.0f + 6.0f;
+    float x = (float) area.getX();
     auto drawWord = [&](const juce::Font& font, const juce::String& text, juce::Colour colour)
     {
         g.setFont(font);
@@ -435,11 +538,11 @@ void TransportBar::paintLogo(juce::Graphics& g, juce::Rectangle<int> area, float
             x += glyphs.getBoundingBox(0, glyphs.getNumGlyphs(), true).getWidth();
     };
 
-    drawWord(midiFont, "MIDI", ds::tx().withMultipliedAlpha(alpha));
+    drawWord(midiFont, "MIDI", ds::ink().withMultipliedAlpha(alpha));
     if (logoLevel < 2)
         return;
-    drawWord(midiFont, " ", ds::tx().withMultipliedAlpha(alpha));
-    drawWord(toolFont, "Toolkit", ds::tx2().withMultipliedAlpha(alpha));
+    drawWord(midiFont, " ", ds::ink().withMultipliedAlpha(alpha));
+    drawWord(toolFont, "Toolkit", ds::inkMuted().withMultipliedAlpha(alpha));
 }
 
 void TransportBar::setClipName(const juce::String& name)
@@ -455,10 +558,15 @@ void TransportBar::refreshBpm()
     const double shown = synced ? hostBpm * multiplier : freeBpm;
     statusPill.synced = synced;
     statusPill.editable = !synced;
-    statusPill.setText(juce::String(shown, 1) + " bpm");
+    statusPill.value = shown;
+    // Whole numbers unless the tempo really has a fraction (set with Shift).
+    const bool whole = std::abs(shown - std::round(shown)) < 0.05;
+    statusPill.setText((whole ? juce::String(juce::roundToInt(shown)) : juce::String(shown, 1)) + " bpm");
+    statusPill.setMouseCursor(synced ? juce::MouseCursor::NormalCursor : juce::MouseCursor::UpDownResizeCursor);
+    statusPill.setTooltip(synced ? "Host tempo. Turn off Sync to set your own"
+                                 : "Drag or use the arrow keys to set the tempo. Double-click to type");
     btnSync.active = synced;
-    btnSync.setTooltip(synced ? "Synced to host - click for free tempo"
-                              : "Free tempo - click to sync to host");
+    btnSync.setTooltip(synced ? "Synced to host tempo" : "Free tempo. Click to sync to host");
     btnSync.repaint();
 }
 
@@ -485,7 +593,7 @@ bool TransportBar::hitInteractive(juce::Point<int> p) const
     {
         return c.isVisible() && c.getBounds().contains(p);
     };
-    return covers(btnPlay) || covers(btnStop) || covers(btnRecord) || covers(statusPill) || covers(btnSync)
+    return covers(btnSettings) || covers(btnPlay) || covers(btnStop) || covers(btnRecord) || covers(statusPill) || covers(btnSync)
         || covers(btnDragToDaw) || covers(btnPassthrough) || covers(btnEditor)
         || covers(btnEffects);
 }
@@ -528,206 +636,204 @@ void TransportBar::mouseDoubleClick(const juce::MouseEvent& e)
 
 void TransportBar::applyHeaderCaptions(bool withText)
 {
+    applyHeaderCaptionsTier(withText ? 2 : 0);
+}
+
+void TransportBar::applyHeaderCaptionsTier(int tier)
+{
+    // 2 = all labels, 1 = Through + Toolkit (drop Piano roll), 0 = icons only.
     btnSync.caption = {};
-    btnPassthrough.caption = withText ? "Through" : juce::String();
-    btnEditor.caption = withText ? "Piano Roll" : juce::String();
-    btnEffects.caption = withText ? "Effects" : juce::String();
+    btnPassthrough.caption = tier >= 1 ? "Through" : juce::String();
+    btnEffects.caption = tier >= 1 ? "Toolkit" : juce::String();
+    btnEditor.caption = tier >= 2 ? "Piano roll" : juce::String();
 }
 
 void TransportBar::resized()
 {
+    // [lights] Wordmark · BPM · Play/Stop · Rec · Sync ······ Passthrough · Piano Roll · Effects · Settings
     const int h = getHeight();
-    const float s = juce::jmax(0.5f, contentScale());
-    const int btnW = juce::roundToInt((float) kBtnW * s);
-    const int btnH = juce::jmin(h - 4, juce::roundToInt((float) kBtnH * s));
-    const int y = (h - btnH) / 2;
-    const int gap = juce::jmax(4, juce::roundToInt(6.0f * s));
+    const float sc = juce::jmax(0.5f, contentScale());
+    // Mockup: ~5 px vertical inset in the 40 px band.
+    const int btn = juce::jmin(h - 8, juce::roundToInt((float) kBtnH * sc));
+    const int y = (h - btn) / 2;
+    const int tight = juce::roundToInt(6.0f * sc);     // within a group
+    const int groupGap = juce::roundToInt(12.0f * sc); // between groups
+    const int leftPad = juce::roundToInt(12.0f * sc);
+    const int rightPad = juce::roundToInt(12.0f * sc);
 
-    if (passthrough)
-    {
-        applyHeaderCaptions(true);
-        btnPlay.setVisible(false);
-        btnStop.setVisible(false);
-        btnRecord.setVisible(false);
-        statusPill.setVisible(false);
-        btnSync.setVisible(false);
-        btnEditor.setVisible(false);
-        btnEffects.setVisible(false);
-        btnDragToDaw.setVisible(false);
-        transportGroupBounds = {};
-        dividerBounds = {};
+    lightsZoneW = (reserveTrafficLights || measuredLightsZone > 0) ? juce::jmax(leftPad, measuredLightsZone)
+                                                                   : leftPad;
 
-        if (reserveTrafficLights || measuredLightsZone > 0)
-            lightsZoneW = juce::jmax(16, measuredLightsZone);
-        else
-            lightsZoneW = 16;
-
-        const int fullW = logoIdealWidth();
-        titleBounds = { lightsZoneW, 0, fullW, h };
-        logoLevel = 2;
-
-        int passW = btnPassthrough.captionWidth();
-        if (lightsZoneW + fullW + 16 + passW + 8 > getWidth())
-        {
-            applyHeaderCaptions(false);
-            passW = btnPassthrough.captionWidth();
-        }
-        btnPassthrough.setVisible(true);
-        btnPassthrough.setBounds(getWidth() - 8 - passW, y, passW, btnH);
-        return;
-    }
-
-    btnPlay.setVisible(true);
-    btnStop.setVisible(true);
-    btnRecord.setVisible(true);
-    statusPill.setVisible(true);
-    btnSync.setVisible(true);
-    btnEditor.setVisible(true);
+    btnStop.setVisible(false);
     btnEffects.setVisible(true);
+    // Drag Me sits between Effects and Settings when a clip is available.
+    btnDragToDaw.setVisible(hasClip);
+    btnEditor.setVisible(true);
+    // Levels: Through stays next to Record whenever browser transport is visible
+    // (not gated on Effects). MIDI FX build can still lock it off.
+    const bool showThrough = transportControlsVisible && !passthroughLocked;
+    btnPassthrough.setVisible(showThrough);
+    btnPlay.setVisible(transportControlsVisible);
+    // Record stays visible alongside Through (Through no longer hides Record).
+    const bool showRecord = transportControlsVisible;
+    btnRecord.setVisible(showRecord);
 
-    // Measured zoom-button edge already includes the 14 px gap. Fullscreen reports 0.
-    if (reserveTrafficLights || measuredLightsZone > 0)
-        lightsZoneW = juce::jmax(16, measuredLightsZone);
-    else
-        lightsZoneW = 16;
+    const bool showBpm = !compactChrome;
+    const int pillW = showBpm ? statusPill.idealWidth() : 0;
+    btnDragToDaw.iconOnly = compactChrome;
+    const int chipW = btnDragToDaw.isVisible() ? btnDragToDaw.idealWidth() : 0;
 
-    const int toggleGap = juce::jmax(2, juce::roundToInt(4.0f * s));
-    const int rightInset = juce::roundToInt(8.0f * s);
-    const int groupW = btnW * 3;
-    const int dragExtra = hasClip ? btnDragToDaw.idealWidth() + juce::roundToInt(8.0f * s) : 0;
-    const int dividerGap = juce::roundToInt(17.0f * s);
-    const int logoGap = juce::roundToInt(16.0f * s);
+    auto leftWidth = [&]()
+    {
+        const int passChipW = showThrough ? btnPassthrough.captionWidth() : 0;
+        const int playRecW = transportControlsVisible
+            ? (btn + tight + (showRecord ? btn + tight : 0)
+               + (showThrough ? tight + passChipW : 0) + groupGap)
+            : 0;
+        return (showBpm ? pillW + groupGap : 0) + playRecW + btn;
+    };
+    auto rightWidth = [&]()
+    {
+        int w = btn + groupGap;   // settings
+        if (chipW > 0)              w += chipW + tight; // Drag Me before Settings
+        if (btnEffects.isVisible()) w += btnEffects.captionWidth();
+        if (btnEditor.isVisible())  w += tight + btnEditor.captionWidth();
+        return w;
+    };
+
+    // Prefer: full wordmark + all labels → shorten wordmark → drop Piano roll
+    // label → drop wordmark → icons only. Through stays labeled as long as possible.
+    applyHeaderCaptionsTier(2);
+    int leftW = leftWidth();
+    int rightW = rightWidth();
     const int fullW = logoIdealWidth();
     const int midiW = logoMidiWidth();
-    const int glyphW = juce::roundToInt(16.0f * s);
+    const int avail = getWidth() - lightsZoneW - rightPad;
 
-    auto measureToggles = [&]()
-    {
-        return btnEditor.captionWidth() + toggleGap
-             + btnEffects.captionWidth();
-    };
-
-    applyHeaderCaptions(true);
-    int togglesW = measureToggles();
-    int syncW = btnSync.captionWidth();
-    int throughW = btnPassthrough.captionWidth();
-    int pillW = juce::roundToInt(80.0f * s);
-    auto centerWidth = [&]()
-    {
-        return groupW + gap + pillW + gap + syncW + gap + throughW;
-    };
-    int centerW = centerWidth();
-
-    auto fits = [&](int title, int center)
-    {
-        return lightsZoneW + title + logoGap + center + dragExtra + dividerGap + togglesW + rightInset
-            <= juce::jmax(0, getWidth());
-    };
-
-    if (!fits(fullW, centerW))
-    {
-        pillW = juce::roundToInt(64.0f * s);
-        centerW = centerWidth();
-    }
+    auto fits = [&](int logo) { return (logo > 0 ? logo + groupGap : 0) + leftW + groupGap + rightW <= avail; };
 
     int titleW = fullW;
     logoLevel = 2;
-    if (!fits(fullW, centerW))
+    if (!fits(fullW)) { titleW = midiW; logoLevel = 1; }
+    if (!fits(titleW))
     {
-        titleW = midiW;
-        logoLevel = 1;
+        applyHeaderCaptionsTier(1); // keep Through + Toolkit
+        leftW = leftWidth();
+        rightW = rightWidth();
     }
-    if (!fits(midiW, centerW))
+    if (!fits(midiW)) { titleW = 0; logoLevel = 0; }
+    if (!fits(titleW))
     {
-        titleW = glyphW;
-        logoLevel = 0;
-    }
-    if (!fits(titleW, centerW))
-    {
-        // Labels drop after the wordmark has already stepped down, so the
-        // logo level never grows back as the window gets narrower.
-        applyHeaderCaptions(false);
-        togglesW = measureToggles();
-        syncW = btnSync.captionWidth();
-        throughW = btnPassthrough.captionWidth();
-        centerW = centerWidth();
+        applyHeaderCaptionsTier(0);
+        leftW = leftWidth();
+        rightW = rightWidth();
     }
 
     titleBounds = { lightsZoneW, 0, titleW, h };
 
-    const int editW = btnEditor.captionWidth();
-    const int fxW = btnEffects.captionWidth();
-    const int sideGap = juce::roundToInt(8.0f * s);
-
-    int xRight = getWidth() - rightInset;
-    btnEffects.setBounds(xRight - fxW, y, fxW, btnH);
-    xRight -= fxW + toggleGap;
-    btnEditor.setBounds(xRight - editW, y, editW, btnH);
-    xRight -= editW + sideGap;
-    dividerBounds = { xRight - 1, (h - juce::roundToInt(16.0f * s)) / 2, 1, juce::roundToInt(16.0f * s) };
-    xRight -= 1 + sideGap;
-
-    const int chipH = juce::jmin(h - 4, juce::roundToInt(26.0f * s));
-    btnDragToDaw.setVisible(hasClip);
-    if (hasClip)
+    int x = lightsZoneW + (titleW > 0 ? titleW + groupGap : 0);
+    statusPill.setVisible(showBpm);
+    if (showBpm)
     {
-        const int chipW = btnDragToDaw.idealWidth();
-        btnDragToDaw.setBounds(xRight - chipW, (h - chipH) / 2, chipW, chipH);
-        xRight -= chipW + sideGap;
+        // Levels tempo group: Sync toggle flush against the BPM readout.
+        btnSync.groupLeft = true;
+        statusPill.grouped = true;
+        btnSync.setBounds(x, y, btn, btn);
+        x += btn;
+        statusPill.setBounds(x, y, pillW, btn);
+        tempoGroupBounds = btnSync.getBounds().getUnion(statusPill.getBounds());
+        x += pillW + groupGap;
+    }
+    else
+    {
+        statusPill.setBounds({});
+        btnSync.groupLeft = false;
+        statusPill.grouped = false;
+        tempoGroupBounds = {};
+    }
+    if (transportControlsVisible)
+    {
+        btnPlay.setBounds(x, y, btn, btn);            x += btn + tight;
+        if (showRecord)
+        {
+            btnRecord.setBounds(x, y, btn, btn);
+            x += btn + tight;
+        }
+        else
+        {
+            btnRecord.setBounds({});
+        }
+        if (showThrough)
+        {
+            const int pw = btnPassthrough.captionWidth();
+            btnPassthrough.setBounds(x, y, pw, btn);
+            x += pw + groupGap;
+        }
+        else
+        {
+            btnPassthrough.setBounds({});
+            x += groupGap - tight;
+        }
+    }
+    else
+    {
+        btnPlay.setBounds({});
+        btnRecord.setBounds({});
+        btnPassthrough.setBounds({});
+    }
+    if (!showBpm)
+    {
+        btnSync.setBounds(x, y, btn, btn);
+        x += btn + tight;
+    }
+    transportGroupBounds = {};
+    dividerBounds = {};
+
+    int xr = getWidth() - rightPad;
+    btnSettings.setBounds(xr - btn, y, btn, btn);
+    xr -= btn + tight;
+    if (chipW > 0)
+    {
+        btnDragToDaw.setBounds(xr - chipW, y, chipW, btn);
+        xr -= chipW + groupGap;
     }
     else
     {
         btnDragToDaw.setBounds({});
+        xr -= groupGap - tight;
     }
-
-    const int rightEdge = xRight;
-    int centerX = titleBounds.getRight() + logoGap;
-    const int room = rightEdge - centerX;
-    if (room > centerW)
-        centerX += (room - centerW) / 2;
-    if (centerX + centerW > rightEdge)
-        centerX = juce::jmax(lightsZoneW + 4, rightEdge - centerW);
-
-    transportGroupBounds = { centerX, y, groupW, btnH };
-    btnPlay.setBounds(transportGroupBounds.getX(), y, btnW, btnH);
-    btnStop.setBounds(transportGroupBounds.getX() + btnW, y, btnW, btnH);
-    btnRecord.setBounds(transportGroupBounds.getX() + btnW * 2, y, btnW, btnH);
-    statusPill.setBounds(transportGroupBounds.getRight() + gap, y, pillW, btnH);
-    btnSync.setBounds(statusPill.getRight() + gap, y, syncW, btnH);
-    btnPassthrough.setVisible(true);
-    btnPassthrough.setBounds(btnSync.getRight() + gap, y, throughW, btnH);
+    if (btnEffects.isVisible())
+    {
+        const int w = btnEffects.captionWidth();
+        btnEffects.setBounds(xr - w, y, w, btn);
+        xr -= w + tight;
+    }
+    if (btnEditor.isVisible())
+    {
+        const int w = btnEditor.captionWidth();
+        btnEditor.setBounds(xr - w, y, w, btn);
+        xr -= w + groupGap;
+    }
 }
 
 void TransportBar::paint(juce::Graphics& g)
 {
-    auto b = getLocalBounds().toFloat();
-    g.setColour(ds::chrome());
-    g.fillRect(b);
-    g.setColour(ds::hl());
-    g.fillRect(0.0f, (float) getHeight() - 1.0f, (float) getWidth(), 1.0f);
+    // Levels header: surface with a 10 % hairline beneath. No grouped faces.
+    g.setColour(ds::bg());
+    g.fillRect(getLocalBounds());
+    g.setColour(ds::line());
+    g.fillRect(0, getHeight() - 1, getWidth(), 1);
+    paintLogo(g, titleBounds, windowActive ? 1.0f : 0.50f);
+}
 
-    const float fgAlpha = windowActive ? 1.0f : 0.50f;
-
-    paintLogo(g, titleBounds, fgAlpha);
-
-    // Grouped transport face (outer corners only — play/stop stay ghost)
-    if (!transportGroupBounds.isEmpty())
-    {
-        auto face = transportGroupBounds.toFloat();
-        g.setColour(ds::ctl().withMultipliedAlpha(windowActive ? 1.0f : 0.85f));
-        g.fillRoundedRectangle(face, 5.0f);
-        g.setColour(ds::ctlb().withMultipliedAlpha(fgAlpha));
-        g.drawRoundedRectangle(face.reduced(0.5f), 5.0f, 1.0f);
-        const float third = face.getWidth() / 3.0f;
-        g.fillRect(face.getX() + third - 0.5f, face.getY() + 4.0f, 1.0f, face.getHeight() - 8.0f);
-        g.fillRect(face.getX() + third * 2.0f - 0.5f, face.getY() + 4.0f, 1.0f, face.getHeight() - 8.0f);
-    }
-
-    if (dividerBounds.getWidth() > 0)
-    {
-        g.setColour(ds::hl().withMultipliedAlpha(fgAlpha));
-        g.fillRect(dividerBounds.toFloat());
-    }
+void TransportBar::paintOverChildren(juce::Graphics& g)
+{
+    // Levels tempo group: one 18 % frame (radius-md) around Sync + BPM, 1 px divider.
+    if (tempoGroupBounds.isEmpty() || !statusPill.isVisible()) return;
+    auto r = tempoGroupBounds.toFloat();
+    g.setColour(ds::edge());
+    g.drawRoundedRectangle(r.reduced(0.5f), ds::radius::md, 1.0f);
+    g.fillRect((float) btnSync.getRight() - 0.5f, r.getY() + 1.0f, 1.0f, r.getHeight() - 2.0f);
 }
 
 } // namespace pflow

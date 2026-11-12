@@ -102,6 +102,40 @@ inline juce::Colour kindBass() { return palette().kindBass; }
 inline juce::Colour kindKeys() { return palette().kindKeys; }
 inline juce::Colour kindPerc() { return palette().kindPerc; }
 
+// ── Groove Panel tokens (exact names from the design system) ────────────────
+juce::Colour surface000();
+juce::Colour surface100();
+juce::Colour surface200();
+juce::Colour surface300();
+juce::Colour line();
+juce::Colour edge();
+juce::Colour ink();
+juce::Colour inkMuted();
+juce::Colour inkFaint();
+juce::Colour onAccent();
+juce::Colour play();
+juce::Colour record();
+juce::Colour solo();
+juce::Colour active();
+juce::Colour onLit();
+juce::Colour focus();
+/** Levels: solid primary actions (Play, Drag Me, active New) and their label colour. */
+juce::Colour primary();
+juce::Colour onPrimary();
+juce::Colour warning();
+/** Levels active state: 1 px acc() border over a selsoft() tint. */
+void drawActive(juce::Graphics& g, juce::Rectangle<float> r, float radius);
+/** clip-1 … clip-8: the user's labels. Same in both themes; text on them is onClip(). */
+juce::Colour clip(int n);
+juce::Colour onClip();
+
+/** Groove radii: radius-0 panels, radius-sm toggles/fields, radius-md popovers/devices. */
+namespace radius {
+    constexpr float none = 0.0f;
+    constexpr float sm   = 4.0f;   // Levels rounded.sm
+    constexpr float md   = 8.0f;   // Levels rounded.md
+}
+
 /** §4 shadow recipes — drop shadows only; never invent others. */
 namespace shadow {
     void control (juce::Graphics& g, juce::Rectangle<float> r, float radius);
@@ -129,16 +163,17 @@ juce::Colour colour (Type t);
 
 /** §5 region metrics (logical px at Medium). */
 namespace region {
-    constexpr int toolbarH     = 52;
-    constexpr int sidebarW     = 250;
-    constexpr int fileListW    = 420;
-    constexpr int toolkitW     = 300;
+    constexpr int toolbarH     = 40;   // header
+    constexpr int sidebarW     = 200;  // library (Levels mockup)
+    constexpr int fileListW    = 368;  // file list column
+    constexpr int gridBrowserW = 484;  // five 96 px kind columns + hairlines
+    constexpr int toolkitW     = 280;  // Levels: Toolkit + Generator column
     constexpr int rollMinW     = 320;
     constexpr int velocityH    = 100;
-    constexpr int previewH     = 112;
-    constexpr int listRowH     = 26;
-    constexpr int listHeaderH  = 28;
-    constexpr int sidebarRowH  = 28;
+    constexpr int previewH     = 134;  // 14 ruler + 120 notes
+    constexpr int listRowH     = 28;  // Levels
+    constexpr int listHeaderH  = 28;  // Levels
+    constexpr int sidebarRowH  = 28;  // Levels
 }
 
 } // namespace ds
