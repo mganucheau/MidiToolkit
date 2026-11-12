@@ -1021,6 +1021,10 @@ private:
 class ChipGrid : public juce::Component
 {
 public:
+    /** SolidPrimary = key chips (primary fill + onPrimary text).
+        Accent = Kind/Tags (violet tint + border, ink text). */
+    enum class SelectStyle { SolidPrimary = 0, Accent };
+
     std::function<void()> onChange;
     bool multiSelect = false;
     int columns = 6;
@@ -1034,6 +1038,9 @@ public:
     std::function<void()> onCollapsedChanged;
     /** Selected index treated as the untouched default (summary in tx3). */
     int neutralIndex = 0;
+    /** When true (Kind), summary reads "3 of 4" instead of listing names. */
+    bool countSummary = false;
+    SelectStyle selectStyle = SelectStyle::SolidPrimary;
     juce::String hint;
 
     void setItems(juce::StringArray labelsIn)
@@ -1090,17 +1097,27 @@ public:
 
     juce::String selectedSummary() const
     {
+        int n = 0;
         juce::StringArray parts;
         for (int i = 0; i < labels.size(); ++i)
             if (i < (int) selected.size() && selected[(size_t) i])
+            {
+                ++n;
                 parts.add(labels[i]);
+            }
+        if (countSummary)
+        {
+            if (n <= 0 || n >= labels.size())
+                return "Any";
+            return juce::String(n) + " of " + juce::String(labels.size());
+        }
         if (!parts.isEmpty())
-            return parts.joinIntoString(" ");
+            return parts.joinIntoString(", ");
         // Fall back to candidate names when nothing is exclusively selected.
         for (int i = 0; i < labels.size() && i < 16; ++i)
             if ((candidateMask & (uint16_t) (1u << i)) != 0)
                 parts.add(labels[i]);
-        return parts.isEmpty() ? "Any" : parts.joinIntoString(" ");
+        return parts.isEmpty() ? "Any" : parts.joinIntoString(", ");
     }
 
     int idealHeight() const
@@ -1133,10 +1150,11 @@ public:
         rebuildChipBounds();
         const auto& t = inspectorTokens();
         auto header = getLocalBounds().removeFromTop(headerStrip());
+        const juce::String titleDraw = sidebarLabelStyle ? title.toUpperCase() : title;
         if (sidebarLabelStyle)
         {
-            g.setFont(uiFontFixed(11.0f, true));
-            g.setColour(ds::inkMuted());
+            g.setFont(monoFontFixed(12.0f, true).withExtraKerningFactor(0.04f));
+            g.setColour(ds::ink());
         }
         else
         {
@@ -1145,22 +1163,35 @@ public:
         }
         if (collapsible)
         {
-            const int titleW = (int) std::ceil(g.getCurrentFont().getStringWidthFloat(title));
+            const int titleW = (int) std::ceil(juce::GlyphArrangement::getStringWidth(
+                g.getCurrentFont(), titleDraw));
+            // Tags: chevron before the label (Levels FilterPopover).
+            if (sidebarLabelStyle)
+            {
+                auto chev = header.removeFromLeft(12).toFloat().withSizeKeepingCentre(10.0f, 10.0f);
+                drawStrokedChevron(g, chev, ds::inkMuted(), !collapsed);
+                header.removeFromLeft(6);
+            }
             auto titleR = header.removeFromLeft(juce::jmin(titleW, juce::jmax(0, header.getWidth() - 48)));
-            g.drawText(title, titleR, juce::Justification::centredLeft, true);
-            header.removeFromLeft(4);
-            auto chev = header.removeFromLeft(12).toFloat().withSizeKeepingCentre(10.0f, 10.0f);
-            drawStrokedChevron(g, chev, sidebarLabelStyle ? ds::tx3() : t.valueText, !collapsed);
+            g.drawText(titleDraw, titleR, juce::Justification::centredLeft, true);
+            if (!sidebarLabelStyle)
+            {
+                header.removeFromLeft(4);
+                auto chev = header.removeFromLeft(12).toFloat().withSizeKeepingCentre(10.0f, 10.0f);
+                drawStrokedChevron(g, chev, t.valueText, !collapsed);
+            }
         }
         else
         {
-            g.drawText(title, header.removeFromLeft(header.getWidth() / 2),
+            g.drawText(titleDraw, header.removeFromLeft(header.getWidth() / 2),
                        juce::Justification::centredLeft, true);
         }
-        g.setFont(sidebarLabelStyle ? uiFontFixed(11.0f) : inspectorFont());
-        const bool summaryDefault = getSelectedIndex() == neutralIndex;
+        g.setFont(sidebarLabelStyle ? monoFontFixed(12.0f) : inspectorFont());
+        const auto summary = selectedSummary();
+        const bool summaryDefault = summary.equalsIgnoreCase("Any")
+            || (!countSummary && !multiSelect && getSelectedIndex() == neutralIndex);
         g.setColour(summaryDefault ? ds::inkMuted() : ds::ink());
-        g.drawText(selectedSummary(), header, juce::Justification::centredRight, true);
+        g.drawText(summary, header, juce::Justification::centredRight, true);
 
         if (collapsible && collapsed)
             return;
@@ -1172,30 +1203,45 @@ public:
             const bool on = i < (int) selected.size() && selected[(size_t) i];
             const bool cand = !on && i < 16
                 && (candidateMask & (uint16_t) (1u << i)) != 0;
-            // Levels key chip: primary fill when selected, surface + edge when
-            // not; a candidate (suggested) chip carries a small violet dot.
-            g.setColour(on ? ds::primary() : ds::surface200());
-            g.fillRoundedRectangle(cell, ds::radius::sm);
-            if (!on)
+            if (on && selectStyle == SelectStyle::Accent)
             {
-                g.setColour(ds::edge());
-                g.drawRoundedRectangle(cell.reduced(0.5f), ds::radius::sm, 1.0f);
+                ds::drawActive(g, cell, ds::radius::sm);
+            }
+            else if (on)
+            {
+                g.setColour(ds::primary());
+                g.fillRoundedRectangle(cell, ds::radius::sm);
+            }
+            else
+            {
+                // Idle key/kind chip: text @ 4 % wash (Levels FilterPopover).
+                g.setColour(ds::ink().withAlpha(0.04f));
+                g.fillRoundedRectangle(cell, ds::radius::sm);
+                if (selectStyle == SelectStyle::Accent)
+                {
+                    g.setColour(ds::line());
+                    g.drawRoundedRectangle(cell.reduced(0.5f), ds::radius::sm, 1.0f);
+                }
             }
             if (cand)
             {
                 g.setColour(ds::acc());
                 g.fillEllipse(cell.getRight() - 7.0f, cell.getY() + 3.0f, 4.0f, 4.0f);
             }
-            float chipPt = kAnnotPt;
+            float chipPt = sidebarLabelStyle ? 12.0f : kAnnotPt;
             if (sidebarLabelStyle)
             {
                 const float tw = juce::GlyphArrangement::getStringWidth(
-                    uiFontFixed(kAnnotPt, on), labels[i]);
+                    uiFontFixed(chipPt, on), labels[i]);
                 if (tw > cell.getWidth() - 6.0f)
                     chipPt = 9.0f;
             }
-            g.setFont(uiFontFixed(chipPt, on));
-            g.setColour(on ? ds::onPrimary() : ds::ink());
+            g.setFont(selectStyle == SelectStyle::SolidPrimary && sidebarLabelStyle
+                          ? monoFontFixed(chipPt, on)
+                          : uiFontFixed(chipPt, on));
+            g.setColour(on && selectStyle == SelectStyle::SolidPrimary ? ds::onPrimary()
+                        : on ? ds::ink()
+                             : ds::inkMuted());
             g.drawText(labels[i], cell.toNearestInt(), juce::Justification::centred, false);
         }
         if (hint.isNotEmpty())
@@ -1528,10 +1574,11 @@ public:
         const auto& t = inspectorTokens();
         auto r = getLocalBounds();
         auto header = r.removeFromTop(headerStrip());
+        const juce::String labelDraw = sidebarLabelStyle ? label.toUpperCase() : label;
         if (sidebarLabelStyle)
         {
-            g.setFont(uiFontFixed(11.0f, true));
-            g.setColour(ds::inkMuted());
+            g.setFont(monoFontFixed(12.0f, true).withExtraKerningFactor(0.04f));
+            g.setColour(ds::ink());
         }
         else
         {
@@ -1540,20 +1587,24 @@ public:
         }
         if (collapsible)
         {
-            const int titleW = (int) std::ceil(g.getCurrentFont().getStringWidthFloat(label));
+            const int titleW = (int) std::ceil(juce::GlyphArrangement::getStringWidth(
+                g.getCurrentFont(), labelDraw));
             auto titleR = header.removeFromLeft(juce::jmin(titleW, juce::jmax(0, header.getWidth() - 48)));
-            g.drawText(label, titleR, juce::Justification::centredLeft, true);
-            header.removeFromLeft(4);
-            auto chev = header.removeFromLeft(12).toFloat().withSizeKeepingCentre(10.0f, 10.0f);
-            drawStrokedChevron(g, chev, sidebarLabelStyle ? ds::tx3() : t.valueText, !collapsed);
+            g.drawText(labelDraw, titleR, juce::Justification::centredLeft, true);
+            if (!sidebarLabelStyle)
+            {
+                header.removeFromLeft(4);
+                auto chev = header.removeFromLeft(12).toFloat().withSizeKeepingCentre(10.0f, 10.0f);
+                drawStrokedChevron(g, chev, t.valueText, !collapsed);
+            }
         }
         else
         {
-            g.drawText(label, header.removeFromLeft(header.getWidth() / 2),
+            g.drawText(labelDraw, header.removeFromLeft(header.getWidth() / 2),
                        juce::Justification::centredLeft, true);
         }
         g.setColour(isFullRange() ? ds::inkMuted() : ds::ink());
-        g.setFont(sidebarLabelStyle ? monoFontFixed(11.0f) : inspectorFont());
+        g.setFont(sidebarLabelStyle ? monoFontFixed(12.0f) : inspectorFont());
         const juce::String val = isFullRange() ? "Any"
             : (juce::String(lo) + juce::String::charToString((juce::juce_wchar) 0x2013) + juce::String(hi));
         g.drawText(val, header, juce::Justification::centredRight, true);
@@ -1588,17 +1639,18 @@ public:
             }
             else
             {
-                g.setColour(inRange ? ds::primary().withAlpha(0.85f) : ds::ink().withAlpha(0.18f));
-                g.fillRect(bar);
+                // In-range bars = primary; out-of-range = text @ 18 %.
+                g.setColour(inRange ? ds::primary() : ds::ink().withAlpha(0.18f));
+                g.fillRoundedRectangle(bar.withTrimmedBottom(-0.01f), 2.0f);
             }
         }
 
         r.removeFromTop(4);
-        constexpr float kThumbD = 14.0f;
+        constexpr float kThumbD = 12.0f;
         const float thumbInset = kThumbD * 0.5f;
         auto lane = r.removeFromTop(kTrackH).toFloat();
         auto track = lane.reduced(thumbInset, 0.0f).withSizeKeepingCentre(lane.getWidth() - thumbInset * 2.0f, 2.0f);
-        g.setColour(ds::trk());
+        g.setColour(ds::ink().withAlpha(0.18f));
         g.fillRect(track);
         const float trackSpan = (float) juce::jmax(1, maxV - minV);
         const float xLo = track.getX() + track.getWidth() * ((float) (lo - minV) / trackSpan);
@@ -1606,10 +1658,10 @@ public:
         auto sel = juce::Rectangle<float>::leftTopRightBottom(xLo, track.getY(), xHi, track.getBottom());
         g.setColour(ds::primary());
         g.fillRect(sel);
-        // Groove handles: solid ink blocks (10 x 12, radius-sm).
+        // Levels dual thumbs: 12 px surface discs with a 2 px primary ring.
         auto thumbAt = [&](float x)
         {
-            return juce::Rectangle<float>(x - 5.0f, lane.getCentreY() - 6.0f, 10.0f, 12.0f);
+            return juce::Rectangle<float>(kThumbD, kThumbD).withCentre({ x, lane.getCentreY() });
         };
         ds::shadow::thumb(g, thumbAt(xLo));
         ds::shadow::thumb(g, thumbAt(xHi));
@@ -1617,10 +1669,10 @@ public:
 
 private:
     static constexpr int kLabelH = 18;
-    static constexpr int kHistH = 24;
-    static constexpr int kTrackH = 20;
+    static constexpr int kHistH = 28;
+    static constexpr int kTrackH = 12;
 
-    int headerStrip() const { return collapsible ? 22 : kLabelH; }
+    int headerStrip() const { return collapsible ? 16 : kLabelH; }
     enum class Thumb { None, Lo, Hi };
     Thumb dragThumb = Thumb::None;
 

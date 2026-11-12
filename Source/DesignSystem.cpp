@@ -226,11 +226,10 @@ void popover(juce::Graphics& g, juce::Rectangle<float> r, float radius)
 
 void thumb(juce::Graphics& g, juce::Rectangle<float> thumb)
 {
-    // Levels handle: 12 px surface disc with a 2 px violet ring (mockup).
+    // Levels dual-range handle: 12 px surface disc, 2 px primary ring.
     const float d = 12.0f; juce::ignoreUnused(thumb.getWidth());
     const auto c = juce::Rectangle<float>(d, d).withCentre(thumb.getCentre());
-    // Levels (LvRow): 12 px surface disc with a 2 px primary ring.
-    g.setColour(surface200());
+    g.setColour(surface100());
     g.fillEllipse(c);
     g.setColour(primary());
     g.drawEllipse(c.reduced(1.0f), 2.0f);

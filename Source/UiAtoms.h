@@ -151,7 +151,8 @@ public:
     juce::String onLabel, offLabel;
 };
 
-/** Connected two-option text toggle — both labels always visible. */
+/** Levels SegmentToggle — track 7 % / radius-md / 2 px inset; selected thumb is
+    surface + 18 % border + 600 weight (selection never colour alone). */
 class SegmentToggle : public juce::Component,
                       public juce::SettableTooltipClient
 {
@@ -160,17 +161,22 @@ public:
     void setIndex(int i, juce::NotificationType notify = juce::dontSendNotification);
     int getIndex() const { return index; }
     int idealWidth() const;
+    int idealHeight() const { return metrics::scaled(28); }
     std::function<void(int)> onChange;
 
     void paint(juce::Graphics&) override;
+    void resized() override;
     void mouseDown(const juce::MouseEvent&) override;
     void mouseMove(const juce::MouseEvent&) override;
     void mouseExit(const juce::MouseEvent&) override;
 
 private:
     int hitIndex(juce::Point<int> p) const;
+    void layoutSegs();
+    juce::Font labelFont(bool selected) const;
 
     juce::String left, right;
+    juce::Rectangle<float> leftSeg, rightSeg;
     int index = 0;
     int hover = -1;
 };

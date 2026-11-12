@@ -729,17 +729,61 @@ void SegmentToggle::setIndex(int i, juce::NotificationType notify)
         onChange(index);
 }
 
+juce::Font SegmentToggle::labelFont(bool selected) const
+{
+    // Levels: selected 600, idle 500 — never colour alone.
+    const float pt = 12.0f * contentScale() * textIconScale();
+    return grooveFont(pt, selected ? 600 : 500, false);
+}
+
 int SegmentToggle::idealWidth() const
 {
-    const auto f = uiFont(12.0f, true);
-    const float lw = juce::GlyphArrangement::getStringWidth(f, left);
-    const float rw = juce::GlyphArrangement::getStringWidth(f, right);
-    return (int) std::ceil(lw + rw) + 54;   // 2 px inset · 12 px label padding · 2 px gap
+    // Track = 2 inset + left pad12+label+pad12 + 2 gap + right pad12+label+pad12 + 2 inset.
+    const auto bold = labelFont(true);
+    const float lw = juce::GlyphArrangement::getStringWidth(bold, left);
+    const float rw = juce::GlyphArrangement::getStringWidth(bold, right);
+    const float pad = 12.0f * contentScale();
+    const float inset = 2.0f * contentScale();
+    const float gap = 2.0f * contentScale();
+    return (int) std::ceil(inset * 2.0f + gap + (pad * 2.0f + lw) + (pad * 2.0f + rw));
+}
+
+void SegmentToggle::layoutSegs()
+{
+    auto bounds = getLocalBounds().toFloat();
+    const float inset = 2.0f * contentScale();
+    const float gap = 2.0f * contentScale();
+    const float pad = 12.0f * contentScale();
+    auto inner = bounds.reduced(inset);
+    const auto bold = labelFont(true);
+    const float lw = juce::GlyphArrangement::getStringWidth(bold, left);
+    const float rw = juce::GlyphArrangement::getStringWidth(bold, right);
+    float leftW = pad * 2.0f + lw;
+    float rightW = pad * 2.0f + rw;
+    // Stretch to fill when the host assigns a wider slot than ideal.
+    const float natural = leftW + gap + rightW;
+    if (inner.getWidth() > natural + 0.5f)
+    {
+        const float extra = inner.getWidth() - natural;
+        leftW += extra * 0.5f;
+        rightW += extra * 0.5f;
+    }
+    leftSeg = { inner.getX(), inner.getY(), leftW, inner.getHeight() };
+    rightSeg = { leftSeg.getRight() + gap, inner.getY(), rightW, inner.getHeight() };
+}
+
+void SegmentToggle::resized()
+{
+    layoutSegs();
 }
 
 int SegmentToggle::hitIndex(juce::Point<int> p) const
 {
-    return p.x < getWidth() / 2 ? 0 : 1;
+    if (leftSeg.contains(p.toFloat())) return 0;
+    if (rightSeg.contains(p.toFloat())) return 1;
+    // Fall back to nearer segment so clicks in the 2 px gap still work.
+    const float mid = (leftSeg.getRight() + rightSeg.getX()) * 0.5f;
+    return (float) p.x < mid ? 0 : 1;
 }
 
 void SegmentToggle::mouseDown(const juce::MouseEvent& e)
@@ -764,20 +808,17 @@ void SegmentToggle::mouseExit(const juce::MouseEvent&)
 
 void SegmentToggle::paint(juce::Graphics& g)
 {
-    // Levels segmented control: 7 % track (radius-md, 2 px inset); the selected half is a
-    // surface thumb with an 18 % border and 600 label; the idle half is a 64 % label,
-    // with a 7 % hover fill.
+    layoutSegs();
+    // Track: text @ 7 %, radius-md (8).
     auto bounds = getLocalBounds().toFloat();
-    g.setColour(ds::surface300());
+    g.setColour(ds::hoverWash());
     g.fillRoundedRectangle(bounds, ds::radius::md);
-    auto inner = bounds.reduced(2.0f);
-    const float mid = inner.getX() + inner.getWidth() * 0.5f;
-    const auto leftSeg = inner.withRight(mid - 1.0f);
-    const auto rightSeg = inner.withLeft(mid + 1.0f);
+
     auto paintSeg = [&](juce::Rectangle<float> seg, bool sel, bool hov, const juce::String& text)
     {
         if (sel)
         {
+            // Thumb: surface + 18 % border, radius-sm (4).
             g.setColour(ds::surface200());
             g.fillRoundedRectangle(seg, ds::radius::sm);
             g.setColour(ds::edge());
@@ -785,15 +826,16 @@ void SegmentToggle::paint(juce::Graphics& g)
         }
         else if (hov)
         {
+            // Idle hover: another 7 % wash so the cell reads without colour.
             g.setColour(ds::hoverWash());
             g.fillRoundedRectangle(seg, ds::radius::sm);
         }
-        g.setFont(uiFont(12.0f, sel));
-        g.setColour(sel ? ds::ink() : ds::inkMuted());
+        g.setFont(labelFont(sel));
+        g.setColour(sel || hov ? ds::ink() : ds::inkMuted());
         g.drawText(text, seg.toNearestInt(), juce::Justification::centred, false);
     };
-    paintSeg(leftSeg, index == 0, hover == 0, left);
-    paintSeg(rightSeg, index == 1, hover == 1, right);
+    paintSeg(leftSeg, index == 0, hover == 0 && index != 0, left);
+    paintSeg(rightSeg, index == 1, hover == 1 && index != 1, right);
 }
 
 // ── MiniSwitch ───────────────────────────────────────────────────────────────

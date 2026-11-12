@@ -3568,7 +3568,8 @@ void MidiToolkitEditor::LeftPaneTabs::resized()
     auto row = getLocalBounds().reduced(metrics::scaled(8), 0);
     const int ctl = metrics::chromeIconButton();
     const int gap = metrics::scaled(4);
-    const int toggleH = juce::jmin(ctl, row.getHeight() - metrics::scaled(4));
+    // Levels SegmentToggle: 28 tall track, content-sized width.
+    const int toggleH = juce::jmin(tabToggle.idealHeight(), row.getHeight() - metrics::scaled(4));
     const int toggleW = tabToggle.idealWidth();
     tabToggle.setBounds(row.removeFromLeft(toggleW)
                             .withSizeKeepingCentre(toggleW, toggleH));
@@ -3807,10 +3808,13 @@ void MidiToolkitEditor::refreshBrowserBar()
             ++files;
     const int barH = browserBar.idealHeight();
     browserBar.setTitle(fileList.getFolderName());
-    browserBar.setCount(files, files);
+    const int total = juce::jmax(files, (int) clips.size());
+    browserBar.setCount(files, total);
     browserBar.setFiltersActive(sidebar.isFilterOpen(), sidebar.activeFilterCount(),
                                 sidebar.describeActiveFilters());
-    filterPopover.setCountText(juce::String(files) + (files == 1 ? " file" : " files"));
+    // Levels FilterPopover footer: "20 of 64 files".
+    filterPopover.setCountText(juce::String(files) + " of " + juce::String(total)
+                               + (total == 1 ? " file" : " files"));
     // Filter summary strip changes BrowserToolbar height — reflow only when it does.
     if (browserBar.isVisible() && browserBar.idealHeight() != barH)
         layoutContent();
@@ -4055,7 +4059,9 @@ void MidiToolkitEditor::layoutContent()
 
     if (showFiles && sidebar.isFilterOpen())
     {
-        const int w = juce::jmin(metrics::scaled(300), juce::jmax(200, browserBar.getWidth() - metrics::scaled(16)));
+        // Levels FilterPopover: 320 px wide, anchored under the Filters chip.
+        const int w = juce::jmin(metrics::scaled(320), juce::jmax(metrics::scaled(280),
+                                                                  browserBar.getWidth() - metrics::scaled(16)));
         const int top = browserBar.getBottom() - metrics::scaled(4);
         const int maxH = juce::jmax(120, content.getHeight() - top - metrics::scaled(8));
         filterPopover.setBounds(browserBar.getRight() - metrics::scaled(8) - w, top, w,

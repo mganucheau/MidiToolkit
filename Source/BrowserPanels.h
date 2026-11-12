@@ -747,7 +747,7 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(BrowserToolbar)
 };
 
-/** Floating filter menu (radius-md, shadow-popover) that hosts the sidebar's filter panel. */
+/** Floating filter menu (Levels FilterPopover: 320 × radius-md, Reset + count footer). */
 class FilterPopover : public juce::Component
 {
 public:
@@ -757,20 +757,21 @@ public:
     int idealHeight() const;
     void resized() override;
     void paint(juce::Graphics&) override;
+    void mouseDown(const juce::MouseEvent&) override;
+    void mouseMove(const juce::MouseEvent&) override;
+    void mouseExit(const juce::MouseEvent&) override;
     bool keyPressed(const juce::KeyPress&) override;
 
     std::function<void()> onDone;
-    std::function<void()> onSaveSearch;
+    std::function<void()> onSaveSearch; // retained for editor wiring; footer no longer hosts Save
     std::function<void()> onReset;
 
 private:
     juce::Component* panel = nullptr;
     std::function<int()> panelHeight;
     juce::String countText;
-    IconBtn btnReset { icons::undo, "Reset filters" };
-    ChipBtn btnSave { "Save Search", icons::plus };
-    ChipBtn btnDone { "Done" };
-    juce::DropShadower shadower { juce::DropShadow(juce::Colours::black.withAlpha(0.6f), 12, { 0, 4 }) };
+    juce::Rectangle<int> resetBounds;
+    bool resetHover = false;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(FilterPopover)
 };

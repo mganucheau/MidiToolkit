@@ -92,13 +92,9 @@ FavoritesSidebar::FilterPanel::FilterPanel()
     keyGrid.columns = 6;
     keyGrid.multiSelect = true;
     keyGrid.sidebarLabelStyle = true;
-    keyGrid.collapsible = true;
-    keyGrid.collapsed = true;
-    keyGrid.onCollapsedChanged = [this]
-    {
-        resized();
-        if (onLayoutChanged) onLayoutChanged();
-    };
+    keyGrid.selectStyle = fx::ChipGrid::SelectStyle::SolidPrimary;
+    keyGrid.collapsible = false; // Levels FilterPopover: Key always expanded
+    keyGrid.collapsed = false;
     keyGrid.setItems(keys);
     keyGrid.onChange = [this]
     {
@@ -113,13 +109,10 @@ FavoritesSidebar::FilterPanel::FilterPanel()
     kindGrid.columns = kNumClipKinds;   // one row: Bass · Keys · Lead · Arp · Drums
     kindGrid.multiSelect = true;
     kindGrid.sidebarLabelStyle = true;
-    kindGrid.collapsible = true;
-    kindGrid.collapsed = true;
-    kindGrid.onCollapsedChanged = [this]
-    {
-        resized();
-        if (onLayoutChanged) onLayoutChanged();
-    };
+    kindGrid.selectStyle = fx::ChipGrid::SelectStyle::Accent;
+    kindGrid.countSummary = true;
+    kindGrid.collapsible = false; // Levels FilterPopover: Kind always expanded
+    kindGrid.collapsed = false;
     kindGrid.setItems(kinds);
     // All kinds visible by default — user toggles off ones to hide.
     kindGrid.setSelectedMask((uint16_t) ((1u << kNumClipKinds) - 1), juce::dontSendNotification);
@@ -136,8 +129,9 @@ FavoritesSidebar::FilterPanel::FilterPanel()
     tagGrid.columns = 3;
     tagGrid.multiSelect = true;
     tagGrid.sidebarLabelStyle = true;
+    tagGrid.selectStyle = fx::ChipGrid::SelectStyle::Accent;
     tagGrid.collapsible = true;
-    tagGrid.collapsed = true;
+    tagGrid.collapsed = false;
     tagGrid.onCollapsedChanged = [this]
     {
         resized();
@@ -187,6 +181,7 @@ FavoritesSidebar::FilterPanel::FilterPanel()
         };
         addAndMakeVisible(*range);
     }
+    bpmRange.collapsed = false; // Levels FilterPopover: Tempo open by default
     bpmRange.setTooltip("Filter by tempo (BPM)");
     barsRange.setTooltip("Filter by length in bars");
     complexityRange.setTooltip("Filter by complexity score");
@@ -237,22 +232,21 @@ void FavoritesSidebar::FilterPanel::lookAndFeelChanged()
 
 int FavoritesSidebar::FilterPanel::idealHeight() const
 {
-    // Tight 2 px between folded headers; full gap only after an open body.
     auto gapAfter = [](bool sectionOpen)
     {
-        return metrics::scaled(sectionOpen ? 8 : 2);
+        return metrics::scaled(sectionOpen ? 16 : 2);
     };
     const int toggleBlock = metrics::scaled(22) * 2 + metrics::scaled(4) + metrics::scaled(6)
-                          + metrics::scaled(26) + metrics::scaled(6); // Sort by row
-    return toggleBlock
-         + keyGrid.idealHeight() + gapAfter(!keyGrid.collapsed)
+                          + metrics::scaled(26); // Sort by row
+    return keyGrid.idealHeight() + gapAfter(!keyGrid.collapsed)
          + kindGrid.idealHeight() + gapAfter(!kindGrid.collapsed)
          + tagGrid.idealHeight() + gapAfter(!tagGrid.collapsed)
-         + timeSigGrid.idealHeight() + gapAfter(!timeSigGrid.collapsed)
          + bpmRange.idealHeight() + gapAfter(!bpmRange.collapsed)
          + barsRange.idealHeight() + gapAfter(!barsRange.collapsed)
          + complexityRange.idealHeight() + gapAfter(!complexityRange.collapsed)
-         + 18;
+         + timeSigGrid.idealHeight() + gapAfter(!timeSigGrid.collapsed)
+         + toggleBlock
+         + 8;
 }
 
 void FavoritesSidebar::FilterPanel::setIncludeSubdirs(bool on)
@@ -539,15 +533,33 @@ void FavoritesSidebar::FilterPanel::mouseDown(const juce::MouseEvent& e)
 void FavoritesSidebar::FilterPanel::resized()
 {
     auto r = getLocalBounds();
+    // Levels FilterPopover: 16 px between open sections; tight 2 px when folded.
     auto gapAfter = [](bool sectionOpen)
     {
-        return metrics::scaled(sectionOpen ? 8 : 2);
+        return metrics::scaled(sectionOpen ? 16 : 2);
     };
 
-    // Top of Filters: Include Subdirectories, then Hide Duplicates (toggle rows).
+    // Utility toggles stay available under the fold groups.
     const int toggleRowH = metrics::scaled(22);
     const int switchW = metrics::scaled(34);
     const int switchH = metrics::scaled(18);
+    resetBounds = {}; // Reset lives in the FilterPopover header.
+
+    keyGrid.setBounds(r.removeFromTop(keyGrid.idealHeight()));
+    r.removeFromTop(gapAfter(!keyGrid.collapsed));
+    kindGrid.setBounds(r.removeFromTop(kindGrid.idealHeight()));
+    r.removeFromTop(gapAfter(!kindGrid.collapsed));
+    tagGrid.setBounds(r.removeFromTop(tagGrid.idealHeight()));
+    r.removeFromTop(gapAfter(!tagGrid.collapsed));
+    bpmRange.setBounds(r.removeFromTop(bpmRange.idealHeight()));
+    r.removeFromTop(gapAfter(!bpmRange.collapsed));
+    barsRange.setBounds(r.removeFromTop(barsRange.idealHeight()));
+    r.removeFromTop(gapAfter(!barsRange.collapsed));
+    complexityRange.setBounds(r.removeFromTop(complexityRange.idealHeight()));
+    r.removeFromTop(gapAfter(!complexityRange.collapsed));
+    timeSigGrid.setBounds(r.removeFromTop(timeSigGrid.idealHeight()));
+    r.removeFromTop(gapAfter(!timeSigGrid.collapsed));
+
     {
         auto row = r.removeFromTop(toggleRowH);
         subdirRowBounds = row;
@@ -557,8 +569,7 @@ void FavoritesSidebar::FilterPanel::resized()
     }
     {
         auto row = r.removeFromTop(toggleRowH);
-        hideDupesBounds = row; // full row hit; paint draws label + switch
-        // Reuse right side of the row as the switch track (painted in paint()).
+        hideDupesBounds = row;
         r.removeFromTop(metrics::scaled(6));
     }
     {
@@ -566,24 +577,7 @@ void FavoritesSidebar::FilterPanel::resized()
         sortRowBounds = row;
         const int popW = juce::jmin(juce::jmax(sortPopup.idealWidth(), 110), row.getWidth() / 2);
         sortPopup.setBounds(row.removeFromRight(popW).withSizeKeepingCentre(popW, metrics::scaled(22)));
-        r.removeFromTop(metrics::scaled(6));
     }
-    resetBounds = {}; // Reset lives in the FilterPopover header as an icon.
-
-    keyGrid.setBounds(r.removeFromTop(keyGrid.idealHeight()));
-    r.removeFromTop(gapAfter(!keyGrid.collapsed));
-    kindGrid.setBounds(r.removeFromTop(kindGrid.idealHeight()));
-    r.removeFromTop(gapAfter(!kindGrid.collapsed));
-    tagGrid.setBounds(r.removeFromTop(tagGrid.idealHeight()));
-    r.removeFromTop(gapAfter(!tagGrid.collapsed));
-    timeSigGrid.setBounds(r.removeFromTop(timeSigGrid.idealHeight()));
-    r.removeFromTop(gapAfter(!timeSigGrid.collapsed));
-    bpmRange.setBounds(r.removeFromTop(bpmRange.idealHeight()));
-    r.removeFromTop(gapAfter(!bpmRange.collapsed));
-    barsRange.setBounds(r.removeFromTop(barsRange.idealHeight()));
-    r.removeFromTop(gapAfter(!barsRange.collapsed));
-    complexityRange.setBounds(r.removeFromTop(complexityRange.idealHeight()));
-    r.removeFromTop(gapAfter(!complexityRange.collapsed));
 }
 
 // ── SearchQueryPanel ─────────────────────────────────────────────────────────
@@ -3326,18 +3320,7 @@ void BrowserToolbar::paint(juce::Graphics& g)
 FilterPopover::FilterPopover()
 {
     setWantsKeyboardFocus(true);
-    // Match Toolkit section-header reset: ghost face, 10px undo glyph.
-    btnReset.ghost = true;
-    btnReset.headerChrome = true;
-    btnReset.iconScale = 10.0f / 15.0f;
-    btnReset.setTooltip("Reset filters");
-    btnReset.onClick = [this] { if (onReset) onReset(); };
-    btnSave.onClick = [this] { if (onSaveSearch) onSaveSearch(); };
-    btnDone.onClick = [this] { if (onDone) onDone(); };
-    addAndMakeVisible(btnReset);
-    addAndMakeVisible(btnSave);
-    addAndMakeVisible(btnDone);
-    shadower.setOwner(this);
+    setMouseCursor(juce::MouseCursor::NormalCursor);
 }
 
 void FilterPopover::setContent(juce::Component* p, std::function<int()> idealPanelHeight)
@@ -3358,8 +3341,9 @@ void FilterPopover::setCountText(const juce::String& t)
 
 int FilterPopover::idealHeight() const
 {
-    const int header = metrics::scaled(26);
-    const int footer = metrics::scaled(30);
+    // Levels: 40 header + 12 body pad + panel + 12 pad + 36 footer.
+    const int header = metrics::scaled(40);
+    const int footer = metrics::scaled(36);
     const int pad = metrics::scaled(12);
     return header + pad + (panelHeight ? panelHeight() : 0) + pad + footer;
 }
@@ -3367,14 +3351,11 @@ int FilterPopover::idealHeight() const
 void FilterPopover::resized()
 {
     auto r = getLocalBounds();
-    auto header = r.removeFromTop(metrics::scaled(26)).reduced(metrics::scaled(8), 0);
-    const int chipH = metrics::scaled(18);
-    // Same 20×header cell as EffectsInspector section resetBounds().
-    btnReset.setBounds(header.removeFromRight(20).withSizeKeepingCentre(20, header.getHeight()));
-    auto footer = r.removeFromBottom(metrics::scaled(30)).reduced(metrics::scaled(8), 0);
-    btnSave.setBounds(footer.removeFromLeft(btnSave.idealWidth()).withSizeKeepingCentre(btnSave.idealWidth(), chipH));
-    const int doneW = btnDone.idealWidth() + metrics::scaled(12);
-    btnDone.setBounds(footer.removeFromRight(doneW).withSizeKeepingCentre(doneW, chipH));
+    auto header = r.removeFromTop(metrics::scaled(40)).reduced(metrics::scaled(12), 0);
+    const int resetH = metrics::scaled(24);
+    const int resetW = metrics::scaled(50);
+    resetBounds = header.removeFromRight(resetW).withSizeKeepingCentre(resetW, resetH);
+    r.removeFromBottom(metrics::scaled(36)); // footer is painted only
     if (panel != nullptr)
         panel->setBounds(r.reduced(metrics::scaled(12)));
 }
@@ -3384,37 +3365,70 @@ void FilterPopover::paint(juce::Graphics& g)
     auto b = getLocalBounds().toFloat();
     g.setColour(ds::surface100());
     g.fillRoundedRectangle(b, ds::radius::md);
+    ds::shadow::popover(g, b, ds::radius::md);
 
-    auto header = getLocalBounds().removeFromTop(metrics::scaled(26));
+    auto header = getLocalBounds().removeFromTop(metrics::scaled(40));
     {
         juce::Graphics::ScopedSaveState ss(g);
         juce::Path clip;
         clip.addRoundedRectangle(b, ds::radius::md);
         g.reduceClipRegion(clip);
-        g.setColour(ds::surface300());
-        g.fillRect(header);
-        auto footer = getLocalBounds().removeFromBottom(metrics::scaled(30));
-        g.setColour(ds::surface200());
-        g.fillRect(footer);
         g.setColour(ds::line());
+        g.fillRect(header.getX(), header.getBottom() - 1, header.getWidth(), 1);
+        auto footer = getLocalBounds().removeFromBottom(metrics::scaled(36));
         g.fillRect(footer.removeFromTop(1));
     }
-    g.setColour(ds::line());
-    g.fillRect(header.getX(), header.getBottom() - 1, header.getWidth(), 1);
 
-    auto t = header.reduced(metrics::scaled(12), 0);
-    t.setRight(btnReset.getX() - 6);
+    auto titleR = header.reduced(metrics::scaled(12), 0);
+    titleR.setRight(resetBounds.getX() - 8);
     g.setColour(ds::ink());
-    g.setFont(uiFontFixed(13.0f, true));
-    const int tw = (int) std::ceil(juce::GlyphArrangement::getStringWidth(g.getCurrentFont(), "Filters")) + 2;
-    g.drawText("Filters", t.removeFromLeft(tw), juce::Justification::centredLeft, false);
-    t.removeFromLeft(8);
-    g.setColour(ds::inkMuted());
-    g.setFont(monoFontFixed(11.0f));
-    g.drawText(countText, t, juce::Justification::centredLeft, true);
+    g.setFont(uiFontFixed(14.0f, true));
+    g.drawText("Filters", titleR, juce::Justification::centredLeft, false);
 
-    g.setColour(ds::line());
-    g.drawRoundedRectangle(b.reduced(0.5f), ds::radius::md, 1.0f);
+    // Reset — Levels outlined chip: surface + 18 % border, 12 / 500.
+    if (!resetBounds.isEmpty())
+    {
+        auto rb = resetBounds.toFloat();
+        g.setColour(resetHover ? ds::surface300() : ds::surface100());
+        g.fillRoundedRectangle(rb, ds::radius::sm);
+        g.setColour(ds::edge());
+        g.drawRoundedRectangle(rb.reduced(0.5f), ds::radius::sm, 1.0f);
+        g.setColour(ds::ink());
+        g.setFont(uiFontFixed(12.0f, true));
+        g.drawText("Reset", resetBounds, juce::Justification::centred, false);
+    }
+
+    auto footer = getLocalBounds().removeFromBottom(metrics::scaled(36)).reduced(metrics::scaled(12), 0);
+    g.setColour(ds::inkMuted());
+    g.setFont(monoFontFixed(12.0f));
+    g.drawText(countText, footer, juce::Justification::centredLeft, true);
+}
+
+void FilterPopover::mouseDown(const juce::MouseEvent& e)
+{
+    if (resetBounds.contains(e.getPosition()) && onReset)
+        onReset();
+}
+
+void FilterPopover::mouseMove(const juce::MouseEvent& e)
+{
+    const bool hot = resetBounds.contains(e.getPosition());
+    if (hot != resetHover)
+    {
+        resetHover = hot;
+        repaint(resetBounds.expanded(2));
+    }
+    setMouseCursor(hot ? juce::MouseCursor::PointingHandCursor
+                       : juce::MouseCursor::NormalCursor);
+}
+
+void FilterPopover::mouseExit(const juce::MouseEvent&)
+{
+    if (resetHover)
+    {
+        resetHover = false;
+        repaint(resetBounds.expanded(2));
+    }
 }
 
 bool FilterPopover::keyPressed(const juce::KeyPress& key)
