@@ -94,6 +94,7 @@ void MidiToolkitProcessor::applySharedUiSessionFromLibrary()
     tweaks().fontFamily.store(juce::jlimit(0, (int) FontFamily::Count - 1, s.tweakFontFamily));
     tweaks().surfaceStyle.store(juce::jlimit(0, (int) SurfaceStyle::Count - 1, s.tweakSurfaceStyle));
     tweaks().alternateRows.store(s.tweakAlternateRows != 0 ? 1 : 0);
+    tweaks().contrastPct.store(juce::jlimit(40, 100, s.tweakContrastPct));
 
     hasDefaultView = s.hasDefaultView;
     defEditorOpen = s.defEditorOpen;
@@ -153,6 +154,7 @@ void MidiToolkitProcessor::persistSharedUiSession()
     s.tweakFontFamily = tweaks().fontFamily.load();
     s.tweakSurfaceStyle = tweaks().surfaceStyle.load();
     s.tweakAlternateRows = tweaks().alternateRows.load();
+    s.tweakContrastPct = tweaks().contrastPct.load();
     s.hasDefaultView = hasDefaultView;
     s.defEditorOpen = defEditorOpen;
     s.defEffectsOpen = defEffectsOpen;
@@ -212,6 +214,7 @@ void MidiToolkitProcessor::syncLibraryFromMemory()
         s.tweakFontFamily = tweaks().fontFamily.load();
         s.tweakSurfaceStyle = tweaks().surfaceStyle.load();
         s.tweakAlternateRows = tweaks().alternateRows.load();
+        s.tweakContrastPct = tweaks().contrastPct.load();
         s.hasDefaultView = hasDefaultView;
         s.defEditorOpen = defEditorOpen;
         s.defEffectsOpen = defEffectsOpen;
@@ -816,6 +819,7 @@ void MidiToolkitProcessor::getStateInformation(juce::MemoryBlock& dest)
     xml.setAttribute("tweakFontFamily", tweaks().fontFamily.load());
     xml.setAttribute("tweakSurfaceStyle", tweaks().surfaceStyle.load());
     xml.setAttribute("tweakAlternateRows", tweaks().alternateRows.load());
+    xml.setAttribute("tweakContrastPct", tweaks().contrastPct.load());
     xml.setAttribute("syncSessionBars", syncSessionBars.load());
     xml.setAttribute("lastBrowserDir", lastBrowserDir);
     xml.setAttribute("trimEmptyMeasuresPreview", trimEmptyMeasuresPreview ? 1 : 0);
@@ -1200,6 +1204,8 @@ void MidiToolkitProcessor::setStateInformation(const void* data, int sizeInBytes
             tweaks().surfaceStyle.store(juce::jlimit(0, (int) SurfaceStyle::Count - 1,
                 xml->getIntAttribute("tweakSurfaceStyle", tweaks().surfaceStyle.load())));
             tweaks().alternateRows.store(xml->getIntAttribute("tweakAlternateRows", 1) != 0 ? 1 : 0);
+            tweaks().contrastPct.store(juce::jlimit(40, 100,
+                xml->getIntAttribute("tweakContrastPct", tweaks().contrastPct.load())));
             syncSessionBars.store(juce::jlimit(1, 256, xml->getIntAttribute("syncSessionBars",
                 xml->getIntAttribute("arrangementBars", syncSessionBars.load()))));
             lastBrowserDir = xml->getStringAttribute("lastBrowserDir");

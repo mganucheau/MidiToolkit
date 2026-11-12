@@ -486,14 +486,14 @@ IconBtn::IconBtn(const juce::String& iconName, const juce::String& tip)
 
 int IconBtn::captionWidth() const
 {
-    // Groove toggle: control-lg square, or 8 px padding + 10 px glyph + 4 px gap + caption.
+    // Match paintButton(): pad + chrome glyph + gap + 12 pt label + pad.
     const float sc = juce::jmax(0.5f, contentScale());
     if (caption.isEmpty())
-        return juce::roundToInt(24.0f * sc);
-    const int textW = (int) std::ceil(juce::GlyphArrangement::getStringWidth(uiFont(11.0f, true), caption));
+        return juce::roundToInt(28.0f * sc);
+    const int textW = (int) std::ceil(juce::GlyphArrangement::getStringWidth(uiFont(12.0f, true), caption));
     const int padH = juce::roundToInt(8.0f * sc);
-    const int iconW = juce::roundToInt(10.0f * sc);
-    const int gap = juce::roundToInt(4.0f * sc);
+    const int iconW = metrics::chromeIconGlyphSize(); // same as paint's glyphPx basis
+    const int gap = juce::roundToInt(5.0f * sc);
     return padH + iconW + gap + textW + padH;
 }
 
@@ -505,9 +505,25 @@ void IconBtn::paintButton(juce::Graphics& g, bool over, bool down)
     juce::ignoreUnused(ghost);
     const float face = ds::radius::sm;
     const juce::Colour litCol = activeTint.isTransparent() ? ds::acc() : activeTint;
-    if (solid)
+    if (groupLeft)
     {
-        const auto fill = (active && !activeTint.isTransparent()) ? activeTint : ds::primary();
+        // Joined-group cell: the parent draws the shared border and divider.
+        if (active || over || down)
+        {
+            juce::Path p;
+            p.addRoundedRectangle(b.getX() + 1.0f, b.getY() + 1.0f, b.getWidth() - 1.0f, b.getHeight() - 2.0f,
+                                  ds::radius::md - 1.0f, ds::radius::md - 1.0f, true, false, true, false);
+            g.setColour(active ? ds::acc().withAlpha(ds::dark() ? 0.22f : 0.12f) : ds::surface300());
+            g.fillPath(p);
+        }
+    }
+    else if (solid)
+    {
+        juce::Colour fill = ds::primary();
+        if (accentSolid)
+            fill = ds::acc();
+        else if (active && !activeTint.isTransparent())
+            fill = activeTint;
         g.setColour(isEnabled() ? (down ? fill.interpolatedWith(ds::bg(), 0.15f) : fill) : ds::surface300());
         g.fillRoundedRectangle(b, ds::radius::md);
     }
@@ -537,13 +553,13 @@ void IconBtn::paintButton(juce::Graphics& g, bool over, bool down)
     }
     juce::Colour col;
     if (solid)
-        col = (active && !activeTint.isTransparent()) ? juce::Colours::white : ds::onPrimary();
+        col = (accentSolid || (active && !activeTint.isTransparent())) ? juce::Colours::white : ds::onPrimary();
     else if (outlined)
         col = active ? juce::Colours::white : (activeTint.isTransparent() ? ds::ink() : activeTint);
     else if (!isEnabled())
         col = ds::inkFaint().withMultipliedAlpha(0.6f);
     else if (active)
-        col = litCol;
+        col = caption.isNotEmpty() ? ds::ink() : litCol; // captioned chips keep ink text
     else if (over || down)
         col = ds::ink();
     else
@@ -557,14 +573,14 @@ void IconBtn::paintButton(juce::Graphics& g, bool over, bool down)
     if (caption.isNotEmpty())
     {
         const float sc = juce::jmax(0.5f, contentScale());
-        const auto font = uiFont(11.0f, true);
-        const float padL = 8.0f * sc, iconW = glyphPx, gap = 4.0f * sc;
+        const auto font = uiFont(12.0f, true);
+        const float padL = 8.0f * sc, iconW = glyphPx, gap = 5.0f * sc;
         auto iconR = juce::Rectangle<float>(b.getX() + padL, b.getCentreY() - iconW * 0.5f, iconW, iconW);
         drawIcon(g, icon, iconR, col, stroke);
         g.setFont(font);
         g.setColour(col);
         g.drawText(caption, juce::Rectangle<float>(iconR.getRight() + gap, b.getY(),
-                                                   b.getRight() - iconR.getRight() - gap, b.getHeight()),
+                                                   b.getRight() - iconR.getRight() - padL, b.getHeight()),
                    juce::Justification::centredLeft, false);
     }
     else

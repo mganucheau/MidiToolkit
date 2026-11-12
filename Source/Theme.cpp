@@ -27,11 +27,26 @@ bool usesDarkAppearance()
     return themeAt(themeIndex()).dark;
 }
 
+static juce::Colour applyContrast(juce::Colour c)
+{
+    // Contrast < 100 %: compress neutrals (surfaces, lines, text) toward a mid grey so
+    // whites soften and blacks lift. Saturated accents (violet, green, red, amber) keep
+    // their colour so state stays readable.
+    const int pct = juce::jlimit(40, 100, tweaks().contrastPct.load());
+    if (pct >= 100 || c.getFloatAlpha() <= 0.001f || c.getSaturation() > 0.35f)
+        return c;
+    const float amount = (float) (100 - pct) / 100.0f * 0.55f; // 40 % → 0.33
+    const auto mid = juce::Colour(0xff8c8d92).withAlpha(c.getFloatAlpha());
+    return c.interpolatedWith(mid, amount).withAlpha(c.getFloatAlpha());
+}
+
 juce::Colour tintForTheme(juce::Colour c)
 {
     const auto& spec = themeAt(themeIndex());
-    if (c.getFloatAlpha() <= 0.001f || (spec.amount <= 0.001f && std::abs(spec.lift) <= 0.001f))
+    if (c.getFloatAlpha() <= 0.001f)
         return c;
+    if (spec.amount <= 0.001f && std::abs(spec.lift) <= 0.001f)
+        return applyContrast(c);
 
     juce::Colour out = c;
     if (spec.amount > 0.001f)
@@ -44,7 +59,7 @@ juce::Colour tintForTheme(juce::Colour c)
     }
     if (std::abs(spec.lift) > 0.001f)
         out = out.withBrightness(juce::jlimit(0.0f, 1.0f, out.getBrightness() + spec.lift));
-    return out.withAlpha(c.getFloatAlpha());
+    return applyContrast(out.withAlpha(c.getFloatAlpha()));
 }
 
 const ThemeTokens& themeTokens()

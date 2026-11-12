@@ -156,6 +156,9 @@ struct Tweaks
     std::atomic<int> surfaceStyle { (int) SurfaceStyle::Flat };
     /** Shade every other file-list row for readability. */
     std::atomic<int> alternateRows { 1 }; // 1 = on (default)
+    /** Overall colour contrast, 40–100 %. 100 = full Levels contrast; lower values
+        pull neutral surfaces, lines and text toward a mid grey (accents untouched). */
+    std::atomic<int> contrastPct { 100 };
 };
 
 /** Standout amber used for tip bubbles and the control highlight under them. */

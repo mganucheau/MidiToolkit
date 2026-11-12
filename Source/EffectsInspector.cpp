@@ -924,12 +924,18 @@ EffectsInspector::EffectsInspector()
         sec->onDragMove = [this](int screenY) { moveSectionDrag(screenY); };
         sec->onDragEnd = [this] { endSectionDrag(); };
     }
-    // Default fold: Playback + Timing + Performance + Form open so Transform controls are findable.
+    // Levels mockup default: Playback + Timing open; other transform sections folded.
     playback.setOpen(true);
     timing.setOpen(true);
-    performance.setOpen(true);
-    formSec.setOpen(true);
-    arpSec.setOpen(true);
+    performance.setOpen(false);
+    pitchSec.setOpen(false);
+    formSec.setOpen(false);
+    effectsSec.setOpen(false);
+    arpSec.setOpen(false);
+    melodySec.setOpen(false);
+    chordsSec.setOpen(false);
+    bassSec.setOpen(false);
+    drumSec.setOpen(false);
 
     // "Hide Unused": fold every section down to its changed rows (the default way of working).
     btnChanged.setComponentID("btnToolkitChanged");
@@ -1445,7 +1451,7 @@ void EffectsInspector::notifyEdit()
 
 void EffectsInspector::layoutSections()
 {
-    // Groove: section frames stacked with 4 px gaps inside an 8 px inset.
+    // Match the Generator column: sections inset 8 px with 4 px gaps between them.
     const int pad = metrics::scaled(8);
     const int gap = metrics::scaled(4);
     const int w = juce::jmax(1, body.getWidth() - pad * 2);
@@ -1731,7 +1737,9 @@ void EffectsInspector::resized()
     {
         generatorsTabBounds = {};
         effectsTabBounds = {};
-        btnChanged.setBounds(header.removeFromLeft(ctl).withSizeKeepingCentre(ctl, ctl));
+        // Levels: "Toolkit" title on the left; the Changed filter joins the
+        // right-hand cluster.
+        btnChanged.setBounds(header.removeFromRight(ctl).withSizeKeepingCentre(ctl, ctl));
     }
     else
     {
@@ -1825,12 +1833,13 @@ void EffectsInspector::resized()
 
 void EffectsInspector::paint(juce::Graphics& g)
 {
-    g.fillAll(ds::surface100());
+    // Levels Toolkit: ground surface000, header face surface200, body well surface100.
+    g.fillAll(ds::surface000());
     g.setColour(ds::line());
     g.fillRect(getLocalBounds().removeFromLeft(1));
 
     auto header = getLocalBounds().removeFromTop(metrics::paneHeaderH());
-    g.setColour(ds::surface300());
+    g.setColour(ds::surface200());
     g.fillRect(header);
     g.setColour(ds::line());
     g.fillRect(header.getX(), header.getBottom() - 1, header.getWidth(), 1);
@@ -1839,7 +1848,14 @@ void EffectsInspector::paint(juce::Graphics& g)
 
     g.setFont(uiFontFixed(12.0f, true));
     if (externalGeneratorHost != nullptr)
+    {
+        // Levels pane title.
+        g.setFont(uiFontFixed(14.0f, true));
+        g.setColour(ds::ink());
+        auto t = header.withTrimmedLeft(metrics::scaled(12)).withRight(btnChanged.getX() - 4);
+        g.drawText("Toolkit", t, juce::Justification::centredLeft, true);
         return;
+    }
 
     auto drawTab = [&](juce::Rectangle<int> r, const juce::String& label, bool active, bool enabled)
     {

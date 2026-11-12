@@ -5,7 +5,7 @@ namespace pflow {
 namespace {
 constexpr float kHeaderIconScale = 1.0f;
 
-constexpr int kBtnH = 28;   // Levels: 28 px header controls
+constexpr int kBtnH = 30;   // Mockup: ~30 px controls in 40 px header (5 px inset)
 }
 
 // ── StatusPill ───────────────────────────────────────────────────────────────
@@ -22,9 +22,20 @@ void TransportBar::StatusPill::paint(juce::Graphics& g)
     // Levels tempo readout: surface + 18 % border (radius-md), sits flush right of the Sync
     // toggle so the two read as one group. Editing = 2 px primary inner ring.
     auto r = getLocalBounds().toFloat();
-    g.setColour(ds::surface200());
-    g.fillRoundedRectangle(r, ds::radius::md);
-    if (editable && editing)
+    if (!grouped)
+    {
+        g.setColour(ds::surface200());
+        g.fillRoundedRectangle(r, ds::radius::md);
+    }
+    if (grouped)
+    {
+        if (editable && editing)
+        {
+            g.setColour(ds::primary());
+            g.drawRoundedRectangle(r.reduced(1.0f), ds::radius::sm, 2.0f);
+        }
+    }
+    else if (editable && editing)
     {
         g.setColour(ds::primary());
         g.drawRoundedRectangle(r.reduced(1.0f), ds::radius::md, 2.0f);
@@ -35,7 +46,7 @@ void TransportBar::StatusPill::paint(juce::Graphics& g)
         g.drawRoundedRectangle(r.reduced(0.5f), ds::radius::md, 1.0f);
     }
 
-    auto inner = r.reduced(10.0f, 0.0f);
+    auto inner = r.reduced(8.0f, 0.0f);
     const auto shownText = editing ? editBuffer + "|"
                                    : text.upToFirstOccurrenceOf(" ", false, false);
     const auto valueFont = ds::font(ds::Type::NumericDisplay);
@@ -55,8 +66,9 @@ int TransportBar::StatusPill::idealWidth() const
     const auto shownText = text.upToFirstOccurrenceOf(" ", false, false);
     const float v = juce::GlyphArrangement::getStringWidth(ds::font(ds::Type::NumericDisplay),
                                                            shownText.length() < 3 ? juce::String("000") : shownText);
-    const float l = juce::GlyphArrangement::getStringWidth(uiFontFixed(11.0f, false), "BPM");
-    return (int) std::ceil(6.0f + v + 4.0f + l + 8.0f);
+    const float l = juce::GlyphArrangement::getStringWidth(monoFontFixed(12.0f), "BPM");
+    // Matches paint(): 8 px inset each side + 6 px gap between value and unit.
+    return (int) std::ceil(8.0f + v + 6.0f + l + 8.0f + 2.0f);
 }
 
 void TransportBar::StatusPill::mouseDrag(const juce::MouseEvent& e)
@@ -165,7 +177,8 @@ int TransportBar::DragChip::idealWidth() const
         return juce::roundToInt(8.0f * sc) * 2 + juce::roundToInt(14.0f * sc);
     const juce::String label = getButtonText().isNotEmpty() ? getButtonText() : "Drag Me";
     const int textW = (int) std::ceil(juce::GlyphArrangement::getStringWidth(uiFont(12.0f, true), label)) + 2;
-    return juce::roundToInt(12.0f * sc) * 2 + juce::roundToInt(14.0f * sc) + juce::roundToInt(8.0f * sc) + textW;
+    // Match caption chips: 8 px pad + grip + 5 gap + label.
+    return juce::roundToInt(8.0f * sc) * 2 + juce::roundToInt(14.0f * sc) + juce::roundToInt(5.0f * sc) + textW;
 }
 
 void TransportBar::DragChip::paintButton(juce::Graphics& g, bool over, bool down)
@@ -187,10 +200,10 @@ void TransportBar::DragChip::paintButton(juce::Graphics& g, bool over, bool down
     }
     else
     {
-        auto inner = face.reduced(12.0f * sc, 0.0f);
+        auto inner = face.reduced(8.0f * sc, 0.0f);
         auto glyph = inner.removeFromLeft(14.0f * sc).withSizeKeepingCentre(14.0f * sc, 14.0f * sc);
         drawIcon(g, icons::grip, glyph, ink, 1.3f);
-        inner.removeFromLeft(8.0f * sc);
+        inner.removeFromLeft(5.0f * sc);
         g.setFont(uiFont(12.0f, true));
         g.setColour(ink);
         const juce::String label = getButtonText().isNotEmpty() ? getButtonText() : "Drag Me";
@@ -344,6 +357,11 @@ void TransportBar::setEditorOpen(bool open)
 {
     editorOpen = open;
     btnEditor.active = open;
+    // Levels toggle chip (LvApp): active = violet border + 12 % tint, ink label;
+    // idle = ghost at 64 %.
+    btnEditor.solid = false;
+    btnEditor.accentSolid = false;
+    btnEditor.outlined = false;
     btnEditor.repaint();
     resized();
 }
@@ -352,6 +370,11 @@ void TransportBar::setEffectsOpen(bool open)
 {
     effectsOpen = open;
     btnEffects.active = open;
+    // Levels toggle chip (LvApp): active = violet border + 12 % tint, ink label;
+    // idle = ghost at 64 %.
+    btnEffects.solid = false;
+    btnEffects.accentSolid = false;
+    btnEffects.outlined = false;
     btnEffects.repaint();
     resized();
 }
@@ -360,6 +383,11 @@ void TransportBar::setPassthrough(bool on)
 {
     passthrough = on;
     btnPassthrough.active = on;
+    // Levels toggle chip (LvApp): active = violet border + 12 % tint, ink label;
+    // idle = ghost at 64 %.
+    btnPassthrough.solid = false;
+    btnPassthrough.accentSolid = false;
+    btnPassthrough.outlined = false;
     btnPassthrough.repaint();
     resized();
     repaint();
@@ -606,13 +634,18 @@ void TransportBar::mouseDoubleClick(const juce::MouseEvent& e)
 #endif
 }
 
-void TransportBar::applyHeaderCaptions(bool /*withText*/)
+void TransportBar::applyHeaderCaptions(bool withText)
 {
-    // Icon-only chrome — captions stay empty so buttons are glyphs.
+    applyHeaderCaptionsTier(withText ? 2 : 0);
+}
+
+void TransportBar::applyHeaderCaptionsTier(int tier)
+{
+    // 2 = all labels, 1 = Through + Toolkit (drop Piano roll), 0 = icons only.
     btnSync.caption = {};
-    btnEditor.caption = {};
-    btnEffects.caption = {};
-    btnPassthrough.caption = {};
+    btnPassthrough.caption = tier >= 1 ? "Through" : juce::String();
+    btnEffects.caption = tier >= 1 ? "Toolkit" : juce::String();
+    btnEditor.caption = tier >= 2 ? "Piano roll" : juce::String();
 }
 
 void TransportBar::resized()
@@ -620,12 +653,13 @@ void TransportBar::resized()
     // [lights] Wordmark · BPM · Play/Stop · Rec · Sync ······ Passthrough · Piano Roll · Effects · Settings
     const int h = getHeight();
     const float sc = juce::jmax(0.5f, contentScale());
+    // Mockup: ~5 px vertical inset in the 40 px band.
     const int btn = juce::jmin(h - 8, juce::roundToInt((float) kBtnH * sc));
     const int y = (h - btn) / 2;
-    const int tight = juce::roundToInt(2.0f * sc);     // within a group
-    const int groupGap = juce::roundToInt(8.0f * sc);  // between groups
+    const int tight = juce::roundToInt(6.0f * sc);     // within a group
+    const int groupGap = juce::roundToInt(12.0f * sc); // between groups
     const int leftPad = juce::roundToInt(12.0f * sc);
-    const int rightPad = juce::roundToInt(8.0f * sc);
+    const int rightPad = juce::roundToInt(12.0f * sc);
 
     lightsZoneW = (reserveTrafficLights || measuredLightsZone > 0) ? juce::jmax(leftPad, measuredLightsZone)
                                                                    : leftPad;
@@ -635,23 +669,29 @@ void TransportBar::resized()
     // Drag Me sits between Effects and Settings when a clip is available.
     btnDragToDaw.setVisible(hasClip);
     btnEditor.setVisible(true);
-    // Passthrough sits next to Sync; visible while Effects is open.
-    btnPassthrough.setVisible(effectsOpen);
+    // Levels: Through stays next to Record whenever browser transport is visible
+    // (not gated on Effects). MIDI FX build can still lock it off.
+    const bool showThrough = transportControlsVisible && !passthroughLocked;
+    btnPassthrough.setVisible(showThrough);
     btnPlay.setVisible(transportControlsVisible);
-    // Passthrough is effect-only — no record arm on the header.
-    const bool showRecord = transportControlsVisible && !passthrough;
+    // Record stays visible alongside Through (Through no longer hides Record).
+    const bool showRecord = transportControlsVisible;
     btnRecord.setVisible(showRecord);
 
     const bool showBpm = !compactChrome;
     const int pillW = showBpm ? statusPill.idealWidth() : 0;
-    const int passW = btnPassthrough.isVisible() ? (tight + btn) : 0;
-    const int playRecW = transportControlsVisible
-        ? (btn + tight + (showRecord ? btn + tight : 0) + groupGap)
-        : 0;
-    const int leftW = (showBpm ? pillW + groupGap : 0) + playRecW + btn + passW;
     btnDragToDaw.iconOnly = compactChrome;
     const int chipW = btnDragToDaw.isVisible() ? btnDragToDaw.idealWidth() : 0;
 
+    auto leftWidth = [&]()
+    {
+        const int passChipW = showThrough ? btnPassthrough.captionWidth() : 0;
+        const int playRecW = transportControlsVisible
+            ? (btn + tight + (showRecord ? btn + tight : 0)
+               + (showThrough ? tight + passChipW : 0) + groupGap)
+            : 0;
+        return (showBpm ? pillW + groupGap : 0) + playRecW + btn;
+    };
     auto rightWidth = [&]()
     {
         int w = btn + groupGap;   // settings
@@ -661,7 +701,10 @@ void TransportBar::resized()
         return w;
     };
 
-    applyHeaderCaptions(true);
+    // Prefer: full wordmark + all labels → shorten wordmark → drop Piano roll
+    // label → drop wordmark → icons only. Through stays labeled as long as possible.
+    applyHeaderCaptionsTier(2);
+    int leftW = leftWidth();
     int rightW = rightWidth();
     const int fullW = logoIdealWidth();
     const int midiW = logoMidiWidth();
@@ -669,15 +712,20 @@ void TransportBar::resized()
 
     auto fits = [&](int logo) { return (logo > 0 ? logo + groupGap : 0) + leftW + groupGap + rightW <= avail; };
 
-    // The wordmark steps down first; button words drop only once it is gone, so
-    // the wordmark never comes back as the window keeps getting narrower.
     int titleW = fullW;
     logoLevel = 2;
     if (!fits(fullW)) { titleW = midiW; logoLevel = 1; }
-    if (!fits(midiW)) { titleW = 0;     logoLevel = 0; }
     if (!fits(titleW))
     {
-        applyHeaderCaptions(false);
+        applyHeaderCaptionsTier(1); // keep Through + Toolkit
+        leftW = leftWidth();
+        rightW = rightWidth();
+    }
+    if (!fits(midiW)) { titleW = 0; logoLevel = 0; }
+    if (!fits(titleW))
+    {
+        applyHeaderCaptionsTier(0);
+        leftW = leftWidth();
         rightW = rightWidth();
     }
 
@@ -688,14 +736,20 @@ void TransportBar::resized()
     if (showBpm)
     {
         // Levels tempo group: Sync toggle flush against the BPM readout.
+        btnSync.groupLeft = true;
+        statusPill.grouped = true;
         btnSync.setBounds(x, y, btn, btn);
-        x += btn + tight;
+        x += btn;
         statusPill.setBounds(x, y, pillW, btn);
+        tempoGroupBounds = btnSync.getBounds().getUnion(statusPill.getBounds());
         x += pillW + groupGap;
     }
     else
     {
         statusPill.setBounds({});
+        btnSync.groupLeft = false;
+        statusPill.grouped = false;
+        tempoGroupBounds = {};
     }
     if (transportControlsVisible)
     {
@@ -703,11 +757,21 @@ void TransportBar::resized()
         if (showRecord)
         {
             btnRecord.setBounds(x, y, btn, btn);
-            x += btn + groupGap;
+            x += btn + tight;
         }
         else
         {
             btnRecord.setBounds({});
+        }
+        if (showThrough)
+        {
+            const int pw = btnPassthrough.captionWidth();
+            btnPassthrough.setBounds(x, y, pw, btn);
+            x += pw + groupGap;
+        }
+        else
+        {
+            btnPassthrough.setBounds({});
             x += groupGap - tight;
         }
     }
@@ -715,16 +779,13 @@ void TransportBar::resized()
     {
         btnPlay.setBounds({});
         btnRecord.setBounds({});
+        btnPassthrough.setBounds({});
     }
     if (!showBpm)
     {
         btnSync.setBounds(x, y, btn, btn);
         x += btn + tight;
     }
-    if (btnPassthrough.isVisible())
-        btnPassthrough.setBounds(x, y, btn, btn);
-    else
-        btnPassthrough.setBounds({});
     transportGroupBounds = {};
     dividerBounds = {};
 
@@ -763,6 +824,16 @@ void TransportBar::paint(juce::Graphics& g)
     g.setColour(ds::line());
     g.fillRect(0, getHeight() - 1, getWidth(), 1);
     paintLogo(g, titleBounds, windowActive ? 1.0f : 0.50f);
+}
+
+void TransportBar::paintOverChildren(juce::Graphics& g)
+{
+    // Levels tempo group: one 18 % frame (radius-md) around Sync + BPM, 1 px divider.
+    if (tempoGroupBounds.isEmpty() || !statusPill.isVisible()) return;
+    auto r = tempoGroupBounds.toFloat();
+    g.setColour(ds::edge());
+    g.drawRoundedRectangle(r.reduced(0.5f), ds::radius::md, 1.0f);
+    g.fillRect((float) btnSync.getRight() - 0.5f, r.getY() + 1.0f, 1.0f, r.getHeight() - 2.0f);
 }
 
 } // namespace pflow

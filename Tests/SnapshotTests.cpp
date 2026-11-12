@@ -220,12 +220,12 @@ TEST_CASE("Toolkit section order round-trips and ignores unknown ids", "[editoru
     juce::ScopedJuceInitialiser_GUI gui;
     EffectsInspector fx;
     fx.setSize(300, 800);
-    CHECK(fx.getSectionOrder() == "playback,timing,performance,pitch,effects");
+    CHECK(fx.getSectionOrder() == "playback,form,timing,performance,pitch,effects");
 
     juce::String saved;
     fx.onSectionOrderChanged = [&](const juce::String& s) { saved = s; };
     fx.setSectionOrder("pitch,bogus,timing");
-    CHECK(fx.getSectionOrder() == "pitch,timing,playback,performance,effects");
+    CHECK(fx.getSectionOrder() == "pitch,timing,playback,performance,form,effects");
     CHECK(fx.pitchSection().getY() < fx.timingSection().getY());
     CHECK(fx.timingSection().getY() < fx.playbackSection().getY());
 }

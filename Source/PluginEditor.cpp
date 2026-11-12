@@ -626,6 +626,12 @@ MidiToolkitEditor::MidiToolkitEditor(MidiToolkitProcessor& p)
     // ── Browser toolbar + filter popover (Groove) ──
     browserBar.setSearchComponent(&sidebar.searchComponent());
     browserBar.onToggleFilters = [this] { sidebar.setFilterOpen(!sidebar.isFilterOpen()); };
+    browserBar.onResetFilters = [this]
+    {
+        sidebar.resetFilters();
+        refreshBrowserBar();
+        layoutContent();
+    };
     browserBar.onToggleSubfolders = [this]
     {
         const bool on = !sidebar.getIncludeSubdirs();
@@ -698,7 +704,11 @@ MidiToolkitEditor::MidiToolkitEditor(MidiToolkitProcessor& p)
         refreshBrowserBar();
     };
     sidebar.onFilterLayoutChanged = [this] { layoutContent(); };
-    fileList.onFolderNameChanged = [this](const juce::String& name) { browserBar.setTitle(name); };
+    fileList.onFolderNameChanged = [this](const juce::String& name)
+    {
+        browserBar.setTitle(name);
+        layoutContent(); // title row changes BrowserToolbar height
+    };
     fileList.onEntriesChanged = [this]
     {
         kindGrid.setKindMask(sidebar.getCriteria().kindMask);
@@ -799,6 +809,19 @@ MidiToolkitEditor::MidiToolkitEditor(MidiToolkitProcessor& p)
 
     content.addAndMakeVisible(previewHeader);
     content.addAndMakeVisible(miniRoll);
+    miniRoll.onContextClick = [this](const juce::MouseEvent&)
+    {
+        juce::PopupMenu m;
+        m.addItem(1, "Mute preview", true, previewMuted);
+        m.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&miniRoll),
+                        [this](int r)
+                        {
+                            if (r != 1) return;
+                            previewMuted = !previewMuted;
+                            pushPreviewToProcessor();
+                            previewHeader.refresh();
+                        });
+    };
 
     // ── Piano-roll editor ──
     rollEditor.onEditChanged = [this](const ClipEdit& e)
@@ -3289,8 +3312,13 @@ void MidiToolkitEditor::PreviewHeader::refresh()
     if (const auto* e = owner.fileList.entryAt(owner.fileList.getSelectedIndex()); e != nullptr && !e->isDirectory)
     {
         n = e->name;
-        if (e->bars > 0) m = juce::String(e->bars) + (e->bars == 1 ? " bar" : " bars");
-        if (e->rootName.isNotEmpty()) m += (m.isNotEmpty() ? juce::String::fromUTF8(" \xc2\xb7 ") : juce::String()) + e->rootName;
+        if (e->rootName.isNotEmpty()) m = e->rootName;
+        if (e->noteCount > 0)
+            m += (m.isNotEmpty() ? juce::String::fromUTF8(" \xc2\xb7 ") : juce::String())
+                 + juce::String(e->noteCount) + (e->noteCount == 1 ? " note" : " notes");
+        else if (e->bars > 0)
+            m += (m.isNotEmpty() ? juce::String::fromUTF8(" \xc2\xb7 ") : juce::String())
+                 + juce::String(e->bars) + (e->bars == 1 ? " bar" : " bars");
     }
     const bool vel = owner.showPreviewVelocity, trim = owner.effectsInspector.isTrimOn(), mute = owner.previewMuted;
     const bool hasClip = n.isNotEmpty();
@@ -3324,19 +3352,20 @@ void MidiToolkitEditor::PreviewHeader::resized()
 
 void MidiToolkitEditor::PreviewHeader::paint(juce::Graphics& g)
 {
-    g.fillAll(ds::surface300());
+    // Levels preview strip: surface100 with hairlines; Inter name + mono meta.
+    g.fillAll(ds::surface100());
     g.setColour(ds::line());
     g.fillRect(getLocalBounds().removeFromTop(1));
     g.fillRect(getLocalBounds().removeFromBottom(1));
 
     auto r = getLocalBounds().reduced(metrics::scaled(8), 0);
     r.setRight(btnTrim.getX() - metrics::scaled(6));
-    const auto nameFont = uiFontFixed(11.0f, true);
-    const auto metaFont = monoFontFixed(11.0f);
+    const auto nameFont = uiFontFixed(12.0f, true);
+    const auto metaFont = monoFontFixed(12.0f);
     if (name.isEmpty())
     {
         g.setColour(ds::inkMuted());
-        g.setFont(uiFontFixed(11.0f, false));
+        g.setFont(uiFontFixed(12.0f, false));
         g.drawText("Select a MIDI file to preview", r, juce::Justification::centredLeft, true);
         return;
     }
@@ -3776,9 +3805,15 @@ void MidiToolkitEditor::refreshBrowserBar()
     for (int i = 0; i < fileList.getNumEntries(); ++i)
         if (const auto* e = fileList.entryAt(i); e != nullptr && !e->isDirectory)
             ++files;
+    const int barH = browserBar.idealHeight();
+    browserBar.setTitle(fileList.getFolderName());
+    browserBar.setCount(files, files);
     browserBar.setFiltersActive(sidebar.isFilterOpen(), sidebar.activeFilterCount(),
                                 sidebar.describeActiveFilters());
     filterPopover.setCountText(juce::String(files) + (files == 1 ? " file" : " files"));
+    // Filter summary strip changes BrowserToolbar height — reflow only when it does.
+    if (browserBar.isVisible() && browserBar.idealHeight() != barH)
+        layoutContent();
 }
 
 void MidiToolkitEditor::layoutContent()
@@ -3841,7 +3876,8 @@ void MidiToolkitEditor::layoutContent()
     sidebar.setVisible(showFiles);
     browserBar.setVisible(showFiles);
     fileList.setVisible(showFiles);
-    previewHeader.setVisible(false); // preview title row removed
+    // Levels: clip title strip above the mini preview when the full roll is closed.
+    previewHeader.setVisible(previewOpen && !edOpen);
     rollEditor.setVisible(edOpen);
     effectsInspector.setVisible(showFx);
     leftPaneTabs.setVisible(true);
@@ -3923,21 +3959,33 @@ void MidiToolkitEditor::layoutContent()
         filterPopover.setVisible(false);
         kindGrid.setVisible(false);
         fileList.setVisible(false);
-        previewHeader.setBounds({});
 
         // Preview under the generator when the piano roll is closed.
+        const int headerH = 0; // Levels: no title/Trim/Mute row above the preview (Mute → right-click)
         const int desiredRollH = previewOpen ? juce::jmax(metrics::miniRollH(), metrics::scaled(80)) : 0;
-        const int rollH = juce::jmin(desiredRollH, juce::jmax(0, left.getHeight() / 3));
+        const int stackH = juce::jmin(headerH + desiredRollH, juce::jmax(0, left.getHeight() / 3));
+        const int rollH = juce::jmax(0, stackH - headerH);
         if (rollH > 0)
         {
             miniRoll.setBounds(left.removeFromBottom(rollH));
             miniRoll.setVisible(true);
-            miniRoll.setShowVelocity(false);   // preview roll has no velocity lane
+            miniRoll.setShowVelocity(false);
+            if (headerH > 0)
+            {
+                previewHeader.setBounds(left.removeFromBottom(headerH));
+                previewHeader.setVisible(true);
+            }
+            else
+            {
+                previewHeader.setBounds({});
+            }
         }
         else
         {
             miniRoll.setBounds({});
             miniRoll.setVisible(false);
+            previewHeader.setBounds({});
+            previewHeader.setVisible(false);
         }
 
         generatorViewport.setBounds(left);
@@ -3976,16 +4024,27 @@ void MidiToolkitEditor::layoutContent()
         const int fileListMinH = metrics::listHeaderH() + metrics::listRowH() * 2;
         const int colH = browserCol.getHeight();
         const int softMaxStack = juce::jmax(0, colH - fileListMinH);
+        const int headerH = 0; // Levels: no title/Trim/Mute row above the preview (Mute → right-click)
         const int desiredRollH = previewOpen ? juce::jmax(metrics::miniRollH(), metrics::scaled(80)) : 0;
-        const int rollH = juce::jmin(desiredRollH, softMaxStack);
+        const int stackH = juce::jmin(headerH + desiredRollH, softMaxStack);
+        const int rollH = juce::jmax(0, stackH - headerH);
 
         if (rollH > 0)
+        {
             miniRoll.setBounds(browserCol.removeFromBottom(rollH));
+            if (headerH > 0)
+                previewHeader.setBounds(browserCol.removeFromBottom(headerH));
+            else
+                previewHeader.setBounds({});
+        }
         else
+        {
             miniRoll.setBounds({});
+            previewHeader.setBounds({});
+        }
         miniRoll.setVisible(rollH > 0);
-        miniRoll.setShowVelocity(false);   // preview roll has no velocity lane
-        previewHeader.setBounds({});
+        miniRoll.setShowVelocity(false);
+        previewHeader.setVisible(rollH > 0 && headerH > 0);
 
         fileList.setBounds(browserCol);
         kindGrid.setBounds(browserCol);
@@ -4118,6 +4177,18 @@ public:
         };
         addAndMakeVisible(alternateRowsSwitch);
 
+        // Contrast: 100 % = full Levels contrast; drag down to soften the palette.
+        contrastSlider.setValue(juce::jlimit(40, 100, tweaks().contrastPct.load()), juce::dontSendNotification);
+        contrastSlider.valueText = juce::String(contrastSlider.getValue()) + "%";
+        contrastSlider.setTooltip("Overall contrast between surfaces, lines and text (double-click for 100%)");
+        contrastSlider.onChange = [this](int v)
+        {
+            tweaks().contrastPct.store(juce::jlimit(40, 100, v));
+            contrastSlider.valueText = juce::String(v) + "%";
+            if (onChanged) onChanged();
+        };
+        addAndMakeVisible(contrastSlider);
+
         closeBtn.ghost = true;
         closeBtn.iconScale = 0.95f;
         closeBtn.setTooltip("Close");
@@ -4152,7 +4223,7 @@ public:
         const int header = kHeaderH + kTabH + 8 + kFooterH + 20;
         const int rowH = (narrow ? 56 : 40) + 6;
         if (t == 0) return header + rowH + 8;
-        if (t == 1) return header + rowH * 7 + 8; // appearance + theme + size..alt
+        if (t == 1) return header + rowH * 8 + 8; // appearance + theme + contrast + size..alt
         return header + 56;
     }
 
@@ -4163,6 +4234,7 @@ public:
         const bool output = tab == 0;
         appearancePopup.setVisible(design);
         themePopup.setVisible(design);
+        contrastSlider.setVisible(design);
         sizePopup.setVisible(design);
         textPopup.setVisible(design);
         fontPopup.setVisible(design);
@@ -4244,6 +4316,7 @@ public:
         {
             paintRow("Appearance", "Auto follows the system light/dark setting");
             paintRow("Theme", "Ten light and ten dark colour pairs");
+            paintRow("Contrast", "Softens surfaces, lines and text");
             paintRow("UI size", "Scales spacing, panels, and controls");
             paintRow("Text size", "Scales type and icons only");
             paintRow("Font", "Interface typeface; values stay mono");
@@ -4300,6 +4373,7 @@ public:
 
         appearancePopup.setBounds({});
         themePopup.setBounds({});
+        contrastSlider.setBounds({});
         sizePopup.setBounds({});
         textPopup.setBounds({});
         fontPopup.setBounds({});
@@ -4320,6 +4394,17 @@ public:
         {
             placePopup(appearancePopup);
             placePopup(themePopup);
+            {
+                auto row = body.removeFromTop(rowH);
+                if (narrow)
+                    contrastSlider.setBounds(row.removeFromBottom(ctrlH + 4));
+                else
+                {
+                    const int w = juce::jmin(220, row.getWidth() / 2);
+                    contrastSlider.setBounds(row.removeFromRight(w).withSizeKeepingCentre(w, ctrlH + 4));
+                }
+                body.removeFromTop(rowGap);
+            }
             placePopup(sizePopup);
             placePopup(textPopup);
             placePopup(fontPopup);
@@ -4344,6 +4429,7 @@ private:
     fx::FlatPopup appearancePopup, themePopup, sizePopup, textPopup, fontPopup;
     fx::FlatSwitch tooltipsSwitch;
     fx::FlatSwitch alternateRowsSwitch;
+    fx::FlatSliderRow contrastSlider { "", 40, 100, 100, false };
     IconBtn closeBtn { icons::x, "Close" };
     IconBtn saveDefaultBtn { icons::save, "Save" };
 };

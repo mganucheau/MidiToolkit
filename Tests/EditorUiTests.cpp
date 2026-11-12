@@ -444,6 +444,8 @@ TEST_CASE("Toolkit fold keeps dirty rows and collapses clean sections", "[editor
     GrooveParams g;
     g.swing = 35;
     fx.setGroove(g, juce::dontSendNotification);
+    // Playback/Timing/… start open for discoverability; fold keeps only dirty rows.
+    fx.timingSection().setOpen(false);
     REQUIRE(fx.timingSection().isVisible());
     REQUIRE(fx.timingSection().visibleRowCount() == 1);
     REQUIRE(fx.timingSection().modifiedCount() == 1);
@@ -453,7 +455,10 @@ TEST_CASE("Toolkit fold keeps dirty rows and collapses clean sections", "[editor
     for (fx::Section* sec : { &clean.playbackSection(), &clean.timingSection(),
                               &clean.performanceSection(), &clean.pitchSection(),
                               &clean.effectsSection() })
+    {
+        sec->setOpen(false);
         REQUIRE(sec->getHeight() == fx::kSectionHeaderH);
+    }
 }
 
 TEST_CASE("Toolkit paired delay rows and disabled dependents", "[editorui]")
@@ -485,7 +490,7 @@ TEST_CASE("Note filter legend follows key and mode", "[editorui]")
     edit.mode = Mode::Aeolian;
     fx.setEdit(edit, juce::dontSendNotification);
     REQUIRE(fx.noteFilterLegendLead() == "In A aeolian");
-    REQUIRE(metrics::effectsPaneWidth() == metrics::scaled(300));
+    REQUIRE(metrics::effectsPaneWidth() == metrics::scaled(ds::region::toolkitW));
 }
 
 TEST_CASE("Header wordmark tracks the traffic-light zone and drops Toolkit before MIDI", "[editorui]")

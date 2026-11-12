@@ -106,8 +106,12 @@ public:
     bool headerChrome = false; // muted idle glyph in pane headers
     /** Levels solid primary face (Play): primary fill, onPrimary glyph; activeTint fill while active. */
     bool solid = false;
+    /** When solid: fill with accent (violet) instead of primary — Filters CTA, etc. */
+    bool accentSolid = false;
     /** Levels outlined face (Record): surface + 18 % border; glyph in activeTint; filled while active. */
     bool outlined = false;
+    /** Left cell of a joined group (Levels tempo group): left-rounded tint, no border. */
+    bool groupLeft = false;
     float iconScale = 1.0f;
     /** When set, the button draws this label beside the icon and grows to fit. */
     juce::String caption;

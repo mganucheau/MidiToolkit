@@ -46,6 +46,13 @@ public:
     double playheadFraction() const;
     static constexpr int kRulerH = 14;
     static constexpr int kVelocityH = 40;
+    /** Right-click on the preview (Levels: the preview has no header row, so
+        Mute lives in this context menu). */
+    std::function<void(const juce::MouseEvent&)> onContextClick;
+    void mouseDown(const juce::MouseEvent& e) override
+    {
+        if (e.mods.isPopupMenu() && onContextClick) onContextClick(e);
+    }
 
 private:
     juce::Colour noteColour { 0xff6fb5f0 };
@@ -61,7 +68,7 @@ private:
     double playheadStep = 0.0;
     bool playing = false;
     double timeStretch = 1.0;
-    static constexpr float kGutterW = 20.0f;
+    static constexpr float kGutterW = 0.0f; // Levels preview: no key gutter
 };
 
 // Cupertino editor: clip header · toolbar · roll · velocity lane.

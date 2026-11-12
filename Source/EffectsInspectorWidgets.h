@@ -15,16 +15,16 @@ constexpr float kAnnotPt = 11.0f;
 constexpr float kPopupFontPt = 12.0f;
 constexpr float kSectionTitlePt = 12.0f;
 constexpr float kPaneTitlePt = 13.0f;
-constexpr int kSectionHeaderH = 26;   // Slightly taller device section headers
+constexpr int kSectionHeaderH = 36;   // Levels: flat 36 px section header
 constexpr int kSectionPadH = 12;       // chevron starts here
 constexpr int kSectionRowInset = 22;   // content indent past the chevron
-constexpr int kContentPadX = 8;        // left (inside the section frame; fits 275px column)
-constexpr int kContentPadR = 8;
-constexpr int kRowMinH = 24;
+constexpr int kContentPadX = 30;       // Levels: rows align under the section title
+constexpr int kContentPadR = 12;
+constexpr int kRowMinH = 28;      // Levels row height
 constexpr int kControlH = 24;
-constexpr int kSliderRowH = 24;
-constexpr int kLabelColW = 84;
-constexpr int kValueColW = 40;
+constexpr int kSliderRowH = 28;
+constexpr int kLabelColW = 72;    // Levels label column
+constexpr int kValueColW = 36;
 constexpr int kSelectW = 64;
 constexpr int kSelectHalfW = 120;
 constexpr int kHeaderIconW = 20; // match library sidebar glyph hit target
@@ -37,11 +37,11 @@ inline int toolkitDensity(int compact)
     const int v = currentDensity() == Density::Comfortable ? compact + 2 : compact;
     return metrics::scaled(v);
 }
-inline int toolkitRowGap()           { return toolkitDensity(8); }
+inline int toolkitRowGap()           { return toolkitDensity(4); }
 inline int toolkitSectionPadT()      { return 0; }
-inline int toolkitSectionPadB()      { return toolkitDensity(8); }
-inline int toolkitSectionPadBFolded(){ return toolkitDensity(8); }
-inline int toolkitTitleGap()         { return toolkitDensity(8); }
+inline int toolkitSectionPadB()      { return toolkitDensity(12); }
+inline int toolkitSectionPadBFolded(){ return toolkitDensity(12); }
+inline int toolkitTitleGap()         { return 0; }
 inline int toolkitBodyPadB()         { return toolkitDensity(8); }
 
 /** Solid accent behind type. Dark-mode blue is bright enough that black type
@@ -638,6 +638,8 @@ public:
     }
 
     int getValue() const { return value; }
+    /** No label → the track starts at the left edge (e.g. Settings › Contrast). */
+    int labelColW() const { return label.isEmpty() ? 0 : kLabelColW; }
     void setDefault(int d) { defV = juce::jlimit(minV, maxV, d); }
 
     void mouseMove(const juce::MouseEvent& e) override
@@ -717,7 +719,7 @@ private:
     juce::Rectangle<float> trackLane() const
     {
         auto r = getLocalBounds().toFloat();
-        r.removeFromLeft((float) kLabelColW + 10.0f);
+        r.removeFromLeft((float) labelColW() + 10.0f);
         r.removeFromRight((float) kValueColW + 8.0f);
         return r;
     }
@@ -734,7 +736,7 @@ private:
     {
         const auto& t = inspectorTokens();
         auto bounds = getLocalBounds();
-        auto labelR = bounds.removeFromLeft(kLabelColW);
+        auto labelR = bounds.removeFromLeft(labelColW());
         auto valueR = bounds.removeFromRight(kValueColW);
         const bool atDefault = value == defV;
         const auto text = valueText.isNotEmpty() ? valueText
@@ -765,6 +767,7 @@ private:
             g.fillRect(cx - 0.5f, lane.getCentreY() - 5.0f, 1.0f, 10.0f);
             auto fill = juce::Rectangle<float>::leftTopRightBottom(
                 juce::jmin(cx, x), track.getY(), juce::jmax(cx, x), track.getBottom());
+            // Levels: primary filled track (LvRow spec).
             g.setColour(ds::primary());
             g.fillRoundedRectangle(fill, 1.0f);
         }
@@ -1378,7 +1381,6 @@ public:
 
         if (labels.isEmpty()) return;
         // Levels segmented control: muted track, raised selected cell.
-        const float gapX = 0.0f;
         {
             auto bg = juce::Rectangle<float>(track.getX(), track.getCentreY() - 11.0f, track.getWidth(), 22.0f);
             g.setColour(ds::surface300());
@@ -1387,7 +1389,7 @@ public:
         const float cellW = (track.getWidth() - 4.0f) / (float) labels.size();
         for (int i = 0; i < labels.size(); ++i)
         {
-            auto cell = juce::Rectangle<float>(track.getX() + 2.0f + (cellW + gapX) * (float) i,
+            auto cell = juce::Rectangle<float>(track.getX() + 2.0f + cellW * (float) i,
                                                track.getCentreY() - 9.0f, cellW, 18.0f);
             if (i == index)
             {
@@ -1966,7 +1968,6 @@ private:
         const float whiteH = area.getHeight();
         const float blackW = (area.getWidth() / 7.0f) * 0.62f;
         const float blackH = whiteH * 0.58f;
-        const auto& t = inspectorTokens();
 
         auto enabled = [this](int pc)
         {
@@ -2311,49 +2312,18 @@ public:
 
     void paint(juce::Graphics& g) override
     {
-        // Groove device frame: surface-200 body, surface-300 header band, 1px line
-        // border, radius-md. Lit lock = accent; the border turns accent while dragged.
+        // Levels: raised section face (surface100) on surface000 body well.
         const int mods = modifiedCount();
         auto b = getLocalBounds().toFloat();
-        const float rad = ds::radius::md;
-        const auto surface = currentSurfaceStyle();
-        if (surface == SurfaceStyle::Depth)
-        {
-            g.setColour(juce::Colours::black.withAlpha(0.18f));
-            g.fillRoundedRectangle(b.translated(0.0f, 2.0f), rad);
-        }
-        if (surface == SurfaceStyle::Liquid)
-        {
-            g.setColour(ds::surface200().withAlpha(0.82f));
-            g.fillRoundedRectangle(b, rad);
-            g.setColour(juce::Colours::white.withAlpha(0.22f));
-            g.drawRoundedRectangle(b.reduced(0.5f), rad, 1.0f);
-        }
-        else
-        {
-            g.setColour(ds::surface200());
-            g.fillRoundedRectangle(b, rad);
-        }
+        g.setColour(ds::surface100());
+        g.fillRect(b);
 
         auto header = getLocalBounds().removeFromTop(kSectionHeaderH);
+        if (headerHover || dragging)
         {
-            juce::Graphics::ScopedSaveState ss(g);
-            juce::Path clip;
-            clip.addRoundedRectangle(b, rad);
-            g.reduceClipRegion(clip);
-            // Levels: flat header on the section surface; hover = 4% wash.
-            if (headerHover || dragging)
-            {
-                g.setColour(ds::ink().withAlpha(0.04f));
-                g.fillRect(header);
-            }
-            if (visibleRowCount() > 0)
-            {
-                g.setColour(ds::line());
-                g.fillRect(header.getX(), header.getBottom() - 1, header.getWidth(), 1);
-            }
+            g.setColour(ds::ink().withAlpha(dragging ? 0.07f : 0.04f));
+            g.fillRect(dragging ? getLocalBounds() : header);
         }
-
         auto chev = chevronBounds().toFloat().withSizeKeepingCentre(10.0f, 10.0f);
         drawStrokedChevron(g, chev, ds::inkMuted(), open);
 
@@ -2371,18 +2341,21 @@ public:
 
         if (showHeaderChrome && mods > 0)
         {
-            // Count-only badge: primary pill, on-primary mono digits.
-            titleR.removeFromLeft(6);
+            // Count-only badge: violet 12% tag, ink mono digits (Levels).
+            titleR.removeFromLeft(8);
             const auto txt = juce::String(mods);
-            const auto bf = monoFontFixed(11.0f, true);
-            const float bw = juce::jmax(16.0f, juce::GlyphArrangement::getStringWidth(bf, txt) + 8.0f);
-            auto badge = juce::Rectangle<float>((float) titleR.getX(), (float) titleR.getCentreY() - 8.0f, bw, 16.0f);
-            if (badge.getRight() <= (float) titleR.getRight())
+            const auto bf = monoFontFixed(12.0f, true);
+            const float bw = juce::jmax(20.0f, juce::GlyphArrangement::getStringWidth(bf, txt) + 12.0f);
+            // Levels: the count sits at the right of the header, before reset/lock.
+            const float rightEdge = showHeaderChrome ? (float) resetBounds().getX() - 6.0f
+                                                     : (float) getWidth() - 12.0f;
+            auto badge = juce::Rectangle<float>(rightEdge - bw, (float) titleR.getCentreY() - 10.0f, bw, 20.0f);
+            if (badge.getX() >= (float) titleR.getX())
             {
-                g.setColour(ds::primary());
-                g.fillRoundedRectangle(badge, 8.0f);
+                g.setColour(ds::acc().withAlpha(ds::dark() ? 0.22f : 0.12f));
+                g.fillRoundedRectangle(badge, ds::radius::sm);
                 g.setFont(bf);
-                g.setColour(ds::onPrimary());
+                g.setColour(ds::ink());
                 g.drawText(txt, badge.toNearestInt(), juce::Justification::centred, false);
             }
         }
@@ -2400,17 +2373,13 @@ public:
             {
                 ds::drawActive(g, lock, ds::radius::sm);
             }
-            else
-            {
-                g.setColour(ds::edge());
-                g.drawRoundedRectangle(lock.reduced(0.5f), ds::radius::sm, 1.0f);
-            }
+            // Unlocked: bare icon (Levels ghost icon button).
             drawIcon(g, locked ? icons::lockClosed : icons::lockOpen, lock.withSizeKeepingCentre(9.0f, 9.0f),
                      locked ? ds::acc() : ds::inkMuted(), 1.2f);
         }
 
         g.setColour(dragging ? ds::acc() : ds::line());
-        g.drawRoundedRectangle(b.reduced(0.5f), rad, dragging ? 1.5f : 1.0f);
+        g.fillRect(0, getHeight() - 1, getWidth(), 1);
     }
 
     juce::String title;
@@ -2455,20 +2424,20 @@ private:
     juce::Rectangle<int> lockBounds() const
     {
         auto h = getLocalBounds().removeFromTop(kSectionHeaderH);
-        h.removeFromRight(4);
+        h.removeFromRight(8);
         return h.removeFromRight(20);
     }
 
     juce::Rectangle<int> resetBounds() const
     {
         auto h = getLocalBounds().removeFromTop(kSectionHeaderH);
-        h.removeFromRight(4 + 20);
+        h.removeFromRight(8 + 20 + 4);
         return h.removeFromRight(20);
     }
 
     juce::Rectangle<int> chevronBounds() const
     {
-        return { 4, 0, 16, kSectionHeaderH };
+        return { 8, 0, 16, kSectionHeaderH };
     }
 
     /** Whole header except the reset and lock cells (when chrome is shown). */

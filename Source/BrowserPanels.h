@@ -705,6 +705,9 @@ public:
 
     void resized() override;
     void paint(juce::Graphics&) override;
+    void mouseDown(const juce::MouseEvent&) override;
+    void mouseMove(const juce::MouseEvent&) override;
+    void mouseExit(const juce::MouseEvent&) override;
     int idealHeight() const;
 
     /** Host the sidebar's search field in the search row. */
@@ -721,8 +724,12 @@ public:
     std::function<void()> onToggleSaved;
     std::function<void()> onRescan;
     std::function<void()> onToggleFilters;
+    /** Clears active browser filters (mockup Reset link on the summary strip). */
+    std::function<void()> onResetFilters;
 
 private:
+    juce::String filterStripText() const;
+
     juce::Component* search = nullptr;
     IconBtn btnSubfolders { icons::subfolders, "Include files in subfolders" };
     IconBtn btnGrid { icons::grid, "Grid view: files as clips in columns by kind" };
@@ -730,6 +737,12 @@ private:
     bool filtersOpen = false;
     int filtersActiveCount = 0;
     juce::String filtersSummary;
+    juce::String titleText;
+    int shownCount = 0;
+    int totalCount = 0;
+    juce::Rectangle<int> titleBounds, countBounds, filtersBadgeBounds;
+    juce::Rectangle<int> filterStripBounds, resetBounds;
+    bool resetHover = false;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(BrowserToolbar)
 };

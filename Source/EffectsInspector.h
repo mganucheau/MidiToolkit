@@ -300,7 +300,12 @@ private:
     fx::Divider pitchDividerB;
 
     juce::Viewport viewport;
-    juce::Component body;
+    /** Scroll body: surface000 ground; sections paint surface100 raised faces. */
+    struct BodyWell : juce::Component
+    {
+        void paint(juce::Graphics& g) override { g.fillAll(ds::surface000()); }
+    };
+    BodyWell body;
     bool notifyingHeight = false;
 
     static constexpr int kPanelW = 275;

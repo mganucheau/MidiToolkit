@@ -14,6 +14,7 @@ public:
 
     void resized() override;
     void paint(juce::Graphics&) override;
+    void paintOverChildren(juce::Graphics&) override;
     void mouseDown(const juce::MouseEvent&) override;
     void mouseDrag(const juce::MouseEvent&) override;
     void mouseDoubleClick(const juce::MouseEvent&) override;
@@ -61,10 +62,13 @@ public:
 
 private:
     void applyHeaderCaptions(bool withText);
+    /** 2 = Through+Piano roll+Toolkit, 1 = Through+Toolkit, 0 = icons only. */
+    void applyHeaderCaptionsTier(int tier);
     void refreshBpm();
     void timerCallback() override;
     bool hitInteractive(juce::Point<int> p) const;
     void paintLogo(juce::Graphics&, juce::Rectangle<int> area, float alpha) const;
+    juce::Rectangle<int> tempoGroupBounds;
     void paintLogoGlyph(juce::Graphics&, juce::Point<float> origin, float alpha) const;
     int logoMidiWidth() const;
 
@@ -77,6 +81,7 @@ private:
         std::function<void(double)> onCommitBpm;
         bool synced = true;
         bool editable = false;
+        bool grouped = false; // right cell of the tempo group (parent draws the frame)
         float foregroundAlpha = 1.0f;
 
         void setText(const juce::String& t);
@@ -153,11 +158,11 @@ private:
     IconBtn btnRecord { icons::record, "Record" };
     StatusPill statusPill;
     IconBtn btnSync { icons::sync, "Sync to host tempo" };
-    IconBtn btnPassthrough { icons::arrowsIn, "Passthrough" };
+    IconBtn btnPassthrough { icons::through, "Through" };
     DragChip btnDragToDaw { "Drag Me" };
     IconBtn btnEditor { icons::noteKeys, "Piano Roll" };
     IconBtn btnEffects { icons::knobs, "Toolkit" };
-    IconBtn btnSettings { icons::wrench, "Settings" };
+    IconBtn btnSettings { icons::gear, "Settings" };
     bool transportControlsVisible = true;
     bool compactChrome = false;
 

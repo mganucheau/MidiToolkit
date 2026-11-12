@@ -64,30 +64,30 @@ const Palette& palette()
         juce::Colour(0xff8b5cf6),   // logoNoteHi
     };
     static const Palette dark {
-        juce::Colour(0xff27272a),   // bg        = primary
+        juce::Colour(0xff27272a),   // bg        = mockup ground ~#272729
         juce::Colour(0xff27272a),   // chrome
-        juce::Colour(0xff303033),   // side      = white @ 4 %
+        juce::Colour(0xff303033),   // side      = raised ~#303032
         juce::Colour(0xff27272a),   // panel
-        juce::Colour(0xff2b2b2e),   // rollchrome= white @ 2 %
-        juce::Colour(0xff3d3d3f),   // hl        = white @ 10 %
-        juce::Colour(0xffffffff),   // tx        = surface
-        juce::Colour(0xffb1b1b2),   // tx2       = white @ 64 %
+        juce::Colour(0xff2b2b2e),   // rollchrome
+        juce::Colour(0xff3d3d3f),   // hl
+        juce::Colour(0xffffffff),   // tx
+        juce::Colour(0xffb1b1b2),   // tx2
         juce::Colour(0xffb1b1b2),   // tx3
-        juce::Colour(0xff8b5cf6),   // acc       = secondary
-        juce::Colour(0xff3d3357),   // selsoft   = secondary @ 22 %
+        juce::Colour(0xff7b5cff),   // acc       = mockup violet
+        juce::Colour(0xff3f3466),   // selsoft
         juce::Colour(0xff27272a),   // ctl
-        juce::Colour(0xff4e4e50),   // ctlb      = white @ 18 %
+        juce::Colour(0xff4e4e50),   // ctlb
         juce::Colour(0xff27272a),   // field
         juce::Colour(0xff4e4e50),   // trk
         rgba(255, 255, 255, 0.03f), // rowalt
-        juce::Colour(0xffffffff),   // note      = surface (white notes)
+        juce::Colour(0xffffffff),   // note
         juce::Colour(0xffd97706),   // stron
-        juce::Colour(0xff2e2e31),   // kw
-        juce::Colour(0xff5b5b5e),   // kb        = white @ 24 %
+        juce::Colour(0xff303033),   // kw
+        juce::Colour(0xff5b5b5e),   // kb
         rgba(255, 255, 255, 0.05f), // laneb
-        juce::Colour(0xff454548),   // beat      = white @ 14 %
+        juce::Colour(0xff454548),   // beat
         juce::Colour(0xffdc2626),   // kindDrums
-        juce::Colour(0xff8b5cf6),   // kindBass
+        juce::Colour(0xff7b5cff),   // kindBass
         juce::Colour(0xff16a34a),   // kindKeys
         juce::Colour(0xffd97706),   // kindPerc
         juce::Colour(0xff4e4e50),   // winbrd
@@ -99,7 +99,7 @@ const Palette& palette()
         juce::Colour(0xff27272a),   // kfOutW
         juce::Colour(0xff4e4e50),   // kfOutB
         juce::Colour(0xff303033),   // lensFill
-        juce::Colour(0xff8b5cf6),   // logoNoteHi
+        juce::Colour(0xff7b5cff),   // logoNoteHi
     };
 
     auto tinted = [](const Palette& src)
@@ -120,11 +120,14 @@ const Palette& palette()
 
     static Palette cached;
     static int cachedTheme = -1;
+    static int cachedContrast = -1;
     const int theme = themeIndex();
-    if (theme != cachedTheme)
+    const int contrast = tweaks().contrastPct.load();
+    if (theme != cachedTheme || contrast != cachedContrast)
     {
         cached = tinted(themeAt(theme).dark ? dark : light);
         cachedTheme = theme;
+        cachedContrast = contrast;
     }
     return cached;
 }
@@ -137,23 +140,24 @@ const Palette& palette()
         return tintForTheme(base); \
     }
 
-GP_TOKEN(surface000, 0xff27272a, 0xffffffff)   // ground
-GP_TOKEN(surface100, 0xff303033, 0xfff6f6f6)   // text/white @ 4 % (sidebar, wells)
-GP_TOKEN(surface200, 0xff27272a, 0xffffffff)   // control face = surface
-GP_TOKEN(surface300, 0xff363639, 0xffeeeff0)   // hover = text/white @ 7 %
-GP_TOKEN(line,       0xff3d3d3f, 0xffe7e8e9)   // @ 10 %
-GP_TOKEN(edge,       0xff4e4e50, 0xffd4d5d8)   // @ 18 %
+// Dark neutrals from mockup pixels: ground ~#272729, raised ~#303032.
+GP_TOKEN(surface000, 0xff27272a, 0xffffffff)   // ground (header / panels)
+GP_TOKEN(surface100, 0xff303033, 0xfff6f6f6)   // raised (sidebar, wells, toolkit)
+GP_TOKEN(surface200, 0xff27272a, 0xffffffff)   // control face = ground
+GP_TOKEN(surface300, 0xff363639, 0xffeeeff0)   // hover / grey count pills
+GP_TOKEN(line,       0xff3d3d3f, 0xffe7e8e9)   // hairline
+GP_TOKEN(edge,       0xff4e4e50, 0xffd4d5d8)   // edge
 GP_TOKEN(ink,        0xffffffff, 0xff111827)   // text
-GP_TOKEN(inkMuted,   0xffb1b1b2, 0xff676b75)   // @ 64 %
-GP_TOKEN(inkFaint,   0xffb1b1b2, 0xff676b75)   // @ 64 % (lowest text step)
+GP_TOKEN(inkMuted,   0xffb1b1b2, 0xff676b75)   // secondary @ ~64 %
+GP_TOKEN(inkFaint,   0xffb1b1b2, 0xff676b75)
 juce::Colour onAccent() { return juce::Colour(0xffffffff); }
 GP_TOKEN(play,       0xff16a34a, 0xff16a34a)   // success: playhead, previewing
 GP_TOKEN(record,     0xffdc2626, 0xffdc2626)   // danger
-GP_TOKEN(solo,       0xff8b5cf6, 0xff8b5cf6)   // secondary
+GP_TOKEN(solo,       0xff7b5cff, 0xff7b5cff)   // mockup violet
 GP_TOKEN(active,     0xffd97706, 0xffd97706)   // warning
 juce::Colour onLit() { return juce::Colour(0xffffffff); }
 GP_TOKEN(focus,      0xffffffff, 0xff27272a)   // 2 px primary ring
-GP_TOKEN(primary,    0xffffffff, 0xff27272a)   // solid actions: Play, Drag Me, active New
+GP_TOKEN(primary,    0xffffffff, 0xff27272a)   // solid actions: Play, Drag Me
 GP_TOKEN(onPrimary,  0xff27272a, 0xffffffff)
 GP_TOKEN(warning,    0xffd97706, 0xffd97706)
 
@@ -192,9 +196,10 @@ void popover(juce::Graphics& g, juce::Rectangle<float> r, float radius)
 
 void thumb(juce::Graphics& g, juce::Rectangle<float> thumb)
 {
-    // Levels handle: 12 px surface disc with a 2 px primary ring, no shadow.
-    const float d = juce::jlimit(10.0f, 14.0f, juce::jmin(thumb.getWidth(), thumb.getHeight()));
+    // Levels handle: 12 px surface disc with a 2 px violet ring (mockup).
+    const float d = 12.0f; juce::ignoreUnused(thumb.getWidth());
     const auto c = juce::Rectangle<float>(d, d).withCentre(thumb.getCentre());
+    // Levels (LvRow): 12 px surface disc with a 2 px primary ring.
     g.setColour(surface200());
     g.fillEllipse(c);
     g.setColour(primary());
@@ -209,12 +214,12 @@ juce::Font font(Type t)
     switch (t)
     {
         case Type::AppName:        return uiFontFixed(14.0f, true);
-        case Type::PanelHeading:   return uiFontFixed(14.0f, true);   // Levels 14 / 600
-        case Type::SectionLabel:   return monoFontFixed(12.0f).withExtraKerningFactor(0.03f);  // label-caps
-        case Type::TableHeader:    return monoFontFixed(12.0f).withExtraKerningFactor(0.03f);  // label-caps
+        case Type::PanelHeading:   return uiFontFixed(16.0f, true);   // browser folder title
+        case Type::SectionLabel:   return monoFontFixed(11.0f).withExtraKerningFactor(0.04f);  // label-caps
+        case Type::TableHeader:    return monoFontFixed(11.0f).withExtraKerningFactor(0.04f);  // label-caps
         case Type::Body:           return uiFontFixed(12.0f, false);  // body
         case Type::Metadata:       return monoFontFixed(12.0f);       // readout
-        case Type::Caption:        return uiFontFixed(12.0f, false);  // label
+        case Type::Caption:        return uiFontFixed(11.0f, false);  // label / filter summary
         case Type::NumericDisplay: return monoFontFixed(14.0f, true); // BPM readout
         case Type::Logo:           return grooveFont(14.0f * textIconScale(), 600).withExtraKerningFactor(-0.01f);
     }

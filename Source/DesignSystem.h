@@ -164,16 +164,16 @@ juce::Colour colour (Type t);
 /** §5 region metrics (logical px at Medium). */
 namespace region {
     constexpr int toolbarH     = 40;   // header
-    constexpr int sidebarW     = 180;  // library (Levels)
+    constexpr int sidebarW     = 200;  // library (Levels mockup)
     constexpr int fileListW    = 368;  // file list column
     constexpr int gridBrowserW = 484;  // five 96 px kind columns + hairlines
     constexpr int toolkitW     = 280;  // Levels: Toolkit + Generator column
     constexpr int rollMinW     = 320;
     constexpr int velocityH    = 100;
     constexpr int previewH     = 134;  // 14 ruler + 120 notes
-    constexpr int listRowH     = 26;
-    constexpr int listHeaderH  = 24;
-    constexpr int sidebarRowH  = 26;
+    constexpr int listRowH     = 28;  // Levels
+    constexpr int listHeaderH  = 28;  // Levels
+    constexpr int sidebarRowH  = 28;  // Levels
 }
 
 } // namespace ds
