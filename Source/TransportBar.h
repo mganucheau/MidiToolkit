@@ -158,7 +158,7 @@ private:
     IconBtn btnRecord { icons::record, "Record" };
     StatusPill statusPill;
     IconBtn btnSync { icons::sync, "Sync to host tempo" };
-    IconBtn btnPassthrough { icons::through, "Through" };
+    IconBtn btnPassthrough { icons::through, "Passthrough" };
     DragChip btnDragToDaw { "Drag Me" };
     IconBtn btnEditor { icons::noteKeys, "Piano Roll" };
     IconBtn btnEffects { icons::knobs, "Toolkit" };

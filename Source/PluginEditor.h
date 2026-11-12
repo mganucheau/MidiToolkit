@@ -115,6 +115,19 @@ private:
     };
     PassthroughVeil passthroughVeil;
 
+    /** Click-catcher behind the filter popover — dismisses without applying. */
+    class FilterDismissShield : public juce::Component
+    {
+    public:
+        std::function<void()> onDismiss;
+        void paint(juce::Graphics&) override {}
+        void mouseDown(const juce::MouseEvent&) override
+        {
+            if (onDismiss) onDismiss();
+        }
+    };
+    FilterDismissShield filterDismissShield;
+
     /** Drag handle between the file browser and the piano roll. */
     class PaneSplitter : public juce::Component
     {
@@ -220,6 +233,7 @@ private:
     {
         std::function<void()> onLayout;
         void resized() override { if (onLayout) onLayout(); }
+        void paint(juce::Graphics& g) override { g.fillAll(ds::surface000()); }
     };
     ContentHolder content;
 
@@ -258,7 +272,7 @@ private:
     /** 0 = file browser, 1 = generators. */
     int leftPaneTab = 0;
 
-    /** Groove preview header: clip name · bars · key, then Vel · Trim · Mute · Drag. */
+    /** Groove preview fold strip (like Velocity): chevron + title; body opens below. */
     class PreviewHeader : public juce::Component
     {
     public:
@@ -266,6 +280,7 @@ private:
         void paint(juce::Graphics&) override;
         void resized() override;
         void refresh();
+        void mouseDown(const juce::MouseEvent&) override;
         MidiToolkitEditor& owner;
 
         struct DragBtn : ChipBtn
@@ -292,6 +307,7 @@ private:
         ChipBtn btnMute { "Mute" };
         DragBtn btnDrag { "Drag", icons::dragOut };
         juce::String name, meta;
+        static constexpr int kHeaderH = 22;
     };
     PreviewHeader previewHeader { *this };
     KindGridView kindGrid;
@@ -388,6 +404,8 @@ private:
     int passthroughMaxHeight() const;
     /** Through mode fits the file browser, the Toolkit, and the roll when it is open. */
     int passthroughWindowWidth() const;
+    /** Tallest useful window height for the current layout (no empty void). */
+    int filledContentHeight() const;
     bool recordFromThrough = false;
     void syncPassthroughWindowHeight();
     /** User-dragged passthrough height above the default fold. 0 = use default. */

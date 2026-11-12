@@ -130,11 +130,14 @@ const Palette& palette()
         TINT(bg); TINT(chrome); TINT(side); TINT(panel); TINT(rollchrome); TINT(hl);
         TINT(tx); TINT(tx2); TINT(tx3); TINT(acc); TINT(selsoft); TINT(ctl); TINT(ctlb);
         TINT(field); TINT(trk); TINT(rowalt); TINT(note); TINT(stron);
-        TINT(kw); TINT(kb); TINT(laneb); TINT(beat);
+        TINT(laneb); TINT(beat);
         TINT(kindDrums); TINT(kindBass); TINT(kindKeys); TINT(kindPerc);
         TINT(winbrd); TINT(hoverWash); TINT(head); TINT(well);
         TINT(kfInW); TINT(kfInB); TINT(kfOutW); TINT(kfOutB);
         TINT(lensFill); TINT(logoNoteHi);
+        // Piano keys stay literal white/black in every theme (legibility).
+        p.kw = juce::Colours::white;
+        p.kb = juce::Colours::black;
 #undef TINT
         return p;
     };
@@ -146,7 +149,68 @@ const Palette& palette()
     const int separation = tweaks().separationPct.load();
     if (theme != cachedTheme || separation != cachedSeparation)
     {
-        cached = tinted(themeAt(theme).dark ? dark : light);
+        const auto& spec = themeAt(theme);
+        cached = tinted(spec.dark ? dark : light);
+
+        // Skill-pack overrides: rebuild neutrals around the theme surface/text/accent.
+        if (spec.surface != 0)
+        {
+            const auto surf = juce::Colour(spec.surface);
+            cached.bg = surf;
+            cached.chrome = surf;
+            cached.panel = surf;
+            cached.ctl = surf;
+            cached.field = surf;
+            cached.head = surf;
+            cached.lensFill = surf.interpolatedWith(spec.dark ? juce::Colours::white
+                                                              : juce::Colours::black, 0.04f);
+            cached.side = surf.interpolatedWith(spec.dark ? juce::Colours::white
+                                                          : juce::Colours::black, 0.05f);
+            cached.well = cached.side;
+            cached.rollchrome = surf.interpolatedWith(spec.dark ? juce::Colours::white
+                                                                : juce::Colours::black, 0.03f);
+        }
+        if (spec.text != 0)
+        {
+            const auto ink = juce::Colour(spec.text);
+            cached.tx = ink;
+            cached.tx2 = ink.withMultipliedAlpha(0.70f).overlaidWith(cached.bg.withAlpha(0.0f));
+            cached.tx2 = cached.bg.interpolatedWith(ink, 0.64f);
+            cached.tx3 = cached.bg.interpolatedWith(ink, 0.48f);
+            cached.hl = cached.bg.interpolatedWith(ink, 0.14f);
+            cached.ctlb = cached.bg.interpolatedWith(ink, 0.18f);
+            cached.trk = cached.ctlb;
+            cached.winbrd = cached.ctlb;
+            cached.beat = cached.bg.interpolatedWith(ink, 0.16f);
+            cached.rowalt = ink.withAlpha(spec.dark ? 0.04f : 0.03f);
+            cached.laneb = ink.withAlpha(spec.dark ? 0.07f : 0.05f);
+            cached.hoverWash = ink.withAlpha(0.07f);
+        }
+        if (spec.accent != 0)
+        {
+            cached.acc = juce::Colour(spec.accent);
+            cached.selsoft = cached.bg.interpolatedWith(cached.acc, spec.dark ? 0.28f : 0.14f);
+            cached.kindBass = cached.acc;
+            cached.logoNoteHi = cached.acc;
+        }
+        if (spec.primary != 0)
+        {
+            cached.note = juce::Colour(spec.primary);
+            cached.kfInW = cached.note;
+            cached.kfInB = cached.note;
+        }
+        // Prefer accent for note blocks when primary is too close to the roll surface
+        // (e.g. near-white/black primaries) so notes stay legible.
+        if (cached.note.getPerceivedBrightness() > 0.82f
+            || std::abs(cached.note.getPerceivedBrightness() - cached.panel.getPerceivedBrightness()) < 0.18f)
+        {
+            if (spec.accent != 0)
+                cached.note = juce::Colour(spec.accent);
+        }
+        // Keys never follow skill-pack surface/text overrides.
+        cached.kw = juce::Colours::white;
+        cached.kb = juce::Colours::black;
+
         cachedTheme = theme;
         cachedSeparation = separation;
     }
@@ -169,25 +233,50 @@ const Palette& palette()
         return tintForTheme(base); \
     }
 
-// Dark neutrals from mockup pixels: ground ~#272729, raised ~#303032.
-GP_TOKEN(surface000, 0xff27272a, 0xffffffff)   // ground (header / panels)
-GP_SEP_TOKEN(surface100, 0xff303033, 0xfff6f6f6)   // raised (sidebar, wells, toolkit)
-GP_TOKEN(surface200, 0xff27272a, 0xffffffff)   // control face = ground
-GP_SEP_TOKEN(surface300, 0xff363639, 0xffeeeff0)   // hover / grey count pills
-GP_SEP_TOKEN(line,       0xff3d3d3f, 0xffe7e8e9)   // hairline
-GP_SEP_TOKEN(edge,       0xff4e4e50, 0xffd4d5d8)   // edge
-GP_TOKEN(ink,        0xffffffff, 0xff111827)   // text
-GP_TOKEN(inkMuted,   0xffb1b1b2, 0xff676b75)   // secondary @ ~64 %
-GP_TOKEN(inkFaint,   0xffb1b1b2, 0xff676b75)
+namespace {
+juce::Colour themedPrimaryColour()
+{
+    const auto& spec = themeAt(themeIndex());
+    if (spec.primary != 0)
+        return juce::Colour(spec.primary);
+    if (spec.accent != 0)
+        return juce::Colour(spec.accent);
+    return juce::Colour(usesDarkAppearance() ? 0xffffffffu : 0xff27272au);
+}
+} // namespace
+
+// Surfaces / ink follow the active theme palette (classic tint or skill-pack).
+juce::Colour surface000() { return palette().bg; }
+juce::Colour surface100() { return palette().side; }
+juce::Colour surface200() { return palette().ctl; }
+juce::Colour surface300() { return palette().rollchrome.interpolatedWith(palette().tx, 0.08f); }
+juce::Colour line()       { return palette().hl; }
+juce::Colour edge()
+{
+    auto e = palette().ctlb;
+    const float w = themeBorderPx();
+    if (w > 1.5f) // brutal themes: stronger edge
+        e = palette().tx.withAlpha(usesDarkAppearance() ? 0.55f : 0.35f);
+    return e;
+}
+juce::Colour ink()      { return palette().tx; }
+juce::Colour inkMuted() { return palette().tx2; }
+juce::Colour inkFaint() { return palette().tx3; }
 juce::Colour onAccent() { return juce::Colour(0xffffffff); }
 GP_TOKEN(play,       0xff16a34a, 0xff16a34a)   // success: playhead, previewing
 GP_TOKEN(record,     0xffdc2626, 0xffdc2626)   // danger
-GP_TOKEN(solo,       0xff7b5cff, 0xff7b5cff)   // mockup violet
 GP_TOKEN(active,     0xffd97706, 0xffd97706)   // warning
 juce::Colour onLit() { return juce::Colour(0xffffffff); }
 GP_TOKEN(focus,      0xffffffff, 0xff27272a)   // 2 px primary ring
-GP_TOKEN(primary,    0xffffffff, 0xff27272a)   // solid actions: Play, Drag Me
-GP_TOKEN(onPrimary,  0xff27272a, 0xffffffff)
+juce::Colour primary() { return themedPrimaryColour(); }
+juce::Colour onPrimary() { return contrastInkOn(primary()); }
+juce::Colour solo()
+{
+    const auto& spec = themeAt(themeIndex());
+    if (spec.accent != 0)
+        return juce::Colour(spec.accent);
+    return tintForTheme(juce::Colour(0xff7b5cff));
+}
 GP_TOKEN(warning,    0xffd97706, 0xffd97706)
 
 #undef GP_TOKEN
@@ -204,24 +293,100 @@ juce::Colour onClip() { return juce::Colour(0xff141414); }
 
 void drawActive(juce::Graphics& g, juce::Rectangle<float> r, float radius)
 {
-    g.setColour(selsoft());
-    g.fillRoundedRectangle(r, radius);
+    // Clip the tint fill so AA corners never reveal a white parent behind.
+    juce::Path path;
+    path.addRoundedRectangle(r, radius);
+    {
+        juce::Graphics::ScopedSaveState ss(g);
+        g.reduceClipRegion(path);
+        g.setColour(selsoft());
+        g.fillRect(r);
+    }
     g.setColour(acc());
     g.drawRoundedRectangle(r.reduced(0.5f), radius, 1.0f);
 }
 
 namespace shadow {
 
-// Groove Panel: nothing docked casts a shadow. Kept as no-ops so call sites compile.
-void control(juce::Graphics&, juce::Rectangle<float>, float) {}
-void card(juce::Graphics&, juce::Rectangle<float>, float) {}
+namespace {
+void paintDrop(juce::Graphics& g, juce::Rectangle<float> r, float radius,
+               float dy, float blur, float alpha)
+{
+    juce::ignoreUnused(blur);
+    g.setColour(juce::Colours::black.withAlpha(alpha));
+    g.fillRoundedRectangle(r.translated(0.0f, dy), radius);
+}
+
+void paintNeo(juce::Graphics& g, juce::Rectangle<float> r, float radius)
+{
+    // Soft extruded pair: light top-left, dark bottom-right.
+    g.setColour(juce::Colours::white.withAlpha(usesDarkAppearance() ? 0.06f : 0.55f));
+    g.drawRoundedRectangle(r.translated(-1.0f, -1.0f), radius, 1.2f);
+    g.setColour(juce::Colours::black.withAlpha(usesDarkAppearance() ? 0.35f : 0.12f));
+    g.drawRoundedRectangle(r.translated(1.5f, 1.5f), radius, 1.4f);
+}
+} // namespace
+
+void control(juce::Graphics& g, juce::Rectangle<float> r, float radius)
+{
+    switch (themeDepth())
+    {
+        case ThemeDepth::Soft:
+            paintDrop(g, r, radius, 1.0f, 4.0f, 0.12f);
+            break;
+        case ThemeDepth::Glass:
+            g.setColour(juce::Colours::white.withAlpha(usesDarkAppearance() ? 0.08f : 0.35f));
+            g.drawRoundedRectangle(r.reduced(0.5f), radius, 1.0f);
+            paintDrop(g, r, radius, 2.0f, 8.0f, 0.10f);
+            break;
+        case ThemeDepth::Neo:
+            paintNeo(g, r, radius);
+            break;
+        case ThemeDepth::Brutal:
+        {
+            // Hard offset block sits under the face — caller should inset `r`
+            // so this stays inside the component clip.
+            const float o = juce::jmin(3.0f, themeBorderPx());
+            g.setColour(ink().withAlpha(0.90f));
+            g.fillRoundedRectangle(r.translated(o, o), 0.0f);
+            break;
+        }
+        case ThemeDepth::Flat:
+        default:
+            break;
+    }
+}
+
+void card(juce::Graphics& g, juce::Rectangle<float> r, float radius)
+{
+    control(g, r, radius);
+}
 
 void popover(juce::Graphics& g, juce::Rectangle<float> r, float radius)
 {
-    // Levels: no drop shadows. A popover separates by its 18 % border and surface fill.
-    juce::ignoreUnused(g, r, radius);
+    // Inset so thick brutal borders / offset shadows never clip at the window edge.
+    const float border = juce::jmax(1.0f, themeBorderPx());
+    const float inset = themeDepth() == ThemeDepth::Brutal ? border + 1.0f : 0.0f;
+    auto face = r.reduced(inset);
+    switch (themeDepth())
+    {
+        case ThemeDepth::Soft:
+        case ThemeDepth::Glass:
+            paintDrop(g, face.expanded(1.0f), radius, 4.0f, 16.0f, 0.18f);
+            break;
+        case ThemeDepth::Neo:
+            paintNeo(g, face, radius);
+            break;
+        case ThemeDepth::Brutal:
+            g.setColour(ink());
+            g.fillRoundedRectangle(face.translated(border, border), 0.0f);
+            break;
+        case ThemeDepth::Flat:
+        default:
+            break;
+    }
     g.setColour(edge());
-    g.drawRoundedRectangle(r.reduced(0.5f), radius, 1.0f);
+    g.drawRoundedRectangle(face.reduced(0.5f), radius, border);
 }
 
 void thumb(juce::Graphics& g, juce::Rectangle<float> thumb)

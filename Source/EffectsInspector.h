@@ -169,12 +169,10 @@ private:
     fx::FlatSwitch trimSwitch;
     fx::FlatSwitch reverseSwitch;
     fx::FlatSwitch invertSwitch;
-    fx::FlatSwitch selectedNotesSwitch;
     fx::FlatPopup extendPopup;
     fx::InlineRow extendRow;
     fx::InlineRow reverseRow;
     fx::InlineRow invertRow;
-    fx::InlineRow selectedNotesRow;
 
     fx::FlatPopup swingTimePopup;
     fx::FlatPopup quantizeTimePopup;

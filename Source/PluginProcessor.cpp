@@ -88,8 +88,8 @@ void MidiToolkitProcessor::applySharedUiSessionFromLibrary()
     tweaks().size.store(juce::jlimit(0, kNumContentSizes - 1, s.tweakSize));
     tweaks().textScalePct.store(juce::jlimit(60, 150, s.tweakTextScalePct));
     tweaks().appearance.store(juce::jlimit(0, 2, s.tweakAppearance));
-    tweaks().lightTheme.store(juce::jlimit(0, 9, s.tweakLightTheme));
-    tweaks().darkTheme.store(juce::jlimit(0, 9, s.tweakDarkTheme));
+    tweaks().lightTheme.store(juce::jlimit(0, kNumThemesPerFamily - 1, s.tweakLightTheme));
+    tweaks().darkTheme.store(juce::jlimit(0, kNumThemesPerFamily - 1, s.tweakDarkTheme));
     tweaks().showTooltips.store(s.tweakShowTooltips != 0 ? 1 : 0);
     tweaks().fontFamily.store(juce::jlimit(0, (int) FontFamily::Count - 1, s.tweakFontFamily));
     tweaks().surfaceStyle.store(juce::jlimit(0, (int) SurfaceStyle::Count - 1, s.tweakSurfaceStyle));
@@ -390,9 +390,9 @@ void MidiToolkitProcessor::processBlock(juce::AudioBuffer<float>& buffer,
     }
     wasSounding_ = true;
 
-    const double mult = juce::jlimit(0.25, 4.0, bpmMultiplier.load());
-    double bpm = synced ? hostBpm.load() * mult : freeBpm.load();
-    double beatPos = synced ? hostBeatPos.load() * mult : freerunBeat.load();
+    // Half/Double retimes notes via stretch only — playhead rate stays host/free tempo.
+    double bpm = synced ? hostBpm.load() : freeBpm.load();
+    double beatPos = synced ? hostBeatPos.load() : freerunBeat.load();
     if (bpm <= 0.0) bpm = 120.0;
 
     const double secPerBeat = 60.0 / bpm;
@@ -492,13 +492,9 @@ void MidiToolkitProcessor::processBlock(juce::AudioBuffer<float>& buffer,
         {
             // Map host (or session/host-loop) phase into the clip, then into
             // the piano-roll loop region so handles define the looping length.
+            // Half/Double stretches notes only — phase follows host/free tempo.
             double phase = beatPos;
-            if (mult != 1.0)
-            {
-                phase = std::fmod(beatPos, clipLen);
-                if (phase < 0.0) phase += clipLen;
-            }
-            else if (hostLoopActive.load())
+            if (hostLoopActive.load())
             {
                 const double ls = hostLoopPpqStart.load();
                 const double le = hostLoopPpqEnd.load();
@@ -1181,21 +1177,22 @@ void MidiToolkitProcessor::setStateInformation(const void* data, int sizeInBytes
                 if (catalog >= 2)
                 {
                     tweaks().appearance.store(juce::jlimit(0, 2, xml->getIntAttribute("tweakAppearance", 0)));
-                    tweaks().lightTheme.store(juce::jlimit(0, 9, xml->getIntAttribute("tweakLightTheme", 5)));
-                    tweaks().darkTheme.store(juce::jlimit(0, 9, xml->getIntAttribute("tweakDarkTheme", 0)));
+                    tweaks().lightTheme.store(juce::jlimit(0, kNumThemesPerFamily - 1, xml->getIntAttribute("tweakLightTheme", kNeobrutalTheme)));
+                    tweaks().darkTheme.store(juce::jlimit(0, kNumThemesPerFamily - 1, xml->getIntAttribute("tweakDarkTheme", kNeobrutalTheme)));
                 }
                 else if (catalog == 1)
                 {
+                    // Legacy catalog v1: absolute 0–9 light / 10–19 dark.
                     const int named = juce::jlimit(0, 19, xml->getIntAttribute("tweakAppearance", 5));
                     tweaks().appearance.store(named >= 10 ? (int) Appearance::Dark : (int) Appearance::Light);
-                    tweaks().lightTheme.store(named < 10 ? named : 5);
-                    tweaks().darkTheme.store(named >= 10 ? named - 10 : 0);
+                    tweaks().lightTheme.store(named < 10 ? named : kNeobrutalTheme);
+                    tweaks().darkTheme.store(named >= 10 ? named - 10 : kNeobrutalTheme);
                 }
                 else
                 {
                     tweaks().appearance.store(migrateThemeIndex(xml->getIntAttribute("tweakAppearance", 0), false));
-                    tweaks().lightTheme.store(5);
-                    tweaks().darkTheme.store(0);
+                    tweaks().lightTheme.store(kNeobrutalTheme);
+                    tweaks().darkTheme.store(kNeobrutalTheme);
                 }
             }
             tweaks().showTooltips.store(xml->getIntAttribute("tweakShowTooltips", 1) != 0 ? 1 : 0);

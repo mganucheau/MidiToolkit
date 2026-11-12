@@ -111,14 +111,31 @@ void drawInspectorControlSurface(juce::Graphics& g, juce::Rectangle<float> r,
                                  bool over, bool down)
 {
     const auto& t = inspectorTokens();
+    const float rad = metrics::controlRadius();
+    auto face = r;
+    // Brutal: reserve room for the hard offset shadow so it never covers the face
+    // or gets clipped into a misaligned charcoal slab.
+    if (themeDepth() == ThemeDepth::Brutal)
+    {
+        const float o = juce::jmin(3.0f, themeBorderPx());
+        face = r.withTrimmedRight(o).withTrimmedBottom(o);
+        ds::shadow::control(g, face, 0.0f);
+    }
+    else
+    {
+        ds::shadow::control(g, face, rad);
+    }
+
     auto fill = t.controlSurface;
     if (down) fill = fill.darker(t.dark ? 0.10f : 0.06f);
     else if (over) fill = t.controlSurfaceHi;
     g.setColour(fill);
-    g.fillRoundedRectangle(r, metrics::controlRadius);
-    g.setColour(t.controlHairline);
-    g.drawRoundedRectangle(r.reduced(0.25f), metrics::controlRadius, 1.0f);
-    ds::shadow::control(g, r, metrics::controlRadius);
+    g.fillRoundedRectangle(face, rad);
+    const float stroke = themeDepth() == ThemeDepth::Brutal
+                             ? juce::jmax(1.5f, themeBorderPx())
+                             : 1.0f;
+    g.setColour(themeDepth() == ThemeDepth::Brutal ? ds::ink() : t.controlHairline);
+    g.drawRoundedRectangle(face.reduced(stroke * 0.5f), rad, stroke);
 }
 
 void drawInspectorDivider(juce::Graphics& g, juce::Rectangle<int> bounds)
@@ -178,8 +195,28 @@ static juce::Font makeUiFont(float pt, bool semibold)
     const int weight = semibold ? 600 : (pt < 12.0f ? 500 : 400);
     const auto family = (FontFamily) juce::jlimit(0, (int) FontFamily::Count - 1,
                                                   tweaks().fontFamily.load());
+    // Skill themes can steer typeface when the user leaves Font on Archivo/Inter.
     if (family == FontFamily::Archivo)
-        return grooveFont(pt, weight, false);
+    {
+        switch (themeFace())
+        {
+            case ThemeFace::Mono:
+                return grooveFont(pt, weight, true);
+            case ThemeFace::Serif:
+            {
+                const int flags = semibold ? juce::Font::bold : juce::Font::plain;
+                return juce::Font(juce::FontOptions("New York", pt, flags));
+            }
+            case ThemeFace::Rounded:
+            {
+                const int flags = semibold ? juce::Font::bold : juce::Font::plain;
+                return juce::Font(juce::FontOptions("SF Pro Rounded", pt, flags));
+            }
+            case ThemeFace::Sans:
+            default:
+                return grooveFont(pt, weight, false);
+        }
+    }
 
     juce::String name = "Helvetica Neue";
     if (family == FontFamily::System)
@@ -498,11 +535,11 @@ void PatternFlowLookAndFeel::drawButtonBackground(juce::Graphics& g, juce::Butto
         if (down) fill = fill.darker(0.12f);
         else if (highlighted) fill = fill.brighter(0.06f);
         g.setColour(fill);
-        g.fillRoundedRectangle(bounds, metrics::chipRadius);
+        g.fillRoundedRectangle(bounds, metrics::chipRadius());
         if (pressA > 0.0f)
         {
             g.setColour(juce::Colours::white.withAlpha(pressA));
-            g.fillRoundedRectangle(bounds, metrics::chipRadius);
+            g.fillRoundedRectangle(bounds, metrics::chipRadius());
         }
         return;
     }
@@ -512,7 +549,7 @@ void PatternFlowLookAndFeel::drawButtonBackground(juce::Graphics& g, juce::Butto
         if (pressA > 0.0f)
         {
             g.setColour(colours::controlFill());
-            g.fillRoundedRectangle(bounds, metrics::chipRadius);
+            g.fillRoundedRectangle(bounds, metrics::chipRadius());
         }
         return;
     }
@@ -530,7 +567,7 @@ void PatternFlowLookAndFeel::drawButtonBackground(juce::Graphics& g, juce::Butto
     if (pressA > 0.0f)
     {
         g.setColour(colours::controlFill().withAlpha(0.5f + pressA));
-        g.fillRoundedRectangle(bounds, metrics::chipRadius);
+        g.fillRoundedRectangle(bounds, metrics::chipRadius());
     }
 }
 
@@ -611,15 +648,22 @@ void PatternFlowLookAndFeel::drawToggleButton(juce::Graphics& g, juce::ToggleBut
     juce::ignoreUnused(highlighted, down);
     const bool on = button.getToggleState();
     auto b = button.getLocalBounds().toFloat().reduced(1.0f);
-    const float h = b.getHeight();
-    const float w = h * 1.75f;
-    auto track = juce::Rectangle<float>(b.getX(), b.getY() + (b.getHeight() - h * 0.72f) * 0.5f, w, h * 0.72f);
-    g.setColour(on ? colours::accent() : colours::controlFill());
-    g.fillRoundedRectangle(track, track.getHeight() * 0.5f);
-    const float knob = track.getHeight() - 4.0f;
-    const float kx = on ? track.getRight() - knob - 2.0f : track.getX() + 2.0f;
-    g.setColour(juce::Colours::white);
-    g.fillEllipse(kx, track.getCentreY() - knob * 0.5f, knob, knob);
+    const float h = juce::jmin(b.getHeight(), b.getHeight() * 0.72f + 4.0f);
+    const float trackH = juce::jmin(h * 0.72f, b.getHeight() - 2.0f);
+    const float w = trackH * 1.75f;
+    auto track = juce::Rectangle<float>(b.getX(), b.getCentreY() - trackH * 0.5f, w, trackH);
+    juce::Path path;
+    path.addRoundedRectangle(track, track.getHeight() * 0.5f);
+    {
+        juce::Graphics::ScopedSaveState ss(g);
+        g.reduceClipRegion(path);
+        g.setColour(on ? colours::accent() : colours::controlFill());
+        g.fillRect(track);
+        const float knob = juce::jmax(6.0f, track.getHeight() - 4.0f);
+        const float kx = on ? track.getRight() - knob - 2.0f : track.getX() + 2.0f;
+        g.setColour(ds::onPrimary());
+        g.fillEllipse(kx, track.getCentreY() - knob * 0.5f, knob, knob);
+    }
     g.setColour(button.findColour(juce::ToggleButton::textColourId));
     g.setFont(fontFor(TextStyle::Body));
     g.drawFittedText(button.getButtonText(), button.getLocalBounds().withTrimmedLeft((int) w + 8),
@@ -632,9 +676,9 @@ void PatternFlowLookAndFeel::drawComboBox(juce::Graphics& g, int width, int heig
     auto bounds = juce::Rectangle<float>(0, 0, (float) width, (float) height).reduced(0.5f);
     const bool focused = box.hasKeyboardFocus(true);
     g.setColour(colours::bgLight());
-    g.fillRoundedRectangle(bounds, metrics::cornerRadius);
+    g.fillRoundedRectangle(bounds, metrics::cornerRadius());
     g.setColour(focused ? colours::accent() : colours::separator());
-    g.drawRoundedRectangle(bounds, metrics::cornerRadius, focused ? 1.5f : 0.5f);
+    g.drawRoundedRectangle(bounds, metrics::cornerRadius(), focused ? 1.5f : 0.5f);
 }
 
 void PatternFlowLookAndFeel::drawFileBrowserRow(juce::Graphics& g, int width, int height,
@@ -681,7 +725,7 @@ void PatternFlowLookAndFeel::drawTextEditorOutline(juce::Graphics& g, int width,
     auto bounds = juce::Rectangle<float>(0, 0, (float) width, (float) height).reduced(0.5f);
     const bool focused = ed.hasKeyboardFocus(true);
     g.setColour(focused ? colours::accent() : colours::separator());
-    g.drawRoundedRectangle(bounds, metrics::cornerRadius, focused ? 1.5f : 0.5f);
+    g.drawRoundedRectangle(bounds, metrics::cornerRadius(), focused ? 1.5f : 0.5f);
 }
 
 void PatternFlowLookAndFeel::drawPopupMenuBackground(juce::Graphics& g, int width, int height)
@@ -734,12 +778,12 @@ void PatternFlowLookAndFeel::drawPopupMenuItem(juce::Graphics& g, const juce::Re
     if (isHighlighted && isActive)
     {
         g.setColour(colours::accent());
-        g.fillRoundedRectangle(r, metrics::chipRadius);
+        g.fillRoundedRectangle(r, metrics::chipRadius());
     }
     else if (isTicked)
     {
         g.setColour(colours::accent().withAlpha(0.14f));
-        g.fillRoundedRectangle(r, metrics::chipRadius);
+        g.fillRoundedRectangle(r, metrics::chipRadius());
     }
 
     auto textArea = area.reduced(12, 0);
@@ -824,33 +868,38 @@ void PatternFlowLookAndFeel::drawTooltip(juce::Graphics& g, const juce::String& 
     g.setColour(juce::Colour(0xff5a3a00).withAlpha(0.35f));
     g.drawRoundedRectangle(bounds.reduced(0.5f), radius, 1.0f);
 
-    g.setColour(juce::Colour(0xff1a1200));
-    g.setFont(uiFont(11.5f, false));
-    g.drawFittedText(text, bounds.reduced(9.0f, 6.0f).toNearestInt(),
-                     juce::Justification::centredLeft, 4);
+    // Single-line tips stay one line; wrap only when the string is long.
+    // Use TextLayout (same as getTooltipBounds) so glyphs never squash narrow.
+    const auto font = uiFont(12.0f, false);
+    const auto textArea = bounds.reduced(10.0f, 7.0f);
+    juce::AttributedString as;
+    as.setJustification(juce::Justification::centredLeft);
+    as.append(text.removeCharacters("\r"), font, juce::Colour(0xff1a1200));
+    juce::TextLayout layout;
+    layout.createLayout(as, textArea.getWidth());
+    layout.draw(g, textArea);
 }
 
 juce::Rectangle<int> PatternFlowLookAndFeel::getTooltipBounds(const juce::String& tipText,
                                                               juce::Point<int> screenPos,
                                                               juce::Rectangle<int> parentArea)
 {
-    const auto font = uiFont(11.5f, false);
-    const int maxW = 260;
-    int textW = 0;
-    int lines = 1;
-    {
-        juce::AttributedString as;
-        as.setJustification(juce::Justification::centredLeft);
-        as.append(tipText, font, juce::Colour(0xff1a1200));
-        juce::TextLayout layout;
-        layout.createLayout(as, (float) maxW);
-        textW = (int) std::ceil(layout.getWidth());
-        lines = juce::jmax(1, (int) std::ceil(layout.getHeight() / font.getHeight()));
-    }
-    const int padX = 18;
-    const int padY = 12;
-    const int w = juce::jlimit(40, maxW + padX, textW + padX);
-    const int h = (int) std::ceil(font.getHeight() * (float) lines) + padY;
+    const auto font = uiFont(12.0f, false);
+    const juce::String clean = tipText.removeCharacters("\r");
+    const int maxW = 320;
+    const float singleW = juce::GlyphArrangement::getStringWidth(font, clean);
+    const float layoutW = singleW <= (float) maxW - 20.0f
+                              ? juce::jmax(40.0f, singleW)
+                              : (float) maxW - 20.0f;
+    juce::AttributedString as;
+    as.setJustification(juce::Justification::centredLeft);
+    as.append(clean, font, juce::Colour(0xff1a1200));
+    juce::TextLayout layout;
+    layout.createLayout(as, layoutW);
+    const int padX = 22;
+    const int padY = 16;
+    const int w = juce::jlimit(48, maxW, (int) std::ceil(layout.getWidth()) + padX);
+    const int h = juce::jmax(28, (int) std::ceil(layout.getHeight()) + padY);
 
     int x = screenPos.x + 8;
     int y = screenPos.y + 22;

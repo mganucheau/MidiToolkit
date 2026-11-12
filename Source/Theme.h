@@ -13,17 +13,41 @@ enum class ContentSize { Small, Medium, Large };
 /** Settings → Appearance: Auto follows the OS; Light/Dark pick a family. */
 enum class Appearance { System = 0, Light = 1, Dark = 2 };
 
-/** Named themes. Indexes 0–9 are light, 10–19 are dark. */
+/** Depth / chrome personality for skill themes (layout stays the same). */
+enum class ThemeDepth : uint8_t { Flat = 0, Soft = 1, Glass = 2, Neo = 3, Brutal = 4 };
+/** Preferred interface typeface family for a theme. */
+enum class ThemeFace : uint8_t { Sans = 0, Rounded = 1, Mono = 2, Serif = 3 };
+
+/** Named themes. First half of the catalog is light, second half is dark.
+    Indexes 0–9 / 30–39 are the classic tint themes; 10–29 / 40–59 are skill packs. */
 struct ThemeSpec
 {
     const char* name;
     bool dark;
-    float hue;
-    float amount;
-    float lift;
+    float hue;     // classic tint hue (0–1)
+    float amount;  // classic tint strength
+    float lift;    // classic brightness lift
+    /** 0 = keep Levels token; otherwise explicit ARGB override. */
+    juce::uint32 accent = 0;
+    juce::uint32 surface = 0;
+    juce::uint32 text = 0;
+    juce::uint32 primary = 0; // solid actions / note fill preference
+    float radiusSm = 0.0f;    // 0 → 4
+    float radiusMd = 0.0f;    // 0 → 8
+    float spaceScale = 1.0f;  // padding/gap multiplier
+    ThemeDepth depth = ThemeDepth::Flat;
+    ThemeFace face = ThemeFace::Sans;
+    float borderPx = 1.0f;
 };
 
+// Skill-pack helpers (light / dark pairs from ~/.agents/awesome-design-skills).
+#define PF_SKILL_L(name, acc, surf, txt, prim, rSm, rMd, space, depth, face, border) \
+    { name, false, 0, 0, 0, acc, surf, txt, prim, rSm, rMd, space, depth, face, border }
+#define PF_SKILL_D(name, acc, surf, txt, prim, rSm, rMd, space, depth, face, border) \
+    { name, true,  0, 0, 0, acc, surf, txt, prim, rSm, rMd, space, depth, face, border }
+
 inline constexpr ThemeSpec kThemes[] = {
+    // ── Classic light (0–9) ──────────────────────────────────────────────────
     { "Paper",    false, 0.00f, 0.00f,  0.00f },
     { "Fog",      false, 0.58f, 0.22f,  0.00f },
     { "Bone",     false, 0.09f, 0.18f,  0.02f },
@@ -34,6 +58,31 @@ inline constexpr ThemeSpec kThemes[] = {
     { "Ice",      false, 0.55f, 0.30f,  0.02f },
     { "Sage",     false, 0.33f, 0.22f,  0.01f },
     { "Blush",    false, 0.97f, 0.20f,  0.02f },
+
+    // ── Skill light (10–29) — distinctive packs for dense MIDI/tool UIs ──────
+    // Chosen for max variety (depth/face/spacing/color); each has a dark twin.
+    PF_SKILL_L("Minimal",      0xff312c85, 0xfff4f4f1, 0xff0c0c09, 0xff0c0c09, 4, 8, 1.15f, ThemeDepth::Flat,   ThemeFace::Sans,    1.0f),
+    PF_SKILL_L("Clean",        0xff6366f1, 0xfff8fafc, 0xff0f172a, 0xff2563eb, 6, 12,1.20f, ThemeDepth::Soft,   ThemeFace::Rounded, 1.0f),
+    PF_SKILL_L("Professional", 0xff111111, 0xffffffff, 0xff111827, 0xfffece14, 4, 8, 0.95f, ThemeDepth::Soft,   ThemeFace::Sans,    1.0f),
+    PF_SKILL_L("Material",     0xffc8b3fd, 0xfff7f5ff, 0xff1e1b4b, 0xff6442d6, 6, 12,1.05f, ThemeDepth::Soft,   ThemeFace::Sans,    1.0f),
+    PF_SKILL_L("Shadcn",       0xff18181b, 0xffffffff, 0xff09090b, 0xff09090b, 4, 8, 1.00f, ThemeDepth::Flat,   ThemeFace::Sans,    1.0f),
+    PF_SKILL_L("Flat",         0xff8b5cf6, 0xffffffff, 0xff111827, 0xfff2673c, 2, 4, 1.00f, ThemeDepth::Flat,   ThemeFace::Sans,    1.0f),
+    PF_SKILL_L("Mono",         0xff00a6f4, 0xffe7e5e4, 0xff1c1917, 0xff37f712, 2, 4, 0.90f, ThemeDepth::Flat,   ThemeFace::Mono,    1.0f),
+    PF_SKILL_L("Neumorph",     0xff006666, 0xffe7e5e4, 0xff1e2938, 0xff006666, 10,16,1.00f, ThemeDepth::Neo,    ThemeFace::Mono,    0.0f),
+    PF_SKILL_L("Glass",        0xff3a344e, 0xffeef2ff, 0xff141414, 0xff1856ff, 8, 14,1.10f, ThemeDepth::Glass,  ThemeFace::Rounded, 1.0f),
+    PF_SKILL_L("Neon",         0xff00bcff, 0xfff8fff0, 0xff0a2a1a, 0xff65a30d, 4, 8, 1.00f, ThemeDepth::Soft,   ThemeFace::Sans,    1.5f),
+    PF_SKILL_L("Neobrutal",    0xff432dd7, 0xfffbfbf9, 0xff1c293c, 0xfffdc800, 0, 0, 1.00f, ThemeDepth::Brutal, ThemeFace::Sans,    2.5f),
+    PF_SKILL_L("Editorial",    0xff111111, 0xfffffbf5, 0xff111111, 0xff111111, 2, 4, 1.15f, ThemeDepth::Flat,   ThemeFace::Serif,   1.0f),
+    PF_SKILL_L("Terracotta",   0xffc56a3c, 0xfff3e9d8, 0xff1c1917, 0xffc56a3c, 4, 8, 1.05f, ThemeDepth::Soft,   ThemeFace::Serif,   1.0f),
+    PF_SKILL_L("Pulse",        0xfff59e0b, 0xffffedd5, 0xff9a3412, 0xffea580b, 2, 4, 1.10f, ThemeDepth::Brutal, ThemeFace::Sans,    2.0f),
+    PF_SKILL_L("Matrix",       0xff2db58a, 0xffe8f5ef, 0xff0b0c14, 0xff0b0c14, 2, 4, 0.92f, ThemeDepth::Flat,   ThemeFace::Mono,    1.0f),
+    PF_SKILL_L("Vintage",      0xff008080, 0xffc0c0c0, 0xff000000, 0xff008080, 2, 4, 0.95f, ThemeDepth::Soft,   ThemeFace::Mono,    1.5f),
+    PF_SKILL_L("Skeuo",        0xfff08321, 0xfff4efe8, 0xff1c1917, 0xfffa3c00, 6, 10,1.00f, ThemeDepth::Soft,   ThemeFace::Sans,    1.0f),
+    PF_SKILL_L("Gradient",     0xffe60076, 0xfffaf5ff, 0xff1e1033, 0xff990ffa, 6, 12,1.10f, ThemeDepth::Glass,  ThemeFace::Rounded, 1.0f),
+    PF_SKILL_L("Bold",         0xff009866, 0xfff4f7fb, 0xff0b1220, 0xff0077bc, 2, 4, 1.00f, ThemeDepth::Brutal, ThemeFace::Sans,    2.0f),
+    PF_SKILL_L("Clay",         0xff3b82f6, 0xffeef4ff, 0xff1c398e, 0xff3b82f6, 12,20,1.15f, ThemeDepth::Neo,    ThemeFace::Rounded, 0.0f),
+
+    // ── Classic dark (30–39) ─────────────────────────────────────────────────
     { "Ink",      true,  0.00f, 0.00f,  0.00f },
     { "Carbon",   true,  0.00f, 0.00f, -0.04f },
     { "Slate",    true,  0.58f, 0.28f,  0.00f },
@@ -44,12 +93,39 @@ inline constexpr ThemeSpec kThemes[] = {
     { "Graphite", true,  0.58f, 0.10f, -0.02f },
     { "Midnight", true,  0.64f, 0.42f, -0.04f },
     { "Cocoa",    true,  0.07f, 0.26f, -0.01f },
+
+    // ── Skill dark (40–59) ───────────────────────────────────────────────────
+    PF_SKILL_D("Minimal",      0xffa5b4fc, 0xff0c0c09, 0xfff4f4f1, 0xffa5b4fc, 4, 8, 1.15f, ThemeDepth::Flat,   ThemeFace::Sans,    1.0f),
+    PF_SKILL_D("Clean",        0xff818cf8, 0xff0f172a, 0xfff8fafc, 0xff60a5fa, 6, 12,1.20f, ThemeDepth::Soft,   ThemeFace::Rounded, 1.0f),
+    PF_SKILL_D("Professional", 0xfffece14, 0xff111111, 0xfffafafa, 0xfffece14, 4, 8, 0.95f, ThemeDepth::Soft,   ThemeFace::Sans,    1.0f),
+    PF_SKILL_D("Material",     0xffc8b3fd, 0xff1a1428, 0xfff5f3ff, 0xff8b6cff, 6, 12,1.05f, ThemeDepth::Soft,   ThemeFace::Sans,    1.0f),
+    PF_SKILL_D("Shadcn",       0xfffafafa, 0xff09090b, 0xfffafafa, 0xfffafafa, 4, 8, 1.00f, ThemeDepth::Flat,   ThemeFace::Sans,    1.0f),
+    PF_SKILL_D("Flat",         0xffc4b5fd, 0xff151515, 0xfff5f5f5, 0xfff2673c, 2, 4, 1.00f, ThemeDepth::Flat,   ThemeFace::Sans,    1.0f),
+    PF_SKILL_D("Mono",         0xff00a6f4, 0xff0a0a0a, 0xff37f712, 0xff37f712, 2, 4, 0.90f, ThemeDepth::Flat,   ThemeFace::Mono,    1.0f),
+    PF_SKILL_D("Neumorph",     0xff2dd4bf, 0xff1c1917, 0xffe7e5e4, 0xff14b8a6, 10,16,1.00f, ThemeDepth::Neo,    ThemeFace::Mono,    0.0f),
+    PF_SKILL_D("Glass",        0xff93c5fd, 0xff0b1020, 0xffeef2ff, 0xff3b82f6, 8, 14,1.10f, ThemeDepth::Glass,  ThemeFace::Rounded, 1.0f),
+    PF_SKILL_D("Neon",         0xff00bcff, 0xff050505, 0xffbbf351, 0xffbbf351, 4, 8, 1.00f, ThemeDepth::Soft,   ThemeFace::Sans,    1.5f),
+    PF_SKILL_D("Neobrutal",    0xfffdc800, 0xff111111, 0xfffbfbf9, 0xff432dd7, 0, 0, 1.00f, ThemeDepth::Brutal, ThemeFace::Sans,    2.5f),
+    PF_SKILL_D("Editorial",    0xfff5f5f5, 0xff111111, 0xfffffbf5, 0xfff5f5f5, 2, 4, 1.15f, ThemeDepth::Flat,   ThemeFace::Serif,   1.0f),
+    PF_SKILL_D("Terracotta",   0xffe7a07a, 0xff1c1410, 0xfff3e9d8, 0xffc56a3c, 4, 8, 1.05f, ThemeDepth::Soft,   ThemeFace::Serif,   1.0f),
+    PF_SKILL_D("Pulse",        0xfff59e0b, 0xff1c0a00, 0xffffedd5, 0xffea580b, 2, 4, 1.10f, ThemeDepth::Brutal, ThemeFace::Sans,    2.0f),
+    PF_SKILL_D("Matrix",       0xff2db58a, 0xff0b0c14, 0xff2db58a, 0xff2db58a, 2, 4, 0.92f, ThemeDepth::Flat,   ThemeFace::Mono,    1.0f),
+    PF_SKILL_D("Vintage",      0xff40e0d0, 0xff1a1a1a, 0xffc0c0c0, 0xff008080, 2, 4, 0.95f, ThemeDepth::Soft,   ThemeFace::Mono,    1.5f),
+    PF_SKILL_D("Skeuo",        0xfff08321, 0xff1a120c, 0xfff4efe8, 0xfffa3c00, 6, 10,1.00f, ThemeDepth::Soft,   ThemeFace::Sans,    1.0f),
+    PF_SKILL_D("Gradient",     0xffe60076, 0xff12081f, 0xfffaf5ff, 0xff990ffa, 6, 12,1.10f, ThemeDepth::Glass,  ThemeFace::Rounded, 1.0f),
+    PF_SKILL_D("Bold",         0xff00c98a, 0xff0b1220, 0xfff4f7fb, 0xff0077bc, 2, 4, 1.00f, ThemeDepth::Brutal, ThemeFace::Sans,    2.0f),
+    PF_SKILL_D("Clay",         0xff60a5fa, 0xff101828, 0xffdbeafe, 0xff3b82f6, 12,20,1.15f, ThemeDepth::Neo,    ThemeFace::Rounded, 0.0f),
 };
 
+#undef PF_SKILL_L
+#undef PF_SKILL_D
+
 inline constexpr int kNumThemes = (int) (sizeof(kThemes) / sizeof(kThemes[0]));
-inline constexpr int kNumThemesPerFamily = 10;
+inline constexpr int kNumThemesPerFamily = 30; // 10 classic + 20 skill
 inline constexpr int kPearlTheme = 5;
-inline constexpr int kInkTheme = 10;
+/** Default skill pack (family index): Neobrutal — light 20 / dark 50. */
+inline constexpr int kNeobrutalTheme = 20;
+inline constexpr int kInkTheme = 30; // first classic dark
 
 inline const ThemeSpec& themeAt(int index)
 {
@@ -61,7 +137,8 @@ inline int migrateThemeIndex(int stored, bool themeCatalog)
 {
     if (!themeCatalog)
         return juce::jlimit(0, 2, stored);
-    if (stored >= 10) return (int) Appearance::Dark;
+    // Absolute theme catalogs: light [0, N), dark [N, 2N).
+    if (stored >= kNumThemesPerFamily) return (int) Appearance::Dark;
     return (int) Appearance::Light;
 }
 
@@ -147,10 +224,10 @@ struct Tweaks
     /** Type + icon glyph scale as percent; 100% = former 115% size. Independent of UI size. */
     std::atomic<int> textScalePct { 100 };
     std::atomic<int> appearance { (int) Appearance::System };
-    /** Light-family theme index 0–9 (Paper…Blush). */
-    std::atomic<int> lightTheme { kPearlTheme };
-    /** Dark-family theme index 0–9 (Ink…Cocoa) → absolute 10–19. */
-    std::atomic<int> darkTheme { 0 };
+    /** Light-family theme index 0–29 (classic + skill packs). */
+    std::atomic<int> lightTheme { kNeobrutalTheme };
+    /** Dark-family theme index 0–29 → absolute 30–59. */
+    std::atomic<int> darkTheme { kNeobrutalTheme };
     std::atomic<int> showTooltips { 1 }; // 1 = on
     std::atomic<int> fontFamily { (int) FontFamily::Archivo };
     std::atomic<int> surfaceStyle { (int) SurfaceStyle::Flat };
@@ -230,6 +307,27 @@ inline bool settingsThemeFamilyIsDark()
 {
     return themeAt(settingsThemeFamilyIndex()).dark;
 }
+
+inline float themeRadiusSm()
+{
+    const float v = themeAt(themeIndex()).radiusSm;
+    return v > 0.0f ? v : ds::radius::sm;
+}
+
+inline float themeRadiusMd()
+{
+    const float v = themeAt(themeIndex()).radiusMd;
+    return v > 0.0f ? v : ds::radius::md;
+}
+
+inline float themeSpaceScale()
+{
+    return juce::jlimit(0.75f, 1.4f, themeAt(themeIndex()).spaceScale);
+}
+
+inline ThemeDepth themeDepth() { return themeAt(themeIndex()).depth; }
+inline ThemeFace themeFace()   { return themeAt(themeIndex()).face; }
+inline float themeBorderPx()   { return juce::jmax(0.0f, themeAt(themeIndex()).borderPx); }
 
 /** UI scale for the Small / Medium / Large content-size tweak (layout / chrome). */
 inline float contentScale()
@@ -360,16 +458,16 @@ namespace colours {
 namespace metrics {
     inline int scaled(int px)
     {
-        return juce::roundToInt((float) px * contentScale());
+        return juce::roundToInt((float) px * contentScale() * themeSpaceScale());
     }
 
     constexpr float uiScale         = 1.0f;
 
-    constexpr float cornerRadius    = ds::radius::md;
+    inline float cornerRadius()     { return themeRadiusMd(); }
     constexpr float windowRadius    = 12.0f;
-    constexpr float groupedRadius   = ds::radius::md;
-    constexpr float chipRadius      = ds::radius::sm;
-    constexpr float controlRadius   = ds::radius::sm;
+    inline float groupedRadius()    { return themeRadiusMd(); }
+    inline float chipRadius()       { return themeRadiusSm(); }
+    inline float controlRadius()    { return themeRadiusSm(); }
     constexpr float browserFontSize = 12.0f;
 
     constexpr int grid              = 8;

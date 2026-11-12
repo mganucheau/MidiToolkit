@@ -307,6 +307,8 @@ MidiToolkitEditor::MidiToolkitEditor(MidiToolkitProcessor& p)
 {
     // Startup defaults independent of prior-session chrome.
     tweaks().appearance.store((int) Appearance::System);
+    tweaks().lightTheme.store(kNeobrutalTheme);
+    tweaks().darkTheme.store(kNeobrutalTheme);
     processorRef.editorOpen = false;
     // Migrate the previous default width (280) to the new half-width default.
     if (processorRef.nameColumnWidth == 280)
@@ -684,20 +686,30 @@ MidiToolkitEditor::MidiToolkitEditor(MidiToolkitProcessor& p)
     content.addAndMakeVisible(browserBar);
 
     filterPopover.setContent(&sidebar.filterComponent(), [this] { return sidebar.filterIdealHeight(); });
-    filterPopover.onDone = [this] { sidebar.setFilterOpen(false); };
+    filterPopover.onDone = [this] { sidebar.cancelFilterDraft(); };
+    filterPopover.onApply = [this]
+    {
+        sidebar.applyFilterDraft();
+        refreshBrowserBar();
+    };
     filterPopover.onReset = [this]
     {
         sidebar.resetFilters();
         refreshBrowserBar();
     };
     filterPopover.onSaveSearch = [this] { if (sidebar.onSaveCurrentSearch) sidebar.onSaveCurrentSearch(); };
+    filterDismissShield.onDismiss = [this] { sidebar.cancelFilterDraft(); };
+    content.addChildComponent(filterDismissShield);
     content.addChildComponent(filterPopover);
     sidebar.onFilterOpenChanged = [this](bool open)
     {
-        filterPopover.setVisible(open && leftPaneTab == 0);
+        const bool show = open && leftPaneTab == 0;
+        filterDismissShield.setVisible(show);
+        filterPopover.setVisible(show);
         layoutContent();
-        if (open)
+        if (show)
         {
+            filterDismissShield.toFront(false);
             filterPopover.toFront(false);
             filterPopover.grabKeyboardFocus();
         }
@@ -1076,7 +1088,7 @@ MidiToolkitEditor::MidiToolkitEditor(MidiToolkitProcessor& p)
     // Section folds scroll inside the viewport — they must not grow the window.
     effectsInspector.onContentHeightChanged = [this]
     {
-        if (processorRef.passthrough)
+        if (processorRef.passthrough || leftPaneTab == 1)
             syncPassthroughWindowHeight();
     };
     content.addAndMakeVisible(effectsInspector);
@@ -1326,6 +1338,10 @@ void MidiToolkitEditor::darkModeSettingChanged()
         return;
     lnf.refreshColours();
     sendLookAndFeelChange();
+    rollEditor.noteColour = ds::note();
+    miniRoll.setNoteColour(ds::note());
+    rollEditor.repaint();
+    miniRoll.repaint();
     repaint();
 }
 
@@ -3264,7 +3280,7 @@ void MidiToolkitEditor::updateMiniPreview()
     const auto groove = selectedGroove();
     const auto resolved = resolveClip(*clip, edit, formSelectionIds());
     const int rootPc = edit.root >= 0 ? edit.root : (clip->root >= 0 ? clip->root : 0);
-    miniRoll.setNoteColour(ds::primary()); // Levels: primary notes
+    miniRoll.setNoteColour(ds::note()); // Theme-aware notes (keys stay black/white)
     auto grooved = applyGroove(resolved.notes, groove, clip->complexity,
                                clip->kind, clip->root, edit.mode);
     if (edit.fitScale && edit.root >= 0)
@@ -3339,46 +3355,71 @@ void MidiToolkitEditor::PreviewHeader::refresh()
 
 void MidiToolkitEditor::PreviewHeader::resized()
 {
+    // Chips only when the preview body is open (folded strip is title-only).
+    const bool open = owner.processorRef.previewOpen && !owner.processorRef.editorOpen;
     auto r = getLocalBounds().reduced(metrics::scaled(8), 0).withTrimmedBottom(1);
     const int h = metrics::scaled(18);
     const int gap = metrics::scaled(4);
     for (auto* b : { (ChipBtn*) &btnDrag, (ChipBtn*) &btnMute, (ChipBtn*) &btnTrim })
     {
+        b->setVisible(open);
+        if (!open)
+        {
+            b->setBounds({});
+            continue;
+        }
         const int w = b->idealWidth();
         b->setBounds(r.removeFromRight(w).withSizeKeepingCentre(w, h));
         r.removeFromRight(gap);
     }
 }
 
+void MidiToolkitEditor::PreviewHeader::mouseDown(const juce::MouseEvent& e)
+{
+    // Click anywhere on the strip (except chips) folds like Velocity.
+    for (auto* b : { (juce::Component*) &btnDrag, (juce::Component*) &btnMute,
+                     (juce::Component*) &btnTrim, (juce::Component*) &btnVel })
+        if (b->isVisible() && b->getBounds().contains(e.getPosition()))
+            return;
+    owner.processorRef.previewOpen = !owner.processorRef.previewOpen;
+    owner.leftPaneTabs.setPreviewOpen(owner.processorRef.previewOpen);
+    owner.applyLayoutState();
+    owner.syncPassthroughWindowHeight();
+}
+
 void MidiToolkitEditor::PreviewHeader::paint(juce::Graphics& g)
 {
-    // Levels preview strip: surface100 with hairlines; Inter name + mono meta.
+    // Velocity-style fold strip: chevron + Preview (+ clip meta when open).
     g.fillAll(ds::surface100());
     g.setColour(ds::line());
     g.fillRect(getLocalBounds().removeFromTop(1));
-    g.fillRect(getLocalBounds().removeFromBottom(1));
 
-    auto r = getLocalBounds().reduced(metrics::scaled(8), 0);
-    r.setRight(btnTrim.getX() - metrics::scaled(6));
-    const auto nameFont = uiFontFixed(12.0f, true);
-    const auto metaFont = monoFontFixed(12.0f);
-    if (name.isEmpty())
+    const bool open = owner.processorRef.previewOpen && !owner.processorRef.editorOpen;
+    auto header = getLocalBounds().reduced(8, 0);
+    auto caret = header.removeFromLeft(12).toFloat().withSizeKeepingCentre(9.0f, 9.0f);
+    fx::drawStrokedChevron(g, caret, ds::inkMuted(), open);
+    header.removeFromLeft(4);
+
+    g.setColour(contrastInkOn(ds::surface100()));
+    g.setFont(uiFontFixed(11.0f, false));
+    const juce::String title = open && name.isNotEmpty()
+                                   ? ("Preview  ·  " + name)
+                                   : juce::String("Preview");
+    auto titleR = header;
+    if (open && btnTrim.isVisible())
+        titleR.setRight(btnTrim.getX() - 6);
+    g.drawText(title, titleR, juce::Justification::centredLeft, true);
+
+    if (open && meta.isNotEmpty() && btnTrim.isVisible())
     {
         g.setColour(ds::inkMuted());
-        g.setFont(uiFontFixed(12.0f, false));
-        g.drawText("Select a MIDI file to preview", r, juce::Justification::centredLeft, true);
-        return;
+        g.setFont(monoFontFixed(11.0f));
+        auto metaR = titleR;
+        const int titleW = (int) std::ceil(
+            juce::GlyphArrangement::getStringWidth(uiFontFixed(11.0f, false), title)) + 8;
+        metaR.removeFromLeft(titleW);
+        g.drawText(meta, metaR, juce::Justification::centredLeft, true);
     }
-    const int metaW = (int) std::ceil(juce::GlyphArrangement::getStringWidth(metaFont, meta)) + 2;
-    const int nameW = juce::jmin(r.getWidth() - metaW - 6,
-                                 (int) std::ceil(juce::GlyphArrangement::getStringWidth(nameFont, name)) + 2);
-    g.setColour(ds::ink());
-    g.setFont(nameFont);
-    g.drawText(name, r.removeFromLeft(juce::jmax(0, nameW)), juce::Justification::centredLeft, true);
-    r.removeFromLeft(6);
-    g.setColour(ds::inkMuted());
-    g.setFont(metaFont);
-    g.drawText(meta, r, juce::Justification::centredLeft, true);
 }
 
 // ── layout ───────────────────────────────────────────────────────────────────
@@ -3487,7 +3528,56 @@ int MidiToolkitEditor::passthroughMaxHeight() const
     const auto* display = displays.getDisplayForRect(getScreenBounds());
     if (display == nullptr)
         display = displays.getPrimaryDisplay();
-    return display != nullptr ? juce::jmax(360, display->userArea.getHeight() - 48) : 900;
+    // Allow growing past content — editor paint fills the extra area (no black void).
+    return display != nullptr ? juce::jmax(360, display->userArea.getHeight() - 48) : 1200;
+}
+
+int MidiToolkitEditor::filledContentHeight() const
+{
+    const int transport = metrics::transportH();
+    const bool edOpen = processorRef.editorOpen;
+    const bool fxOpen = processorRef.effectsOpen;
+    const bool previewOpen = !edOpen && processorRef.previewOpen;
+    const bool pass = processorRef.passthrough;
+
+    if (pass && fxOpen && !recording)
+        return transport + effectsInspector.contentHeight();
+
+    if (recording)
+        return juce::jmax(transport + metrics::scaled(520),
+                          fxOpen ? transport + effectsInspector.contentHeight() : 0);
+
+    if (leftPaneTab == 1)
+    {
+        int h = transport + metrics::paneHeaderH();
+        h += juce::jmax(generatorBody.getHeight(), metrics::scaled(40));
+        if (!edOpen)
+        {
+            h += PreviewHeader::kHeaderH;
+            if (previewOpen)
+                h += juce::jmax(metrics::miniRollH(), metrics::scaled(80));
+        }
+        if (fxOpen)
+            h = juce::jmax(h, transport + effectsInspector.contentHeight());
+        if (edOpen)
+            h = juce::jmax(h, transport + metrics::scaled(520));
+        return h;
+    }
+
+    // Browser: enough for toolbar + a few rows + optional preview/roll/effects.
+    int h = transport + metrics::paneHeaderH() + browserBar.idealHeight()
+          + metrics::listHeaderH() + metrics::listRowH() * 6;
+    if (!edOpen)
+    {
+        h += PreviewHeader::kHeaderH;
+        if (previewOpen)
+            h += juce::jmax(metrics::miniRollH(), metrics::scaled(80));
+    }
+    if (edOpen)
+        h = juce::jmax(h, transport + metrics::scaled(520));
+    if (fxOpen)
+        h = juce::jmax(h, transport + effectsInspector.contentHeight());
+    return h;
 }
 
 int MidiToolkitEditor::passthroughWindowWidth() const
@@ -3603,21 +3693,44 @@ void MidiToolkitEditor::setLeftPaneTab(int tab)
 
 void MidiToolkitEditor::syncPassthroughWindowHeight()
 {
-    if (!processorRef.passthrough || getHeight() <= 0)
+    const bool passFx = processorRef.passthrough && processorRef.effectsOpen;
+    const bool generator = leftPaneTab == 1;
+    if ((!passFx && !generator) || getHeight() <= 0)
         return;
-    const int w = passthroughWindowWidth();
+
+    // Snap window height to the last open section so fold/unfold grows and shrinks.
+    int contentH = metrics::transportH();
+    if (generator)
+    {
+        contentH += metrics::paneHeaderH();
+        contentH += juce::jmax(generatorBody.getHeight(), metrics::scaled(40));
+        if (processorRef.previewOpen && !processorRef.editorOpen)
+            contentH += juce::jmax(metrics::miniRollH(), metrics::scaled(80))
+                      + metrics::scaled(22);
+    }
+    if (passFx || (generator && processorRef.effectsOpen))
+    {
+        const int fxColumn = metrics::transportH() + effectsInspector.contentHeight();
+        contentH = juce::jmax(contentH, fxColumn);
+    }
+
     const int minH = passthroughMinHeight();
     const int maxH = passthroughMaxHeight();
-    setResizeLimits(w, minH, w, maxH);
-    // Opening sections never grows the window — only width / clamp changes.
-    int h = getHeight();
-    if (h < minH)
-        h = passthroughDefaultHeight();
-    h = juce::jlimit(minH, maxH, h);
-    if (std::abs(getHeight() - h) > 1 || getWidth() != w)
-        setSize(w, h);
-    if (getHeight() > passthroughDefaultHeight())
-        userPassthroughH = getHeight();
+    contentH = juce::jlimit(minH, maxH, contentH);
+
+    if (processorRef.passthrough)
+    {
+        const int w = passthroughWindowWidth();
+        setResizeLimits(w, minH, w, maxH);
+        if (std::abs(getHeight() - contentH) > 1 || getWidth() != w)
+            setSize(w, contentH);
+        if (getHeight() > passthroughDefaultHeight())
+            userPassthroughH = getHeight();
+    }
+    else if (std::abs(getHeight() - contentH) > 1)
+    {
+        setSize(getWidth(), contentH);
+    }
 }
 
 void MidiToolkitEditor::updateWindowLimits()
@@ -3649,12 +3762,20 @@ void MidiToolkitEditor::updateWindowLimits()
     const int minH = openedWindowH > 0
         ? openedWindowH
         : metrics::transportH() + metrics::scaled(240);
-    setResizeLimits(minW, minH, maxW, 2400);
+    auto& displays = juce::Desktop::getInstance().getDisplays();
+    const auto* display = displays.getDisplayForRect(getScreenBounds());
+    if (display == nullptr)
+        display = displays.getPrimaryDisplay();
+    const int screenCap = display != nullptr ? juce::jmax(minH, display->userArea.getHeight() - 48)
+                                             : juce::jmax(minH, 1200);
+    // Grow freely up to the screen — content stays top-aligned; paint fills the rest.
+    const int maxH = screenCap;
+    setResizeLimits(minW, minH, maxW, maxH);
     if (getWidth() <= 0)
         return;
     const int w = juce::jlimit(minW, maxW, getWidth());
-    const int h = juce::jmax(getHeight(), minH);
-    if (std::abs(getWidth() - w) > 1 || getHeight() < minH)
+    const int h = juce::jlimit(minH, maxH, juce::jmax(getHeight(), minH));
+    if (std::abs(getWidth() - w) > 1 || std::abs(getHeight() - h) > 1)
         setSize(w, h);
 }
 
@@ -3880,8 +4001,8 @@ void MidiToolkitEditor::layoutContent()
     sidebar.setVisible(showFiles);
     browserBar.setVisible(showFiles);
     fileList.setVisible(showFiles);
-    // Levels: clip title strip above the mini preview when the full roll is closed.
-    previewHeader.setVisible(previewOpen && !edOpen);
+    // Fold strip always present when the full roll is closed (like Velocity).
+    previewHeader.setVisible(!edOpen);
     rollEditor.setVisible(edOpen);
     effectsInspector.setVisible(showFx);
     leftPaneTabs.setVisible(true);
@@ -3964,38 +4085,32 @@ void MidiToolkitEditor::layoutContent()
         kindGrid.setVisible(false);
         fileList.setVisible(false);
 
-        // Preview under the generator when the piano roll is closed.
-        const int headerH = 0; // Levels: no title/Trim/Mute row above the preview (Mute → right-click)
+        // Preview fold strip under the generator (Velocity-style).
+        const int headerH = PreviewHeader::kHeaderH;
         const int desiredRollH = previewOpen ? juce::jmax(metrics::miniRollH(), metrics::scaled(80)) : 0;
-        const int stackH = juce::jmin(headerH + desiredRollH, juce::jmax(0, left.getHeight() / 3));
+        const int maxStack = juce::jmax(headerH, left.getHeight() / 3);
+        const int stackH = juce::jmin(headerH + desiredRollH, maxStack);
         const int rollH = juce::jmax(0, stackH - headerH);
+        previewHeader.setBounds(left.removeFromBottom(headerH));
+        previewHeader.setVisible(true);
+        previewHeader.resized();
         if (rollH > 0)
         {
             miniRoll.setBounds(left.removeFromBottom(rollH));
             miniRoll.setVisible(true);
             miniRoll.setShowVelocity(false);
-            if (headerH > 0)
-            {
-                previewHeader.setBounds(left.removeFromBottom(headerH));
-                previewHeader.setVisible(true);
-            }
-            else
-            {
-                previewHeader.setBounds({});
-            }
         }
         else
         {
             miniRoll.setBounds({});
             miniRoll.setVisible(false);
-            previewHeader.setBounds({});
-            previewHeader.setVisible(false);
         }
 
         generatorViewport.setBounds(left);
         generatorBody.setSize(juce::jmax(1, generatorViewport.getMaximumVisibleWidth()),
                               juce::jmax(1, generatorBody.getHeight()));
         effectsInspector.layoutExternalGenerators();
+        syncPassthroughWindowHeight();
     }
     else
     {
@@ -4027,28 +4142,21 @@ void MidiToolkitEditor::layoutContent()
     {
         const int fileListMinH = metrics::listHeaderH() + metrics::listRowH() * 2;
         const int colH = browserCol.getHeight();
-        const int softMaxStack = juce::jmax(0, colH - fileListMinH);
-        const int headerH = 0; // Levels: no title/Trim/Mute row above the preview (Mute → right-click)
+        const int softMaxStack = juce::jmax(PreviewHeader::kHeaderH, colH - fileListMinH);
+        const int headerH = PreviewHeader::kHeaderH;
         const int desiredRollH = previewOpen ? juce::jmax(metrics::miniRollH(), metrics::scaled(80)) : 0;
         const int stackH = juce::jmin(headerH + desiredRollH, softMaxStack);
         const int rollH = juce::jmax(0, stackH - headerH);
 
+        previewHeader.setBounds(browserCol.removeFromBottom(headerH));
+        previewHeader.setVisible(true);
+        previewHeader.resized();
         if (rollH > 0)
-        {
             miniRoll.setBounds(browserCol.removeFromBottom(rollH));
-            if (headerH > 0)
-                previewHeader.setBounds(browserCol.removeFromBottom(headerH));
-            else
-                previewHeader.setBounds({});
-        }
         else
-        {
             miniRoll.setBounds({});
-            previewHeader.setBounds({});
-        }
         miniRoll.setVisible(rollH > 0);
         miniRoll.setShowVelocity(false);
-        previewHeader.setVisible(rollH > 0 && headerH > 0);
 
         fileList.setBounds(browserCol);
         kindGrid.setBounds(browserCol);
@@ -4059,18 +4167,29 @@ void MidiToolkitEditor::layoutContent()
 
     if (showFiles && sidebar.isFilterOpen())
     {
-        // Levels FilterPopover: 320 px wide, anchored under the Filters chip.
+        // Anchor under the Filters chip, right-aligned with it.
+        const auto filtersLocal = browserBar.getFiltersButtonBounds();
+        const auto filtersInContent = content.getLocalArea(&browserBar, filtersLocal);
         const int w = juce::jmin(metrics::scaled(320), juce::jmax(metrics::scaled(280),
                                                                   browserBar.getWidth() - metrics::scaled(16)));
-        const int top = browserBar.getBottom() - metrics::scaled(4);
-        const int maxH = juce::jmax(120, content.getHeight() - top - metrics::scaled(8));
-        filterPopover.setBounds(browserBar.getRight() - metrics::scaled(8) - w, top, w,
-                                juce::jmin(filterPopover.idealHeight(), maxH));
+        const int top = filtersInContent.getBottom() + metrics::scaled(4);
+        const int roomBelow = juce::jmax(120, content.getHeight() - top - metrics::scaled(8));
+        const int headerFooter = metrics::scaled(40) + metrics::scaled(12) * 2 + metrics::scaled(40);
+        filterPopover.setMaxBodyHeight(juce::jmax(80, roomBelow - headerFooter));
+        const int h = juce::jmin(filterPopover.idealHeight(), roomBelow);
+        int x = filtersInContent.getRight() - w;
+        x = juce::jlimit(metrics::scaled(4),
+                         juce::jmax(metrics::scaled(4), content.getWidth() - w - metrics::scaled(4)), x);
+        filterDismissShield.setBounds(content.getLocalBounds());
+        filterDismissShield.setVisible(true);
+        filterDismissShield.toFront(false);
+        filterPopover.setBounds(x, top, w, h);
         filterPopover.setVisible(true);
         filterPopover.toFront(false);
     }
     else
     {
+        filterDismissShield.setVisible(false);
         filterPopover.setVisible(false);
     }
 
@@ -4086,8 +4205,9 @@ void MidiToolkitEditor::layoutContent()
 
 void MidiToolkitEditor::paint(juce::Graphics& g)
 {
-    // Flat window fill — matches prototype (no desktop chrome behind content).
-    g.fillAll(colours::bg());
+    // Theme surface fills the whole editor — including any area past laid-out content
+    // when the window is dragged taller than filledContentHeight().
+    g.fillAll(ds::surface000());
 }
 
 // ── tweaks ───────────────────────────────────────────────────────────────────
@@ -4322,7 +4442,7 @@ public:
         else if (tab == 1)
         {
             paintRow("Appearance", "Auto follows the system light/dark setting");
-            paintRow("Theme", "Ten light and ten dark colour pairs");
+            paintRow("Theme", "30 light + 30 dark (classic + skill packs)");
             paintRow("Separation", "How far panels and sections stand apart");
             paintRow("UI size", "Scales spacing, panels, and controls");
             paintRow("Text size", "Scales type and icons only");
@@ -4505,6 +4625,8 @@ void MidiToolkitEditor::showTweaksMenu()
         persistBrowserSession();
         lnf.refreshColours();
         sendLookAndFeelChange();
+        rollEditor.noteColour = ds::note();
+        miniRoll.setNoteColour(ds::note());
         applyLayoutState();
         resized();
         repaint();
@@ -4717,9 +4839,9 @@ void MidiToolkitEditor::timerCallback()
         const auto resolved = resolveClip(*clip,
                                           hasRecording ? effectsInspector.getEdit() : selectedEdit(),
                                           formSelectionIds());
+        // Half/Double retimes notes via stretch; playhead advances at host/free rate.
         const double stretch = 1.0 / juce::jlimit(0.25, 4.0, processorRef.bpmMultiplier.load());
         const double lenBeats = juce::jmax(0.25, (double) (resolved.bars * kStepsPerBar) / 4.0 * stretch);
-        const double mult = juce::jlimit(0.25, 4.0, processorRef.bpmMultiplier.load());
         double loopStart = processorRef.previewLoopStartBeat.load();
         double loopEnd = processorRef.previewLoopEndBeat.load();
         if (loopEnd <= loopStart + 1.0e-9)
@@ -4732,8 +4854,8 @@ void MidiToolkitEditor::timerCallback()
         double beat = 0.0;
         if (processorRef.syncToHost.load())
         {
-            const double scaled = processorRef.hostBeatPos.load() * mult;
-            beat = loopStart + std::fmod(std::fmod(scaled, loopLen) + loopLen, loopLen);
+            const double hostBeat = processorRef.hostBeatPos.load();
+            beat = loopStart + std::fmod(std::fmod(hostBeat, loopLen) + loopLen, loopLen);
         }
         else
         {

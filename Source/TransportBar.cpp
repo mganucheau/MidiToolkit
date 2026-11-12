@@ -267,7 +267,7 @@ TransportBar::TransportBar()
     prep(btnPassthrough);
     btnPassthrough.setComponentID("btnPassthrough");
     btnPassthrough.icon = icons::through;
-    btnPassthrough.setTooltip("Through: live MIDI input runs through the Toolkit — no file/generator playback (P)");
+    btnPassthrough.setTooltip("Passthrough: live MIDI input runs through the Toolkit — no file/generator playback (P)");
     btnPassthrough.onClick = [this] { if (onTogglePassthrough) onTogglePassthrough(); };
     addAndMakeVisible(btnPassthrough);
 
@@ -555,7 +555,8 @@ void TransportBar::setClipName(const juce::String& name)
 
 void TransportBar::refreshBpm()
 {
-    const double shown = synced ? hostBpm * multiplier : freeBpm;
+    // Half/Double retimes notes only — BPM readout stays at host/free tempo.
+    const double shown = synced ? hostBpm : freeBpm;
     statusPill.synced = synced;
     statusPill.editable = !synced;
     statusPill.value = shown;
@@ -641,9 +642,9 @@ void TransportBar::applyHeaderCaptions(bool withText)
 
 void TransportBar::applyHeaderCaptionsTier(int tier)
 {
-    // 2 = all labels, 1 = Through + Toolkit (drop Piano roll), 0 = icons only.
+    // 2 = all labels, 1 = Passthrough + Toolkit (drop Piano roll), 0 = icons only.
     btnSync.caption = {};
-    btnPassthrough.caption = tier >= 1 ? "Through" : juce::String();
+    btnPassthrough.caption = tier >= 1 ? "Passthrough" : juce::String();
     btnEffects.caption = tier >= 1 ? "Toolkit" : juce::String();
     btnEditor.caption = tier >= 2 ? "Piano roll" : juce::String();
 }
@@ -667,18 +668,19 @@ void TransportBar::resized()
     btnStop.setVisible(false);
     btnEffects.setVisible(true);
     // Drag Me sits between Effects and Settings when a clip is available.
-    btnDragToDaw.setVisible(hasClip);
+    btnDragToDaw.setVisible(hasClip && !passthrough);
     btnEditor.setVisible(true);
     // Levels: Through stays next to Record whenever browser transport is visible
     // (not gated on Effects). MIDI FX build can still lock it off.
     const bool showThrough = transportControlsVisible && !passthroughLocked;
     btnPassthrough.setVisible(showThrough);
     btnPlay.setVisible(transportControlsVisible);
-    // Record stays visible alongside Through (Through no longer hides Record).
-    const bool showRecord = transportControlsVisible;
+    // Browser mode: keep Record hidden (Play remains).
+    const bool showRecord = false;
     btnRecord.setVisible(showRecord);
 
-    const bool showBpm = !compactChrome;
+    // Passthrough: Sync + BPM leave the header — through-mode has no tempo group.
+    const bool showBpm = !compactChrome && !passthrough;
     const int pillW = showBpm ? statusPill.idealWidth() : 0;
     btnDragToDaw.iconOnly = compactChrome;
     const int chipW = btnDragToDaw.isVisible() ? btnDragToDaw.idealWidth() : 0;
@@ -733,6 +735,7 @@ void TransportBar::resized()
 
     int x = lightsZoneW + (titleW > 0 ? titleW + groupGap : 0);
     statusPill.setVisible(showBpm);
+    btnSync.setVisible(showBpm);
     if (showBpm)
     {
         // Levels tempo group: Sync toggle flush against the BPM readout.
@@ -747,6 +750,7 @@ void TransportBar::resized()
     else
     {
         statusPill.setBounds({});
+        btnSync.setBounds({});
         btnSync.groupLeft = false;
         statusPill.grouped = false;
         tempoGroupBounds = {};
@@ -780,11 +784,6 @@ void TransportBar::resized()
         btnPlay.setBounds({});
         btnRecord.setBounds({});
         btnPassthrough.setBounds({});
-    }
-    if (!showBpm)
-    {
-        btnSync.setBounds(x, y, btn, btn);
-        x += btn + tight;
     }
     transportGroupBounds = {};
     dividerBounds = {};

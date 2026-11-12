@@ -5,11 +5,10 @@ namespace pflow {
 using namespace fx;
 
 EffectsInspector::EffectsInspector()
-    : tempoRow("Tempo", tempoToggle)
+    : tempoRow("Time", tempoToggle)
     , extendRow("Extend", extendPopup)
     , reverseRow("Reverse", reverseSwitch)
     , invertRow("Invert", invertSwitch)
-    , selectedNotesRow("Selected notes only", selectedNotesSwitch)
     , quantizeStrengthSl("Strength", 0, 100, 0, false)
     , swing("Amount", 0, 100, 0, false)
     , pocket("Pocket", -100, 100, 0, true)
@@ -101,6 +100,11 @@ EffectsInspector::EffectsInspector()
     };
     addAndMakeVisible(btnEffectsLock);
 
+    // Generate → New is always a solid primary CTA so it reads in every theme.
+    for (auto* b : { &arpGenerateBtn, &melodyGenerateBtn, &chordsGenerateBtn,
+                     &bassGenerateBtn, &drumGenerateBtn })
+        b->primaryStyle = true;
+
     trimSwitch.setComponentID("btnTrim");
     trimSwitch.setTooltip("Remove empty bars from the clip");
     trimSwitch.onClick = [this] { if (onTrimClicked) onTrimClicked(); };
@@ -119,15 +123,6 @@ EffectsInspector::EffectsInspector()
     invertSwitch.onClick = [this]
     {
         edit.invert = invertSwitch.getToggleState();
-        notifyEdit();
-        refreshDirtySections();
-    };
-
-    selectedNotesSwitch.setComponentID("btnSelectedNotesOnly");
-    selectedNotesSwitch.setTooltip("Apply Invert / Reverse only to notes selected in the piano roll");
-    selectedNotesSwitch.onClick = [this]
-    {
-        edit.selectedNotesOnly = selectedNotesSwitch.getToggleState();
         notifyEdit();
         refreshDirtySections();
     };
@@ -488,7 +483,6 @@ EffectsInspector::EffectsInspector()
     formSec.addRow(&variationsSl, kSliderRowH, [this] { return groove.variationIndex > 0; });
     formSec.addRow(&reverseRow, kRowMinH, [this] { return edit.reverse; });
     formSec.addRow(&invertRow, kRowMinH, [this] { return edit.invert; });
-    formSec.addRow(&selectedNotesRow, kRowMinH, [this] { return edit.selectedNotesOnly; });
 
     effectsSec.addRow(&delayBlock, [this] { return delayBlock.idealHeight(); }, [this] {
         return groove.delayAmount > 0;
@@ -844,8 +838,8 @@ EffectsInspector::EffectsInspector()
         });
     }
 
-    playback.onToggle = timing.onToggle = performance.onToggle = pitchSec.onToggle
-        = effectsSec.onToggle = [this] { layoutSections(); };
+    playback.onToggle = formSec.onToggle = timing.onToggle = performance.onToggle
+        = pitchSec.onToggle = effectsSec.onToggle = [this] { layoutSections(); };
     // Generators are an accordion: opening one folds the other four and is the
     // only active part (others stop sounding until Generate rolls them).
     auto wireGeneratorFold = [this](fx::Section& self)
@@ -1255,8 +1249,7 @@ void EffectsInspector::refreshFormClipGating()
                      (juce::Component*) &syncopationSl,
                      (juce::Component*) &variationsSl,
                      (juce::Component*) &reverseRow,
-                     (juce::Component*) &invertRow,
-                     (juce::Component*) &selectedNotesRow })
+                     (juce::Component*) &invertRow })
         formSec.setRowForcedHidden(c, false);
     layoutSections();
 }
@@ -1409,7 +1402,6 @@ void EffectsInspector::setEdit(const ClipEdit& e, juce::NotificationType)
     }
     reverseSwitch.setToggleState(e.reverse, juce::dontSendNotification);
     invertSwitch.setToggleState(e.invert, juce::dontSendNotification);
-    selectedNotesSwitch.setToggleState(e.selectedNotesOnly, juce::dontSendNotification);
     keyGrid.setCandidateMask(candidateKeyMask);
     keyGrid.setSelectedIndex(e.root >= 0 ? e.root : 0, juce::dontSendNotification);
     modePopup.setIndex((int) e.mode, juce::dontSendNotification);
@@ -1496,7 +1488,8 @@ void EffectsInspector::layoutSections()
             place(*sec, true);
     }
     y += pad - gap;
-    body.setSize(body.getWidth(), juce::jmax(y, viewport.getMaximumVisibleHeight()));
+    // Follow section content so fold/unfold shrinks empty space; window snap uses contentHeight().
+    body.setSize(body.getWidth(), juce::jmax(1, y));
     if (externalGeneratorHost != nullptr)
         layoutExternalGenerators();
     refreshChangedButton();
@@ -1520,7 +1513,7 @@ void EffectsInspector::refreshChangedButton()
 
 void EffectsInspector::setSectionOrder(const juce::String& ids)
 {
-    std::vector<fx::Section*> all { &playback, &timing, &performance, &pitchSec, &formSec, &effectsSec };
+    std::vector<fx::Section*> all { &playback, &formSec, &timing, &performance, &pitchSec, &effectsSec };
     std::vector<fx::Section*> next;
     for (const auto& id : juce::StringArray::fromTokens(ids, ",", {}))
         for (auto* sec : all)
@@ -1676,7 +1669,8 @@ void EffectsInspector::layoutExternalGenerators()
         sec->resized();
         y += h + gap;
     }
-    host.setSize(juce::jmax(1, host.getWidth()), juce::jmax(y + pad - gap, 1));
+    // Tight bottom — no empty row between the last section and the preview.
+    host.setSize(juce::jmax(1, host.getWidth()), juce::jmax(y - gap + metrics::scaled(4), 1));
 }
 
 void EffectsInspector::setGeneratorsEnabled(bool on)

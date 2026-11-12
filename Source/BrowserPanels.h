@@ -165,6 +165,10 @@ public:
     int filterIdealHeight() const;
     bool isFilterOpen() const { return filterOpen; }
     void setFilterOpen(bool open);
+    /** Commit the draft filter panel into the live browser criteria. */
+    void applyFilterDraft();
+    /** Revert the filter panel to the snapshot taken when the popover opened. */
+    void cancelFilterDraft();
     int activeFilterCount() const;
     juce::String describeActiveFilters() const;
     void resetFilters();
@@ -278,6 +282,8 @@ private:
     int scanProgressTotal = 0;
     bool filterOpen = false;
     bool filterApplyPending = false;
+    bool filterEditing = false; // popover open: edits are draft until Apply
+    BrowserSearch filterDraftSnapshot;
     float scanAngle = 0.0f;
     int currentClipCount = 0;
     int starredCount = 0;
@@ -718,6 +724,8 @@ public:
     void setSubfolders(bool);
     void setSaved(bool, bool);
     void setFiltersActive(bool open, int activeCount, const juce::String& summary = {});
+    /** Screen-local bounds of the Filters chip (for anchoring the popover). */
+    juce::Rectangle<int> getFiltersButtonBounds() const { return btnFilters.getBounds(); }
 
     std::function<void()> onToggleGrid;
     std::function<void()> onToggleSubfolders;
@@ -747,7 +755,7 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(BrowserToolbar)
 };
 
-/** Floating filter menu (Levels FilterPopover: 320 × radius-md, Reset + count footer). */
+/** Floating filter menu (Levels FilterPopover: 320 × radius-md, Reset + Apply footer). */
 class FilterPopover : public juce::Component
 {
 public:
@@ -755,6 +763,8 @@ public:
     void setContent(juce::Component* panel, std::function<int()> idealPanelHeight);
     void setCountText(const juce::String& t);
     int idealHeight() const;
+    /** Cap body height so the popover never paints past the host window. */
+    void setMaxBodyHeight(int h);
     void resized() override;
     void paint(juce::Graphics&) override;
     void mouseDown(const juce::MouseEvent&) override;
@@ -762,16 +772,20 @@ public:
     void mouseExit(const juce::MouseEvent&) override;
     bool keyPressed(const juce::KeyPress&) override;
 
-    std::function<void()> onDone;
+    std::function<void()> onDone;   // dismiss without applying
+    std::function<void()> onApply;  // commit draft filters
     std::function<void()> onSaveSearch; // retained for editor wiring; footer no longer hosts Save
     std::function<void()> onReset;
 
 private:
     juce::Component* panel = nullptr;
     std::function<int()> panelHeight;
+    juce::Viewport bodyViewport;
     juce::String countText;
-    juce::Rectangle<int> resetBounds;
+    juce::Rectangle<int> resetBounds, applyBounds;
     bool resetHover = false;
+    bool applyHover = false;
+    int maxBodyH = 0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(FilterPopover)
 };

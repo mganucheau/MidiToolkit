@@ -42,6 +42,7 @@ public:
     void setNoteColour(juce::Colour c) { noteColour = c; repaint(); }
     void setShowVelocity(bool on) { showVelocity = on; repaint(); }
     bool isShowingVelocity() const { return showVelocity; }
+    void lookAndFeelChanged() override { noteColour = ds::note(); repaint(); }
     /** 0..1 position of the playhead through the (stretched) clip. */
     double playheadFraction() const;
     static constexpr int kRulerH = 14;
@@ -55,7 +56,8 @@ public:
     }
 
 private:
-    juce::Colour noteColour { 0xff6fb5f0 };
+    /** Preview note fill — violet accent (high contrast on dark roll). */
+    juce::Colour noteColour { 0xff7b5cff };
     bool showVelocity = false;
     std::vector<RollNote> notes;
     std::vector<RollNote> frameNotes; // stable pitch frame (usually source clip)
@@ -84,12 +86,14 @@ public:
     void paintOverChildren(juce::Graphics&) override;
     void mouseDown(const juce::MouseEvent&) override;
     bool keyPressed(const juce::KeyPress&) override;
+    void lookAndFeelChanged() override { noteColour = ds::note(); repaint(); }
 
     /** Feed the selected clip + its edit + groove. The editor never mutates
         the clip; user actions come back through the callbacks. */
     void setClip(const StepClip& clip, const ClipEdit& edit, const GrooveParams& groove);
     /** Notes take the clip kind's colour (Groove clip-1 … clip-8). */
-    juce::Colour noteColour { 0xff6fb5f0 };
+    /** Preview note fill — violet accent (high contrast on dark roll). */
+    juce::Colour noteColour { 0xff7b5cff };
     /** Shown over an empty roll (e.g. "Play MIDI in, then press record" in Through). */
     void setEmptyHint(const juce::String& h) { emptyHint = h; repaint(); }
     juce::String emptyHint;

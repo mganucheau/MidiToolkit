@@ -144,21 +144,22 @@ SharedUiSession LibraryStore::uiSessionFromXml(const juce::XmlElement& el)
     if (themeCatalog >= 2)
     {
         s.tweakAppearance = juce::jlimit(0, 2, el.getIntAttribute("tweakAppearance", 0));
-        s.tweakLightTheme = juce::jlimit(0, 9, el.getIntAttribute("tweakLightTheme", 5));
-        s.tweakDarkTheme = juce::jlimit(0, 9, el.getIntAttribute("tweakDarkTheme", 0));
+        s.tweakLightTheme = juce::jlimit(0, kNumThemesPerFamily - 1, el.getIntAttribute("tweakLightTheme", kNeobrutalTheme));
+        s.tweakDarkTheme = juce::jlimit(0, kNumThemesPerFamily - 1, el.getIntAttribute("tweakDarkTheme", kNeobrutalTheme));
     }
     else if (themeCatalog == 1)
     {
+        // Legacy catalog v1: absolute 0–9 light / 10–19 dark.
         const int named = juce::jlimit(0, 19, el.getIntAttribute("tweakAppearance", 5));
         s.tweakAppearance = named >= 10 ? (int) Appearance::Dark : (int) Appearance::Light;
-        s.tweakLightTheme = named < 10 ? named : 5;
-        s.tweakDarkTheme = named >= 10 ? named - 10 : 0;
+        s.tweakLightTheme = named < 10 ? named : kNeobrutalTheme;
+        s.tweakDarkTheme = named >= 10 ? named - 10 : kNeobrutalTheme;
     }
     else
     {
         s.tweakAppearance = migrateThemeIndex(el.getIntAttribute("tweakAppearance", 0), false);
-        s.tweakLightTheme = 5;
-        s.tweakDarkTheme = 0;
+        s.tweakLightTheme = kNeobrutalTheme;
+        s.tweakDarkTheme = kNeobrutalTheme;
     }
     s.tweakShowTooltips = el.getIntAttribute("tweakShowTooltips", 1) != 0 ? 1 : 0;
     s.tweakFontFamily = juce::jlimit(0, 3, el.getIntAttribute("tweakFontFamily", 0));

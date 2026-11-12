@@ -47,8 +47,8 @@ struct SharedUiSession
     int tweakSize = 1;          // ContentSize::Medium
     int tweakTextScalePct = 100;
     int tweakAppearance = 0;    // Appearance::System (Auto) / Light / Dark
-    int tweakLightTheme = 5;    // Pearl
-    int tweakDarkTheme = 0;     // Ink (offset into dark family)
+    int tweakLightTheme = 20;   // Neobrutal (skill pack)
+    int tweakDarkTheme = 20;    // Neobrutal (skill pack, dark twin)
     int tweakShowTooltips = 1;
     int tweakFontFamily = 0;    // FontFamily::Archivo
     int tweakSurfaceStyle = 0;  // SurfaceStyle::Flat
