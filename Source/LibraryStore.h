@@ -53,7 +53,7 @@ struct SharedUiSession
     int tweakFontFamily = 0;    // FontFamily::Archivo
     int tweakSurfaceStyle = 0;  // SurfaceStyle::Flat
     int tweakAlternateRows = 1; // on by default
-    int tweakContrastPct = 100; // 40–100
+    int tweakSeparationPct = 100; // 50–300
 
     bool hasDefaultView = false;
     bool defEditorOpen = false;

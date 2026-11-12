@@ -16,6 +16,23 @@ juce::Colour rgba(juce::uint8 r, juce::uint8 g, juce::uint8 b, float a)
     return juce::Colour(r, g, b).withAlpha(a);
 }
 
+/** Surface separation: push a neutral layer further from (or closer to) the base
+    background. Opaque colours scale their per-channel distance from base;
+    translucent washes scale their alpha. */
+juce::Colour separate(juce::Colour c, juce::Colour base)
+{
+    const float k = (float) juce::jlimit(50, 300, tweaks().separationPct.load()) / 100.0f;
+    if (std::abs(k - 1.0f) < 0.001f) return c;
+    if (c.getFloatAlpha() < 0.999f)
+        return c.withAlpha(juce::jlimit(0.0f, 1.0f, c.getFloatAlpha() * k));
+    auto ch = [k](juce::uint8 v, juce::uint8 b)
+    {
+        return (juce::uint8) juce::jlimit(0, 255, juce::roundToInt((float) b + ((float) v - (float) b) * k));
+    };
+    return juce::Colour(ch(c.getRed(), base.getRed()), ch(c.getGreen(), base.getGreen()),
+                        ch(c.getBlue(), base.getBlue()), c.getFloatAlpha());
+}
+
 } // namespace
 
 const Palette& palette()
@@ -105,6 +122,10 @@ const Palette& palette()
     auto tinted = [](const Palette& src)
     {
         Palette p = src;
+#define SEP(field) p.field = separate(p.field, src.bg)
+        SEP(side); SEP(rollchrome); SEP(hl); SEP(selsoft); SEP(ctlb); SEP(trk);
+        SEP(rowalt); SEP(laneb); SEP(beat); SEP(winbrd); SEP(hoverWash); SEP(well);
+#undef SEP
 #define TINT(field) p.field = tintForTheme(p.field)
         TINT(bg); TINT(chrome); TINT(side); TINT(panel); TINT(rollchrome); TINT(hl);
         TINT(tx); TINT(tx2); TINT(tx3); TINT(acc); TINT(selsoft); TINT(ctl); TINT(ctlb);
@@ -120,19 +141,27 @@ const Palette& palette()
 
     static Palette cached;
     static int cachedTheme = -1;
-    static int cachedContrast = -1;
+    static int cachedSeparation = -1;
     const int theme = themeIndex();
-    const int contrast = tweaks().contrastPct.load();
-    if (theme != cachedTheme || contrast != cachedContrast)
+    const int separation = tweaks().separationPct.load();
+    if (theme != cachedTheme || separation != cachedSeparation)
     {
         cached = tinted(themeAt(theme).dark ? dark : light);
         cachedTheme = theme;
-        cachedContrast = contrast;
+        cachedSeparation = separation;
     }
     return cached;
 }
 
 // ── Groove Panel tokens not covered by the legacy slots ─────────────────────
+
+#define GP_SEP_TOKEN(fn, darkHex, lightHex) \
+    juce::Colour fn() { \
+        const bool d = usesDarkAppearance(); \
+        const auto base = juce::Colour(d ? (juce::uint32) darkHex : (juce::uint32) lightHex); \
+        const auto ground = juce::Colour(d ? 0xff27272au : 0xffffffffu); \
+        return tintForTheme(separate(base, ground)); \
+    }
 
 #define GP_TOKEN(fn, darkHex, lightHex) \
     juce::Colour fn() { \
@@ -142,11 +171,11 @@ const Palette& palette()
 
 // Dark neutrals from mockup pixels: ground ~#272729, raised ~#303032.
 GP_TOKEN(surface000, 0xff27272a, 0xffffffff)   // ground (header / panels)
-GP_TOKEN(surface100, 0xff303033, 0xfff6f6f6)   // raised (sidebar, wells, toolkit)
+GP_SEP_TOKEN(surface100, 0xff303033, 0xfff6f6f6)   // raised (sidebar, wells, toolkit)
 GP_TOKEN(surface200, 0xff27272a, 0xffffffff)   // control face = ground
-GP_TOKEN(surface300, 0xff363639, 0xffeeeff0)   // hover / grey count pills
-GP_TOKEN(line,       0xff3d3d3f, 0xffe7e8e9)   // hairline
-GP_TOKEN(edge,       0xff4e4e50, 0xffd4d5d8)   // edge
+GP_SEP_TOKEN(surface300, 0xff363639, 0xffeeeff0)   // hover / grey count pills
+GP_SEP_TOKEN(line,       0xff3d3d3f, 0xffe7e8e9)   // hairline
+GP_SEP_TOKEN(edge,       0xff4e4e50, 0xffd4d5d8)   // edge
 GP_TOKEN(ink,        0xffffffff, 0xff111827)   // text
 GP_TOKEN(inkMuted,   0xffb1b1b2, 0xff676b75)   // secondary @ ~64 %
 GP_TOKEN(inkFaint,   0xffb1b1b2, 0xff676b75)
@@ -162,6 +191,7 @@ GP_TOKEN(onPrimary,  0xff27272a, 0xffffffff)
 GP_TOKEN(warning,    0xffd97706, 0xffd97706)
 
 #undef GP_TOKEN
+#undef GP_SEP_TOKEN
 
 juce::Colour clip(int n)
 {

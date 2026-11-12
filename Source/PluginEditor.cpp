@@ -4177,17 +4177,18 @@ public:
         };
         addAndMakeVisible(alternateRowsSwitch);
 
-        // Contrast: 100 % = full Levels contrast; drag down to soften the palette.
-        contrastSlider.setValue(juce::jlimit(40, 100, tweaks().contrastPct.load()), juce::dontSendNotification);
-        contrastSlider.valueText = juce::String(contrastSlider.getValue()) + "%";
-        contrastSlider.setTooltip("Overall contrast between surfaces, lines and text (double-click for 100%)");
-        contrastSlider.onChange = [this](int v)
+        // Separation: how far section cards, sidebar, wells and lines sit from the
+        // background. 100 % = Levels default; drag up to make layers stand apart.
+        separationSlider.setValue(juce::jlimit(50, 300, tweaks().separationPct.load()), juce::dontSendNotification);
+        separationSlider.valueText = juce::String(separationSlider.getValue()) + "%";
+        separationSlider.setTooltip("How strongly panels, sections and lines stand apart from the background (double-click for 100%)");
+        separationSlider.onChange = [this](int v)
         {
-            tweaks().contrastPct.store(juce::jlimit(40, 100, v));
-            contrastSlider.valueText = juce::String(v) + "%";
+            tweaks().separationPct.store(juce::jlimit(50, 300, v));
+            separationSlider.valueText = juce::String(v) + "%";
             if (onChanged) onChanged();
         };
-        addAndMakeVisible(contrastSlider);
+        addAndMakeVisible(separationSlider);
 
         closeBtn.ghost = true;
         closeBtn.iconScale = 0.95f;
@@ -4223,7 +4224,7 @@ public:
         const int header = kHeaderH + kTabH + 8 + kFooterH + 20;
         const int rowH = (narrow ? 56 : 40) + 6;
         if (t == 0) return header + rowH + 8;
-        if (t == 1) return header + rowH * 8 + 8; // appearance + theme + contrast + size..alt
+        if (t == 1) return header + rowH * 8 + 8; // appearance + theme + separation + size..alt
         return header + 56;
     }
 
@@ -4234,7 +4235,7 @@ public:
         const bool output = tab == 0;
         appearancePopup.setVisible(design);
         themePopup.setVisible(design);
-        contrastSlider.setVisible(design);
+        separationSlider.setVisible(design);
         sizePopup.setVisible(design);
         textPopup.setVisible(design);
         fontPopup.setVisible(design);
@@ -4316,7 +4317,7 @@ public:
         {
             paintRow("Appearance", "Auto follows the system light/dark setting");
             paintRow("Theme", "Ten light and ten dark colour pairs");
-            paintRow("Contrast", "Softens surfaces, lines and text");
+            paintRow("Separation", "How far panels and sections stand apart");
             paintRow("UI size", "Scales spacing, panels, and controls");
             paintRow("Text size", "Scales type and icons only");
             paintRow("Font", "Interface typeface; values stay mono");
@@ -4373,7 +4374,7 @@ public:
 
         appearancePopup.setBounds({});
         themePopup.setBounds({});
-        contrastSlider.setBounds({});
+        separationSlider.setBounds({});
         sizePopup.setBounds({});
         textPopup.setBounds({});
         fontPopup.setBounds({});
@@ -4397,11 +4398,11 @@ public:
             {
                 auto row = body.removeFromTop(rowH);
                 if (narrow)
-                    contrastSlider.setBounds(row.removeFromBottom(ctrlH + 4));
+                    separationSlider.setBounds(row.removeFromBottom(ctrlH + 4));
                 else
                 {
                     const int w = juce::jmin(220, row.getWidth() / 2);
-                    contrastSlider.setBounds(row.removeFromRight(w).withSizeKeepingCentre(w, ctrlH + 4));
+                    separationSlider.setBounds(row.removeFromRight(w).withSizeKeepingCentre(w, ctrlH + 4));
                 }
                 body.removeFromTop(rowGap);
             }
@@ -4429,7 +4430,7 @@ private:
     fx::FlatPopup appearancePopup, themePopup, sizePopup, textPopup, fontPopup;
     fx::FlatSwitch tooltipsSwitch;
     fx::FlatSwitch alternateRowsSwitch;
-    fx::FlatSliderRow contrastSlider { "", 40, 100, 100, false };
+    fx::FlatSliderRow separationSlider { "", 50, 300, 100, false };
     IconBtn closeBtn { icons::x, "Close" };
     IconBtn saveDefaultBtn { icons::save, "Save" };
 };
