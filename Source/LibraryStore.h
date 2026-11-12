@@ -46,8 +46,14 @@ struct SharedUiSession
     int tweakDensity = 1;       // Density::Comfortable
     int tweakSize = 1;          // ContentSize::Medium
     int tweakTextScalePct = 100;
-    int tweakAppearance = 0;    // Appearance::System
+    int tweakAppearance = 0;    // Appearance::System (Auto) / Light / Dark
+    int tweakLightTheme = 5;    // Pearl
+    int tweakDarkTheme = 0;     // Ink (offset into dark family)
     int tweakShowTooltips = 1;
+    int tweakFontFamily = 0;    // FontFamily::Archivo
+    int tweakSurfaceStyle = 0;  // SurfaceStyle::Flat
+    int tweakAlternateRows = 1; // on by default
+    int tweakSeparationPct = 100; // 50–300
 
     bool hasDefaultView = false;
     bool defEditorOpen = false;
@@ -84,6 +90,7 @@ public:
     void flush() const;
 
     juce::StringArray starredFiles;
+    juce::StringArray starredFolders;
     std::vector<SavedSearchEntry> savedSearches;
     std::vector<CachedSearch> searchCache;
     SharedUiSession uiSession;
@@ -91,9 +98,12 @@ public:
     bool hasUiSession = false;
 
     bool isStarred(const juce::String& path) const { return starredFiles.contains(path); }
+    bool isStarredFolder(const juce::String& path) const { return starredFolders.contains(path); }
 
     void toggleStarred(const juce::String& path);
+    void toggleStarredFolder(const juce::String& path);
     void setStarredFiles(const juce::StringArray& paths);
+    void setStarredFolders(const juce::StringArray& paths);
     void addSavedSearch(const SavedSearchEntry& entry);
     void removeSavedSearch(int index);
     void setSavedSearches(std::vector<SavedSearchEntry> entries);
@@ -130,6 +140,7 @@ private:
 
     static juce::StringArray readStarsFromDisk();
     static void writeLibraryFile(juce::StringArray stars,
+                                 juce::StringArray folders,
                                  std::vector<SavedSearchEntry> searches,
                                  std::vector<CachedSearch> cache,
                                  SharedUiSession session,
