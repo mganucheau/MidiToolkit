@@ -7,8 +7,11 @@
 #include "MidiRecorder.h"
 #include "BrowserPanels.h"
 #include "LibraryStore.h"
+#include "HostParams.h"
 #include <atomic>
+#include <functional>
 #include <map>
+#include <vector>
 
 #ifndef MIDITOOLKIT_MIDI_FX
  #define MIDITOOLKIT_MIDI_FX 0
@@ -17,7 +20,8 @@
 namespace pflow {
 
 /** Lightweight MIDI-file browser: session-synced preview only (no arrangement). */
-class MidiToolkitProcessor : public juce::AudioProcessor
+class MidiToolkitProcessor : public juce::AudioProcessor,
+                             private juce::AsyncUpdater
 {
 public:
     MidiToolkitProcessor();
@@ -238,6 +242,25 @@ public:
     void setRecordMonitorFx(bool enabled) { recordMonitorFx.store(enabled); }
     RecordingSnapshot recordSnapshot() const { return recorder.snapshot(); }
 
+    // ── Host-automatable parameters (see HostParams.h) ──────────────────────
+    HostParams& hostParams() { return hostParams_; }
+    const HostParams& hostParams() const { return hostParams_; }
+
+    /** Editor hook (message thread): the host moved these Toolkit / Generator bindings.
+        The editor applies them to the inspector so the same handlers as a UI edit run.
+        Unset while no editor is open — the processor then updates LiveFxState itself. */
+    std::function<void(const std::vector<int>&)> onHostParamsChanged;
+    /** Editor hook (message thread): host moved the browser-index parameter to this position. */
+    std::function<void(int)> onHostBrowserIndex;
+    /** Browser position the host requested while no editor was open (-1 = none). */
+    std::atomic<int> pendingBrowserIndex { -1 };
+
+    /** Run any pending host-parameter apply now (message thread; tests / editor open). */
+    void applyPendingHostParamChanges() { handleUpdateNowIfNeeded(); }
+
+    /** Write the active clip's groove / edit / tempo into the parameters (no host feedback). */
+    void mirrorHostParamsFromClipState();
+
     /** Ask the audio thread to release every held note on the next block. */
     void requestNoteFlush()
     {
@@ -247,6 +270,12 @@ public:
     }
 
 private:
+    void handleAsyncUpdate() override;
+    /** No editor: fold host-changed bindings into LiveFxState + the active clip's maps. */
+    void applyHostParamsHeadless(const std::vector<int>& bindings);
+
+    HostParams hostParams_;
+
     void generatePreviewMidi(const MidiClip& clip, double startBeat, double endBeat,
                              juce::MidiBuffer& output, int numSamples,
                              int sampleOffsetBase = 0);
@@ -259,6 +288,9 @@ private:
     bool wasSounding_ = false;
     bool wasHostPlaying_ = false;
     bool activeNotes_[16][128] = {};   // audio-thread ledger of held note-ons
+    /** Pitch Input shift (semitones) for this block; per-note ledger keeps note-offs paired. */
+    int previewInputShift_ = 0;
+    juce::int8 previewNoteShift_[16][128] = {};
 
     juce::CriticalSection previewLock_;
     MidiClip previewClip_;

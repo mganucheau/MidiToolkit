@@ -22,10 +22,18 @@ struct LiveFxState
     bool recording = false;
 };
 
+/** Pitch Input: semitone shift (nearest direction, -6..+6) that moves the clip's root
+    onto the incoming MIDI note's pitch class. 0 when Input is off, nothing is latched,
+    or the clip root is unknown. Needs no Map to Root: the reference root is the clip's
+    own root, or the Key chip when Map to Root already moved the clip there. */
+int pitchInputDelta(int latchedMidi, const ClipEdit& edit, int sourceRoot);
+
 /** Transform a live MIDI pitch with the stream-capable ClipEdit pitch fields.
-    Channel 10 (drums) skips octave-window / scale remap when `drumChannel` is true. */
+    Channel 10 (drums) skips octave-window / scale remap when `drumChannel` is true.
+    `pitchInputMidi` >= 0 (the latched incoming note) transposes the clip to that note
+    when `edit.pitchInput` is on, without requiring Map to Root. */
 int transformLivePitch(int midi, const ClipEdit& edit, int sourceRoot, int sourceOctave,
-                       bool drumChannel = false);
+                       bool drumChannel = false, int pitchInputMidi = -1);
 
 /** True when the note's pitch-class is muted by the note filter. */
 bool liveNoteMuted(int midi, const ClipEdit& edit);
@@ -56,6 +64,10 @@ public:
     void flush(juce::MidiBuffer& out, int samplePosition = 0);
 
     bool hasHeldNotes() const;
+
+    /** Latch the most recent melodic note-on in `midi` for Pitch Input. Generate mode
+        discards host MIDI, so it calls this first; effect mode latches inside process(). */
+    void observePitchInput(const juce::MidiBuffer& midi);
 
     /** Latched keyboard pitch for Pitch Input (-1 = none). */
     int pitchLatchMidi() const { return pitchLatchMidi_.load(); }

@@ -5,7 +5,7 @@ namespace pflow {
 using namespace fx;
 
 EffectsInspector::EffectsInspector()
-    : tempoRow("Time", tempoToggle)
+    : tempoRow("Time", tempoPopup)
     , extendRow("Extend", extendPopup)
     , reverseRow("Reverse", reverseSwitch)
     , invertRow("Invert", invertSwitch)
@@ -21,20 +21,16 @@ EffectsInspector::EffectsInspector()
     , velocityRangeSl("Velocity", 1, 127, 1, 127)
     , sustainRow("Sustain Pedal", sustainPopup)
     , complexitySl("Complexity", 0, 100, 50, true)
-    , syncopationSl("Syncopation", 0, 100, 0, false)
-    , variationsSl("Variations", 0, 16, 0, false)
+    , variationsSl("Variations", 0, kMaxVariations, 0, false)
+    , revoiceSl("Revoice", 0, kMaxRevoice, 0, false)
     , delayAmountSl("Amount", 0, 100, 0, false)
     , delayFeedbackSl("Feedback", 0, 100, 40, false)
     , arpGenerateRow("Generate", arpGenerateBtn)
-    , arpInputRow("Input", arpInputSwitch)
     , arpLengthRow("Length", arpLengthPopup)
     , arpFormRow("Form", arpFormPopup)
     , arpShapeRow("Type", arpShapePopup)
     , arpRateRow("Rate", arpRatePopup)
     , arpDensitySl("Density", 0, 100, 55, false)
-    , arpIntensitySl("Intensity", 0, 100, 70, false)
-    , arpDynamicsSl("Dynamics", 0, 100, 55, false)
-    , arpGateSl("Gate", 10, 100, 70, false)
     , melodyGenerateRow("Generate", melodyGenerateBtn)
     , melodyInputRow("Input", melodyInputSwitch)
     , melodyLengthRow("Length", melodyLengthPopup)
@@ -141,8 +137,9 @@ EffectsInspector::EffectsInspector()
     velocityRangeSl.setTooltip("Compress clip velocities into this MIDI range");
     sustainPopup.setTooltip("Generate sustain-pedal automation for preview and export");
     complexitySl.setTooltip("Simplify or enrich the clip relative to its baseline complexity");
-    syncopationSl.setTooltip("Pull offbeat attacks earlier for a more syncopated feel");
     variationsSl.setTooltip("Cycle alternate slight takes of the clip");
+    revoiceSl.setTooltip("Group simultaneous notes into chords and revoice them with voice-leading (Off = original voicing)");
+    tempoPopup.setTooltip("Halve or double playback tempo vs the clip / host");
     delayTimePopup.setTooltip("Delay tap spacing");
     delayAmountSl.setTooltip("How loud delayed repeats are");
     delayFeedbackSl.setTooltip("How many delay repeats and how long they decay");
@@ -153,9 +150,11 @@ EffectsInspector::EffectsInspector()
     fitSwitch.setTooltip("Snap pitches into the selected key and mode");
     mapSwitch.setTooltip("Transpose so the clip root matches the selected key");
 
-    tempoToggle.onChange = [this](double m)
+    tempoPopup.setItems({ "1x", "0.5x", "2x" }, 0);
+    tempoPopup.onChange = [this](int idx)
     {
-        bpmMultiplier = m;
+        static constexpr double kMult[] = { 1.0, 0.5, 2.0 };
+        bpmMultiplier = kMult[juce::jlimit(0, 2, idx)];
         if (onBpmMultiplierChanged) onBpmMultiplierChanged(bpmMultiplier);
         refreshDirtySections();
     };
@@ -203,9 +202,10 @@ EffectsInspector::EffectsInspector()
         notifyGroove();
     };
 
-    syncopationSl.onChange = [this](int v)
+    revoiceSl.onChange = [this](int v)
     {
-        groove.syncopation = juce::jlimit(0, 100, v);
+        groove.revoice = juce::jlimit(0, kMaxRevoice, v);
+        revoiceSl.valueText = v <= 0 ? "Off" : juce::String(v);
         notifyGroove();
     };
 
@@ -368,6 +368,15 @@ EffectsInspector::EffectsInspector()
     keyGrid.multiSelect = false;
     keyGrid.setItems(keys);
     keyGrid.setSelectedIndex(0, juce::dontSendNotification);
+    // Hover a candidate key: how sure the clip is about it, and the mode to try.
+    keyGrid.hoverTip = [this](int root) -> juce::String
+    {
+        if (!juce::isPositiveAndBelow(root, 12)
+            || (candidateKeyMask & (uint16_t) (1u << root)) == 0)
+            return {};
+        return "Certainty " + juce::String(clipAnalysis.rootCertainty[(size_t) root])
+             + "% - suggests " + modeName(clipAnalysis.rootMode[(size_t) root]);
+    };
     keyGrid.onChange = [this]
     {
         edit.root = keyGrid.getSelectedIndex();
@@ -444,8 +453,9 @@ EffectsInspector::EffectsInspector()
         return groove.articulationIndex != (int) Articulation::Off && groove.articulationStrength > 0;
     });
     performance.addRow(&performanceDivider, [this] { return performanceDivider.idealHeight(); });
-    performance.addRow(&dynamicsSl, kSliderRowH, [this] { return groove.dynamics != 0; });
-    performance.addRow(&intensitySl, kSliderRowH, [this] { return groove.intensity != 100; });
+    // Intensity / Dynamics removed from the inspector (still driven by Articulation + host params).
+    dynamicsSl.setVisible(false);
+    intensitySl.setVisible(false);
     performance.addRow(&velocityRangeSl, [this] { return velocityRangeSl.idealHeight(); }, [this] {
         return groove.velocityRangeLo > 1 || groove.velocityRangeHi < 127;
     });
@@ -479,8 +489,8 @@ EffectsInspector::EffectsInspector()
     pitchSec.addRow(&filterTypeRow, kRowMinH, [this] { return edit.hasNoteFilter(); });
 
     formSec.addRow(&complexitySl, kSliderRowH, [this] { return groove.complexityTarget >= 0; });
-    formSec.addRow(&syncopationSl, kSliderRowH, [this] { return groove.syncopation > 0; });
     formSec.addRow(&variationsSl, kSliderRowH, [this] { return groove.variationIndex > 0; });
+    formSec.addRow(&revoiceSl, kSliderRowH, [this] { return groove.revoice > 0; });
     formSec.addRow(&reverseRow, kRowMinH, [this] { return edit.reverse; });
     formSec.addRow(&invertRow, kRowMinH, [this] { return edit.invert; });
 
@@ -511,7 +521,7 @@ EffectsInspector::EffectsInspector()
         for (int i = 0; i < (int) ArpShape::Count; ++i)
             shapes.add(arpShapeLabel((ArpShape) i));
         arpShapePopup.setItems(shapes, 0);
-        arpShapePopup.setTooltip("Morphs phrasing from open intervals toward classic lines");
+        arpShapePopup.setTooltip("Morphs phrasing from open intervals toward classic lines. Acid adds octave jumps and slides on the rate grid");
         arpShapePopup.onChange = [this](int idx)
         {
             groove.arpShapeIndex = juce::jlimit(0, (int) ArpShape::Count - 1, idx);
@@ -541,32 +551,10 @@ EffectsInspector::EffectsInspector()
         arpDensitySl.onChange = [this](int v)
         {
             groove.arpDensity = v;
-            arpDensitySl.valueText = juce::String(v) + "%";
+            arpDensitySl.valueText = v >= 100 ? "Every" : (juce::String(v) + "%");
             notifyGroove();
         };
-        arpIntensitySl.onChange = [this](int v)
-        {
-            groove.arpIntensity = v;
-            arpIntensitySl.valueText = juce::String(v) + "%";
-            notifyGroove();
-        };
-        arpDynamicsSl.onChange = [this](int v)
-        {
-            groove.arpDynamics = v;
-            arpDynamicsSl.valueText = juce::String(v) + "%";
-            notifyGroove();
-        };
-        arpGateSl.onChange = [this](int v)
-        {
-            groove.arpGate = v;
-            arpGateSl.valueText = juce::String(v) + "%";
-            notifyGroove();
-        };
-        arpInputSwitch.onClick = [this]
-        {
-            groove.arpInput = arpInputSwitch.getToggleState();
-            notifyGroove();
-        };
+        arpDensitySl.setTooltip("Note activity. 100% plays a note on every step of the Rate");
         arpGenerateBtn.setTooltip("Roll a new pattern into the piano roll");
         arpGenerateBtn.onClick = [this]
         {
@@ -578,7 +566,6 @@ EffectsInspector::EffectsInspector()
             if (onGeneratorGenerated) onGeneratorGenerated(0);
         };
         arpSec.addRow(&arpGenerateRow, kRowMinH, [this] { return groove.arpEnabled; });
-        arpSec.addRow(&arpInputRow, kRowMinH, [this] { return groove.arpInput; });
         arpSec.addRow(&arpLengthRow, kRowMinH, [this] { return groove.arpEnabled; });
         arpSec.addRow(&arpFormRow, kRowMinH, [this] {
             // Visible when folded if Form is non-Auto or length is long enough for tiling.
@@ -590,15 +577,6 @@ EffectsInspector::EffectsInspector()
         arpSec.addRow(&arpRateRow, kRowMinH, [this] { return groove.arpEnabled; });
         arpSec.addRow(&arpDensitySl, kSliderRowH, [this] {
             return groove.arpEnabled && groove.arpDensity != 55;
-        });
-        arpSec.addRow(&arpIntensitySl, kSliderRowH, [this] {
-            return groove.arpEnabled && groove.arpIntensity != 70;
-        });
-        arpSec.addRow(&arpDynamicsSl, kSliderRowH, [this] {
-            return groove.arpEnabled && groove.arpDynamics != 55;
-        });
-        arpSec.addRow(&arpGateSl, kSliderRowH, [this] {
-            return groove.arpEnabled && groove.arpGate != 70;
         });
 
         juce::StringArray styles;
@@ -1009,8 +987,8 @@ void EffectsInspector::resetPerformanceSection()
 void EffectsInspector::resetFormSection()
 {
     groove.complexityTarget = -1;
-    groove.syncopation = 0;
     groove.variationIndex = 0;
+    groove.revoice = 0;
     edit.reverse = false;
     edit.invert = false;
     edit.selectedNotesOnly = false;
@@ -1226,6 +1204,7 @@ void EffectsInspector::setClipScaleAnalysis(const ScaleAnalysis& analysis)
     // Fit-to-Scale look enabled for a key that was never applied.
     candidateKeyMask = analysis.keyMask;
     candidateModeMask = analysis.modeMask;
+    clipAnalysis = analysis;
     keyGrid.setCandidateMask(candidateKeyMask);
     syncNoteFilterScale();
     refreshPitchAnnotation();
@@ -1246,8 +1225,8 @@ void EffectsInspector::refreshFormClipGating()
     // or stay false). Transforms simply no-op until a clip is present.
     juce::ignoreUnused(hasClip, liveStream);
     for (auto* c : { (juce::Component*) &complexitySl,
-                     (juce::Component*) &syncopationSl,
                      (juce::Component*) &variationsSl,
+                     (juce::Component*) &revoiceSl,
                      (juce::Component*) &reverseRow,
                      (juce::Component*) &invertRow })
         formSec.setRowForcedHidden(c, false);
@@ -1276,7 +1255,8 @@ void EffectsInspector::setTrimState(bool active, bool enabled, const juce::Strin
 void EffectsInspector::setBpmMultiplier(double mult, juce::NotificationType)
 {
     bpmMultiplier = juce::jlimit(0.25, 4.0, mult);
-    tempoToggle.setMultiplier(bpmMultiplier, juce::dontSendNotification);
+    tempoPopup.setIndex(bpmMultiplier < 0.75 ? 1 : (bpmMultiplier > 1.5 ? 2 : 0),
+                        juce::dontSendNotification);
     refreshDirtySections();
 }
 
@@ -1294,8 +1274,8 @@ void EffectsInspector::setGroove(const GrooveParams& g, juce::NotificationType)
     delayAmountSl.setValue(g.delayAmount, juce::dontSendNotification);
     delayFeedbackSl.setValue(g.delayFeedback, juce::dontSendNotification);
     velocityRangeSl.setRange(g.velocityRangeLo, g.velocityRangeHi, juce::dontSendNotification);
-    syncopationSl.setValue(g.syncopation, juce::dontSendNotification);
     variationsSl.setValue(g.variationIndex, juce::dontSendNotification);
+    revoiceSl.setValue(g.revoice, juce::dontSendNotification);
 
     swingTimePopup.setIndex(juce::jlimit(0, 5, g.swingGridIndex), juce::dontSendNotification);
     quantizeTimePopup.setIndex(juce::jlimit(0, (int) QuantizeGrid::Count - 1, g.quantizeGridIndex),
@@ -1307,7 +1287,6 @@ void EffectsInspector::setGroove(const GrooveParams& g, juce::NotificationType)
                           juce::dontSendNotification);
     delayTimePopup.setIndex(juce::jlimit(0, (int) DelayTime::Count - 1, g.delayTimeIndex),
                             juce::dontSendNotification);
-    arpInputSwitch.setToggleState(g.arpInput, juce::dontSendNotification);
     arpLengthPopup.setIndex(juce::jlimit(0, (int) GeneratorLength::Count - 1, g.arpLengthIndex),
                             juce::dontSendNotification);
     arpFormPopup.setIndex(juce::jlimit(0, (int) GeneratorForm::Count - 1, g.arpFormIndex),
@@ -1317,13 +1296,7 @@ void EffectsInspector::setGroove(const GrooveParams& g, juce::NotificationType)
     arpRatePopup.setIndex(juce::jlimit(0, (int) DelayTime::Count - 1, g.arpRateIndex),
                           juce::dontSendNotification);
     arpDensitySl.setValue(g.arpDensity, juce::dontSendNotification);
-    arpDensitySl.valueText = juce::String(g.arpDensity) + "%";
-    arpIntensitySl.setValue(g.arpIntensity, juce::dontSendNotification);
-    arpIntensitySl.valueText = juce::String(g.arpIntensity) + "%";
-    arpDynamicsSl.setValue(g.arpDynamics, juce::dontSendNotification);
-    arpDynamicsSl.valueText = juce::String(g.arpDynamics) + "%";
-    arpGateSl.setValue(g.arpGate, juce::dontSendNotification);
-    arpGateSl.valueText = juce::String(g.arpGate) + "%";
+    arpDensitySl.valueText = g.arpDensity >= 100 ? "Every" : (juce::String(g.arpDensity) + "%");
     melodyInputSwitch.setToggleState(g.melodyInput, juce::dontSendNotification);
     melodyStylePopup.setIndex(juce::jlimit(0, (int) MelodyStyle::Count - 1, g.melodyStyleIndex),
                               juce::dontSendNotification);
@@ -1375,8 +1348,8 @@ void EffectsInspector::setGroove(const GrooveParams& g, juce::NotificationType)
     delayAmountSl.valueText = juce::String(g.delayAmount) + "%";
     delayFeedbackSl.valueText = juce::String(g.delayFeedback) + "%";
     velocityRangeSl.valueText = juce::String(g.velocityRangeLo) + "-" + juce::String(g.velocityRangeHi);
-    syncopationSl.valueText = juce::String(g.syncopation);
     variationsSl.valueText = g.variationIndex <= 0 ? "Off" : ("#" + juce::String(g.variationIndex));
+    revoiceSl.valueText = g.revoice <= 0 ? "Off" : juce::String(g.revoice);
     refreshComplexitySlider();
     refreshDirtySections();
     repaint();
@@ -1431,6 +1404,7 @@ void EffectsInspector::notifyGroove()
                               + juce::String(groove.velocityRangeHi);
     variationsSl.valueText = groove.variationIndex <= 0 ? "Off"
                            : ("#" + juce::String(groove.variationIndex));
+    revoiceSl.valueText = groove.revoice <= 0 ? "Off" : juce::String(groove.revoice);
     if (onGrooveChanged) onGrooveChanged(groove);
     refreshDirtySections();
 }
@@ -1762,14 +1736,10 @@ void EffectsInspector::resized()
         p.setSize(halfW, kControlH);
         row.setControlWidth(halfW);
     };
-    {
-        const int tempoW = kSelectHalfW;
-        tempoToggle.setSize(tempoW, kControlH);
-        tempoRow.setControlWidth(tempoW);
-    }
     trimRow.setControlWidth(trimSwitch.idealWidth());
     reverseRow.setControlWidth(reverseSwitch.idealWidth());
     invertRow.setControlWidth(invertSwitch.idealWidth());
+    fitSelect(tempoPopup, tempoRow);
     fitSelect(extendPopup, extendRow);
     fitWide(sustainPopup, sustainRow);
     fitSelect(octaveRangePopup, octaveRangeRow);
@@ -1801,7 +1771,6 @@ void EffectsInspector::resized()
     swingBlock.setControlWidth(stepW);
     delayBlock.setControlWidth(stepW);
     arpGenerateRow.setControlWidth(arpGenerateBtn.idealWidth());
-    arpInputRow.setControlWidth(arpInputSwitch.idealWidth());
     melodyGenerateRow.setControlWidth(melodyGenerateBtn.idealWidth());
     melodyInputRow.setControlWidth(melodyInputSwitch.idealWidth());
     chordsGenerateRow.setControlWidth(chordsGenerateBtn.idealWidth());
@@ -1811,9 +1780,6 @@ void EffectsInspector::resized()
     drumGenerateRow.setControlWidth(drumGenerateBtn.idealWidth());
     pitchInputRow.setControlWidth(pitchInputSwitch.idealWidth());
     arpDensitySl.setSize(arpDensitySl.getWidth(), kControlH);
-    arpIntensitySl.setSize(arpIntensitySl.getWidth(), kControlH);
-    arpDynamicsSl.setSize(arpDynamicsSl.getWidth(), kControlH);
-    arpGateSl.setSize(arpGateSl.getWidth(), kControlH);
     drumDensitySl.setSize(drumDensitySl.getWidth(), kControlH);
     drumFillSl.setSize(drumFillSl.getWidth(), kControlH);
 
@@ -1827,13 +1793,13 @@ void EffectsInspector::resized()
 
 void EffectsInspector::paint(juce::Graphics& g)
 {
-    // Levels Toolkit: ground surface000, header face surface200, body well surface100.
+    // Levels Toolkit: ground surface000, header matches Browser/Generator (surface300).
     g.fillAll(ds::surface000());
     g.setColour(ds::line());
     g.fillRect(getLocalBounds().removeFromLeft(1));
 
     auto header = getLocalBounds().removeFromTop(metrics::paneHeaderH());
-    g.setColour(ds::surface200());
+    g.setColour(ds::surface300());
     g.fillRect(header);
     g.setColour(ds::line());
     g.fillRect(header.getX(), header.getBottom() - 1, header.getWidth(), 1);
@@ -1843,7 +1809,7 @@ void EffectsInspector::paint(juce::Graphics& g)
     g.setFont(uiFontFixed(12.0f, true));
     if (externalGeneratorHost != nullptr)
     {
-        // Levels pane title.
+        // Same type size as Browser / Generator pane titles.
         g.setFont(uiFontFixed(14.0f, true));
         g.setColour(ds::ink());
         auto t = header.withTrimmedLeft(metrics::scaled(12)).withRight(btnChanged.getX() - 4);

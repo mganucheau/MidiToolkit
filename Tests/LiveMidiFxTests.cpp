@@ -26,6 +26,25 @@ TEST_CASE("transformLivePitch map-to-root uses source root", "[LiveMidiFx]")
     REQUIRE(transformLivePitch(60, e, 0, 4) == 62);
 }
 
+TEST_CASE("Pitch Input transposes to the incoming note without Map to Root", "[LiveMidiFx]")
+{
+    ClipEdit e;
+    e.pitchInput = true;
+    e.mapToRoot = false;
+    // Clip is in C; incoming D (MIDI 62) moves it up 2 semitones.
+    CHECK(pitchInputDelta(62, e, 0) == 2);
+    CHECK(transformLivePitch(60, e, 0, 4, false, 62) == 62);
+    // Nearest direction: incoming B transposes down 1, not up 11.
+    CHECK(pitchInputDelta(71, e, 0) == -1);
+    // No latched note or Pitch Input off → untouched.
+    CHECK(pitchInputDelta(-1, e, 0) == 0);
+    e.pitchInput = false;
+    CHECK(transformLivePitch(60, e, 0, 4, false, 62) == 60);
+    // Drums are never transposed.
+    e.pitchInput = true;
+    CHECK(transformLivePitch(36, e, 0, 4, true, 62) == 36);
+}
+
 TEST_CASE("liveNoteMuted respects mute filter", "[LiveMidiFx]")
 {
     ClipEdit e;

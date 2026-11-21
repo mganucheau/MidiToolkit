@@ -83,6 +83,21 @@ TEST_CASE("analyseClipScale detects viable keys/modes and octave span", "[editmo
     CHECK(analyseClipScale(wide).octaveRange >= 2);
 }
 
+TEST_CASE("analyseClipScale exports per-root certainty and suggested mode", "[editmodel]")
+{
+    auto clip = makeClip({ { 0, 60, 0.0, 2.0 }, { 1, 64, 0.0, 2.0 }, { 2, 67, 0.0, 2.0 } }, 1, 0);
+    const auto a = analyseClipScale(clip);
+    // Every candidate root reports a certainty; C major triad is surest about C.
+    for (int r = 0; r < 12; ++r)
+        if (a.keyMask & (uint16_t) (1u << r))
+        {
+            CHECK(a.rootCertainty[(size_t) r] > 0);
+            CHECK(a.rootCertainty[(size_t) r] <= 100);
+        }
+    CHECK(a.rootCoverage[0] == 100);
+    CHECK(a.rootMode[0] == Mode::Ionian);
+}
+
 TEST_CASE("analyseClipScale seeds Major when Lydian covers F#", "[editmodel]")
 {
     // C Lydian content (C E F# G) — Lydian covers it, but audition defaults to

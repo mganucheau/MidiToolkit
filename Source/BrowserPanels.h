@@ -719,6 +719,8 @@ public:
     /** Host the sidebar's search field in the search row. */
     void setSearchComponent(juce::Component* c);
     void setTitle(const juce::String&);
+    /** Absolute folder path used for “Open in Finder” on the title. */
+    void setFolderPath(const juce::File& folder);
     void setCount(int, int);
     void setGrid(bool);
     void setSubfolders(bool);
@@ -746,6 +748,7 @@ private:
     int filtersActiveCount = 0;
     juce::String filtersSummary;
     juce::String titleText;
+    juce::File folderPath;
     int shownCount = 0;
     int totalCount = 0;
     juce::Rectangle<int> titleBounds, countBounds, filtersBadgeBounds;

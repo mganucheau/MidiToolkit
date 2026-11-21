@@ -95,6 +95,8 @@ enum class ArpShape : int
     Pedal,
     Arch,
     Climb,
+    /** 303-style line: low pool, octave jumps and slides (overlapping notes) on the rate grid. */
+    Acid,
     Count
 };
 
@@ -209,6 +211,8 @@ enum class StrumDirection : int
 };
 
 constexpr int kNumKnobs = 6;
+constexpr int kMaxVariations = 25;
+constexpr int kMaxRevoice = 25;
 extern const std::array<KnobDef, kNumKnobs> kKnobDefs;
 
 inline const char* quantizeGridLabel(QuantizeGrid g)
@@ -294,6 +298,7 @@ inline const char* arpShapeLabel(ArpShape s)
         case ArpShape::Pedal: return "Pedal";
         case ArpShape::Arch:  return "Arch";
         case ArpShape::Climb: return "Climb";
+        case ArpShape::Acid:  return "Acid";
         case ArpShape::Count: break;
     }
     return "Walk";
@@ -489,23 +494,24 @@ struct GrooveParams
 
     /** -1 = follow clip baseline (no morph). Else 0..100 target complexity. */
     int complexityTarget = -1;
-    /** 0..100 — pull offbeat attacks earlier for a more syncopated feel. */
-    int syncopation = 0;
-
     int delayTimeIndex = (int) DelayTime::Eighth;
     int delayAmount = 0;            // 0..100
     int delayFeedback = 40;         // 0..100
 
     bool arpEnabled = false;
+    /** Legacy (XML compat). The Arp Input row is gone: LiveMidiFx sets this on its own
+        copy so effect mode arpeggiates held notes and generate mode never does. */
     bool arpInput = false;
     int arpDirectionIndex = (int) ArpDirection::Up;   // legacy / lock compat
     int arpShapeIndex = (int) ArpShape::Walk;         // morphs toward classic phrasing (Sting Type)
     int arpRateIndex = (int) DelayTime::Sixteenth;
+    /** Legacy (XML compat) — Gate / Intensity / Dynamics have no UI; the arp uses fixed values. */
     int arpGate = 70;               // 10..100 %
     int arpOctaves = 2;             // 1..3 span for pattern octave lane
-    int arpDensity = 55;            // 0..100 note activity
-    int arpIntensity = 70;          // 0..100 overall velocity
-    int arpDynamics = 55;           // 0..100 accent contrast
+    /** 0..100 note activity. 100 forces a note on every step of the arp rate. */
+    int arpDensity = 55;
+    int arpIntensity = 70;          // legacy, unused
+    int arpDynamics = 55;           // legacy, unused
     int arpLengthIndex = (int) GeneratorLength::FourBars;
     int arpFormIndex = (int) GeneratorForm::Auto;
     int arpVariation = 1;           // 1..16 seed
@@ -558,8 +564,11 @@ struct GrooveParams
     int velocityRangeLo = 1;
     int velocityRangeHi = 127;
 
-    /** 0 = original. 1..16 = alternate slight variations of the clip. */
+    /** 0 = original. 1..kMaxVariations = alternate slight variations of the clip. */
     int variationIndex = 0;
+    /** 0 = original voicing. 1..kMaxRevoice groups simultaneous notes into chords and
+        revoices them with voice-leading (higher = more chords change, more inversions). */
+    int revoice = 0;
 
     int  get(int knobIndex) const;
     void set(int knobIndex, int value);

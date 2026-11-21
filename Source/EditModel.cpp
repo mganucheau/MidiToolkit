@@ -381,6 +381,63 @@ ScaleAnalysis analyseClipScale(const StepClip& clip)
         }
     }
 
+    // Per-root coverage / certainty / suggested mode (key-chip hover readout).
+    {
+        double w[12] = {};
+        double total = 0.0;
+        for (const auto& n : clip.notes)
+        {
+            const double len = juce::jmax(0.25, n.len);
+            w[wrapPc(n.pitch)] += len;
+            total += len;
+        }
+
+        double bestEvidence[12] = {};
+        for (int root = 0; root < 12; ++root)
+        {
+            double bestCov = -1.0, bestEv = 0.0, bestRank = -1.0;
+            int bestMode = (int) Mode::Ionian;
+            for (int mi = 0; mi < kNumModes; ++mi)
+            {
+                const auto& iv = modeIntervals((Mode) mi);
+                bool scalePc[12] = {};
+                for (int step : iv)
+                    scalePc[wrapPc(root + step)] = true;
+
+                double inside = 0.0;
+                for (int pc = 0; pc < 12; ++pc)
+                    if (scalePc[pc]) inside += w[pc];
+                const double cov = total > 0.0 ? inside / total : 0.0;
+                const double ev = total > 0.0
+                    ? (w[root] + 0.5 * (w[wrapPc(root + iv[2])] + w[wrapPc(root + iv[4])])) / total
+                    : 0.0;
+                // Same-coverage modes: strongest tonic/third/fifth emphasis, then
+                // the common Major / Minor reading.
+                const double rank = ev + ((mi == (int) Mode::Ionian || mi == (int) Mode::Aeolian) ? 0.02 : 0.0);
+                if (cov > bestCov + 1.0e-9 || (std::abs(cov - bestCov) <= 1.0e-9 && rank > bestRank))
+                {
+                    bestCov = cov;
+                    bestEv = ev;
+                    bestRank = rank;
+                    bestMode = mi;
+                }
+            }
+            out.rootCoverage[(size_t) root] = juce::jlimit(0, 100, (int) std::lround(100.0 * bestCov));
+            out.rootMode[(size_t) root] = (Mode) bestMode;
+            bestEvidence[root] = bestEv;
+        }
+
+        double maxEv = 0.0;
+        for (double e : bestEvidence) maxEv = juce::jmax(maxEv, e);
+        for (int root = 0; root < 12; ++root)
+        {
+            const double cov = out.rootCoverage[(size_t) root] / 100.0;
+            const double rel = maxEv > 0.0 ? bestEvidence[root] / maxEv : 1.0;
+            out.rootCertainty[(size_t) root] =
+                juce::jlimit(0, 100, (int) std::lround(100.0 * cov * (0.5 + 0.5 * rel)));
+        }
+    }
+
     // Fallback: estimated root + Major if no diatonic cover (e.g. chromatic).
     if (out.primaryRoot < 0)
     {
@@ -541,7 +598,7 @@ bool editIsClean(const ClipEdit& e)
     if (!e.velocities.empty() || !e.deleted.empty())
         return false;
     for (const auto& [id, mv] : e.moves)
-        if (mv.dPitch != 0 || mv.dStep != 0)
+        if (mv.dPitch != 0 || mv.dStep != 0 || mv.dLen != 0.0)
             return false;
     return true;
 }
@@ -605,7 +662,9 @@ ResolvedClip resolveClip(const StepClip& clip, const ClipEdit& e,
         RollNote r = n;
         r.pitch = pitch;
         r.start = n.start + mv.dStep;
-        r.moved = (mv.dPitch != 0 || mv.dStep != 0);
+        if (mv.dLen != 0.0)
+            r.len = std::max(0.25, n.len + mv.dLen);
+        r.moved = (mv.dPitch != 0 || mv.dStep != 0 || mv.dLen != 0.0);
         if (auto vit = e.velocities.find(n.id); vit != e.velocities.end())
             r.fileVelocity = std::clamp(vit->second, 1, 127);
         out.notes.push_back(r);
@@ -861,7 +920,7 @@ std::vector<EditBadge> editBadges(const StepClip& clip, const ClipEdit& e)
 
     int moved = 0;
     for (const auto& [id, mv] : e.moves)
-        if (mv.dPitch != 0 || mv.dStep != 0)
+        if (mv.dPitch != 0 || mv.dStep != 0 || mv.dLen != 0.0)
             ++moved;
     if (moved > 0)
         out.push_back({ "moves", juce::String(moved) + (moved > 1 ? " notes moved" : " note moved") });

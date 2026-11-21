@@ -21,6 +21,10 @@ MidiToolkitProcessor::MidiToolkitProcessor()
                          .withOutput("Output", juce::AudioChannelSet::stereo(), true))
    #endif
 {
+    // Stable, automatable parameters (IDs are append-only — see HostParams.h).
+    hostParams_.create(*this);
+    hostParams_.onHostChange = [this] { triggerAsyncUpdate(); };
+
     library_.load();
     applyLibraryToMemory();
     applySharedUiSessionFromLibrary();
@@ -29,6 +33,10 @@ MidiToolkitProcessor::MidiToolkitProcessor()
 
 MidiToolkitProcessor::~MidiToolkitProcessor()
 {
+    cancelPendingUpdate();
+    hostParams_.onHostChange = nullptr;
+    onHostParamsChanged = nullptr;
+    onHostBrowserIndex = nullptr;
     // Favorites + last workspace live in Application Support — flush on teardown.
     persistSharedUiSession();
     syncLibraryFromMemory();
@@ -94,7 +102,10 @@ void MidiToolkitProcessor::applySharedUiSessionFromLibrary()
     tweaks().fontFamily.store(juce::jlimit(0, (int) FontFamily::Count - 1, s.tweakFontFamily));
     tweaks().surfaceStyle.store(juce::jlimit(0, (int) SurfaceStyle::Count - 1, s.tweakSurfaceStyle));
     tweaks().alternateRows.store(s.tweakAlternateRows != 0 ? 1 : 0);
-    tweaks().separationPct.store(juce::jlimit(50, 300, s.tweakSeparationPct));
+    tweaks().contrastPct.store(juce::jlimit(50, 200, s.tweakContrastPct));
+    tweaks().noteLabels.store(s.tweakNoteLabels != 0 ? 1 : 0);
+    tweaks().customPrimary.store(s.tweakCustomPrimary);
+    tweaks().customSecondary.store(s.tweakCustomSecondary);
 
     hasDefaultView = s.hasDefaultView;
     defEditorOpen = s.defEditorOpen;
@@ -154,7 +165,10 @@ void MidiToolkitProcessor::persistSharedUiSession()
     s.tweakFontFamily = tweaks().fontFamily.load();
     s.tweakSurfaceStyle = tweaks().surfaceStyle.load();
     s.tweakAlternateRows = tweaks().alternateRows.load();
-    s.tweakSeparationPct = tweaks().separationPct.load();
+    s.tweakContrastPct = tweaks().contrastPct.load();
+    s.tweakNoteLabels = tweaks().noteLabels.load();
+    s.tweakCustomPrimary = tweaks().customPrimary.load();
+    s.tweakCustomSecondary = tweaks().customSecondary.load();
     s.hasDefaultView = hasDefaultView;
     s.defEditorOpen = defEditorOpen;
     s.defEffectsOpen = defEffectsOpen;
@@ -214,7 +228,10 @@ void MidiToolkitProcessor::syncLibraryFromMemory()
         s.tweakFontFamily = tweaks().fontFamily.load();
         s.tweakSurfaceStyle = tweaks().surfaceStyle.load();
         s.tweakAlternateRows = tweaks().alternateRows.load();
-        s.tweakSeparationPct = tweaks().separationPct.load();
+        s.tweakContrastPct = tweaks().contrastPct.load();
+        s.tweakNoteLabels = tweaks().noteLabels.load();
+        s.tweakCustomPrimary = tweaks().customPrimary.load();
+        s.tweakCustomSecondary = tweaks().customSecondary.load();
         s.hasDefaultView = hasDefaultView;
         s.defEditorOpen = defEditorOpen;
         s.defEffectsOpen = defEffectsOpen;
@@ -363,7 +380,9 @@ void MidiToolkitProcessor::processBlock(juce::AudioBuffer<float>& buffer,
         return;
     }
 
-    // Generate-only: discard host MIDI input (do not mix with preview).
+    // Generate-only: discard host MIDI input (do not mix with preview), but let
+    // Pitch Input latch the incoming key first so the clip follows it.
+    liveFx_.observePitchInput(midi);
     midi.clear();
     for (const auto metadata : flushEvents)
         midi.addEvent(metadata.getMessage(), metadata.samplePosition);
@@ -407,6 +426,13 @@ void MidiToolkitProcessor::processBlock(juce::AudioBuffer<float>& buffer,
     // freerunBeat / lastBeatPos_, so loop wraps must not look like jumps.
     if (lastBeatPos_ >= 0.0 && std::abs(beatPos - lastBeatPos_) > beatsPerSample * 2.0)
         flushActiveNotes(generated, 0);
+
+    // Pitch Input: transpose the clip to the latched incoming note (nearest direction).
+    // Needs no Map to Root. Recording leaves notes alone (latch is off while recording).
+    {
+        const auto fxSnap = liveFx_.getState();
+        previewInputShift_ = pitchInputDelta(liveFx_.pitchLatchMidi(), fxSnap.edit, fxSnap.sourceRoot);
+    }
 
     bool previewMuted = true, previewHasClip = false, flushHeldNotes = false;
     MidiClip previewClip;
@@ -523,36 +549,6 @@ void MidiToolkitProcessor::processBlock(juce::AudioBuffer<float>& buffer,
         lastBeatPos_ = endBeat;
     }
 
-    // Pitch Input: transpose the file preview so browsing follows the latched key.
-    // Generators apply the same root themselves. Recording leaves notes alone.
-    const auto fxSnap = liveFx_.getState();
-    const int latch = liveFx_.pitchLatchMidi();
-    if (fxSnap.edit.pitchInput && latch >= 0 && fxSnap.sourceRoot >= 0)
-    {
-        const int delta = (latch % 12) - (fxSnap.sourceRoot % 12);
-        if (delta != 0)
-        {
-            juce::MidiBuffer shifted;
-            for (const auto metadata : generated)
-            {
-                auto msg = metadata.getMessage();
-                if (msg.isNoteOnOrOff())
-                {
-                    const int ch = msg.getChannel();
-                    if (ch != 10)
-                        msg = msg.isNoteOn()
-                            ? juce::MidiMessage::noteOn(ch,
-                                  juce::jlimit(0, 127, msg.getNoteNumber() + delta),
-                                  msg.getVelocity())
-                            : juce::MidiMessage::noteOff(ch,
-                                  juce::jlimit(0, 127, msg.getNoteNumber() + delta));
-                }
-                shifted.addEvent(msg, metadata.samplePosition);
-            }
-            generated.swapWith(shifted);
-        }
-    }
-
     for (const auto metadata : generated)
         midi.addEvent(metadata.getMessage(), metadata.samplePosition);
 }
@@ -598,6 +594,76 @@ void MidiToolkitProcessor::setPreviewState(const MidiClip& clip, bool hasClip, b
 void MidiToolkitProcessor::setLiveFxState(const LiveFxState& state)
 {
     liveFx_.setState(state);
+}
+
+void MidiToolkitProcessor::mirrorHostParamsFromClipState()
+{
+    GrooveParams groove;
+    ClipEdit edit;
+    if (selectedClipPath.isNotEmpty())
+    {
+        if (const auto it = clipGrooves.find(selectedClipPath); it != clipGrooves.end())
+            groove = it->second;
+        if (const auto it = clipEdits.find(selectedClipPath); it != clipEdits.end())
+            edit = it->second;
+    }
+    hostParams_.pushFrom(groove, edit, bpmMultiplier.load(), false);
+}
+
+void MidiToolkitProcessor::handleAsyncUpdate()
+{
+    // Message thread: the host moved one or more parameters (audio or UI thread).
+    const auto dirty = hostParams_.takeDirty();
+
+    if (dirty.browserIndex)
+    {
+        const int position = hostParams_.browserIndex();
+        if (onHostBrowserIndex)
+            onHostBrowserIndex(position);
+        else
+            pendingBrowserIndex.store(position);
+    }
+
+    if (dirty.bindings.empty())
+        return;
+    if (onHostParamsChanged)
+        onHostParamsChanged(dirty.bindings);   // editor routes through the inspector handlers
+    else
+        applyHostParamsHeadless(dirty.bindings);
+}
+
+void MidiToolkitProcessor::applyHostParamsHeadless(const std::vector<int>& bindings)
+{
+    // Same snapshot the editor publishes (pushLiveFxToProcessor). Without an editor
+    // the parameters are the live truth (they mirror the clip state on load / edit),
+    // so lay every value over the last snapshot's non-parameter fields, then re-apply
+    // the ones the host just moved so they win (generator exclusivity, articulation).
+    auto snap = liveFx_.getState();
+    double mult = bpmMultiplier.load();
+    std::vector<int> all((size_t) hostParams_.numBindings());
+    for (int i = 0; i < (int) all.size(); ++i)
+        all[(size_t) i] = i;
+    hostParams_.applyBindings(all, snap.groove, snap.edit, mult);
+    const auto applied = hostParams_.applyBindings(bindings, snap.groove, snap.edit, mult);
+    if (!applied.any())
+        return;
+
+    if (applied.tempo)
+        bpmMultiplier.store(mult);
+    snap.bpmMultiplier = mult;
+    liveFx_.setState(snap);
+
+    // Keep the per-clip XML source in step so the editor (and host save) see it.
+    if (selectedClipPath.isNotEmpty())
+    {
+        if (applied.groove)
+            clipGrooves[selectedClipPath] = snap.groove;
+        if (applied.edit)
+            clipEdits[selectedClipPath] = snap.edit;
+    }
+
+    // Exclusive generators, articulation knobs, etc. may have moved other parameters.
+    hostParams_.pushFrom(snap.groove, snap.edit, mult, false);
 }
 
 void MidiToolkitProcessor::setRecordingEnabled(bool enabled)
@@ -685,18 +751,24 @@ void MidiToolkitProcessor::generatePreviewMidi(const MidiClip& clip, double star
             const double globalEnd = (double) k * clipLen + noteEnd;
             if (globalEnd <= startBeat || globalStart >= endBeat) continue;
 
+            // Pitch Input shift is latched per note-on so a key change mid-note still
+            // releases the pitch that actually sounded. Drums are never transposed.
+            const int chIdx = juce::jlimit(1, 16, note.channel) - 1;
+            const int basePitch = juce::jlimit(0, 127, note.noteNumber + clip.rootNoteOffset);
             if (globalStart >= startBeat && globalStart < endBeat)
             {
-                const int pitch = juce::jlimit(0, 127, note.noteNumber + clip.rootNoteOffset);
+                const int shift = note.channel == 10 ? 0 : previewInputShift_;
+                previewNoteShift_[chIdx][basePitch] = (juce::int8) shift;
+                const int pitch = juce::jlimit(0, 127, basePitch + shift);
                 emitAt(globalStart,
                        juce::MidiMessage::noteOn(note.channel, pitch, (juce::uint8) note.velocity));
-                activeNotes_[juce::jlimit(1, 16, note.channel) - 1][pitch] = true;
+                activeNotes_[chIdx][pitch] = true;
             }
             if (globalEnd >= startBeat && globalEnd <= endBeat + 1.0e-12)
             {
-                const int pitch = juce::jlimit(0, 127, note.noteNumber + clip.rootNoteOffset);
+                const int pitch = juce::jlimit(0, 127, basePitch + previewNoteShift_[chIdx][basePitch]);
                 emitAt(globalEnd, juce::MidiMessage::noteOff(note.channel, pitch));
-                activeNotes_[juce::jlimit(1, 16, note.channel) - 1][pitch] = false;
+                activeNotes_[chIdx][pitch] = false;
             }
         }
     }
@@ -815,7 +887,10 @@ void MidiToolkitProcessor::getStateInformation(juce::MemoryBlock& dest)
     xml.setAttribute("tweakFontFamily", tweaks().fontFamily.load());
     xml.setAttribute("tweakSurfaceStyle", tweaks().surfaceStyle.load());
     xml.setAttribute("tweakAlternateRows", tweaks().alternateRows.load());
-    xml.setAttribute("tweakSeparationPct", tweaks().separationPct.load());
+    xml.setAttribute("tweakContrastPct", tweaks().contrastPct.load());
+    xml.setAttribute("tweakNoteLabels", tweaks().noteLabels.load());
+    xml.setAttribute("tweakCustomPrimary", juce::String::toHexString((juce::int64) tweaks().customPrimary.load()));
+    xml.setAttribute("tweakCustomSecondary", juce::String::toHexString((juce::int64) tweaks().customSecondary.load()));
     xml.setAttribute("syncSessionBars", syncSessionBars.load());
     xml.setAttribute("lastBrowserDir", lastBrowserDir);
     xml.setAttribute("trimEmptyMeasuresPreview", trimEmptyMeasuresPreview ? 1 : 0);
@@ -946,6 +1021,7 @@ void MidiToolkitProcessor::getStateInformation(juce::MemoryBlock& dest)
     xml.setAttribute("lockVelRangeLo", lockedGroove.velocityRangeLo);
     xml.setAttribute("lockVelRangeHi", lockedGroove.velocityRangeHi);
     xml.setAttribute("lockVariation", lockedGroove.variationIndex);
+    xml.setAttribute("lockRevoice", lockedGroove.revoice);
     if (!savedLibraries.empty())
     {
         for (const auto& folder : savedLibraries)
@@ -1028,11 +1104,13 @@ void MidiToolkitProcessor::getStateInformation(juce::MemoryBlock& dest)
         }
         for (const auto& [id, mv] : edit.moves)
         {
-            if (mv.dPitch == 0 && mv.dStep == 0) continue;
+            if (mv.dPitch == 0 && mv.dStep == 0 && mv.dLen == 0.0) continue;
             auto* m = e->createNewChildElement("Move");
             m->setAttribute("id", id);
             m->setAttribute("dPitch", mv.dPitch);
             m->setAttribute("dStep", mv.dStep);
+            if (mv.dLen != 0.0)
+                m->setAttribute("dLen", mv.dLen);
         }
         for (const auto& [id, vel] : edit.velocities)
         {
@@ -1124,6 +1202,7 @@ void MidiToolkitProcessor::getStateInformation(juce::MemoryBlock& dest)
         e->setAttribute("velRangeLo", k.velocityRangeLo);
         e->setAttribute("velRangeHi", k.velocityRangeHi);
         e->setAttribute("variation", k.variationIndex);
+        e->setAttribute("revoice", k.revoice);
     }
     copyXmlToBinary(xml, dest);
 }
@@ -1154,6 +1233,7 @@ void MidiToolkitProcessor::setStateInformation(const void* data, int sizeInBytes
         applyLibraryToMemory();
         applySharedUiSessionFromLibrary();
         lockMidiFxPassthrough();
+        mirrorHostParamsFromClipState();
         return;
     }
     if (auto xml = getXmlFromBinary(data, sizeInBytes))
@@ -1177,22 +1257,22 @@ void MidiToolkitProcessor::setStateInformation(const void* data, int sizeInBytes
                 if (catalog >= 2)
                 {
                     tweaks().appearance.store(juce::jlimit(0, 2, xml->getIntAttribute("tweakAppearance", 0)));
-                    tweaks().lightTheme.store(juce::jlimit(0, kNumThemesPerFamily - 1, xml->getIntAttribute("tweakLightTheme", kNeobrutalTheme)));
-                    tweaks().darkTheme.store(juce::jlimit(0, kNumThemesPerFamily - 1, xml->getIntAttribute("tweakDarkTheme", kNeobrutalTheme)));
+                    tweaks().lightTheme.store(juce::jlimit(0, kNumThemesPerFamily - 1, xml->getIntAttribute("tweakLightTheme", kClayTheme)));
+                    tweaks().darkTheme.store(juce::jlimit(0, kNumThemesPerFamily - 1, xml->getIntAttribute("tweakDarkTheme", kClayTheme)));
                 }
                 else if (catalog == 1)
                 {
                     // Legacy catalog v1: absolute 0–9 light / 10–19 dark.
                     const int named = juce::jlimit(0, 19, xml->getIntAttribute("tweakAppearance", 5));
                     tweaks().appearance.store(named >= 10 ? (int) Appearance::Dark : (int) Appearance::Light);
-                    tweaks().lightTheme.store(named < 10 ? named : kNeobrutalTheme);
-                    tweaks().darkTheme.store(named >= 10 ? named - 10 : kNeobrutalTheme);
+                    tweaks().lightTheme.store(named < 10 ? named : kClayTheme);
+                    tweaks().darkTheme.store(named >= 10 ? named - 10 : kClayTheme);
                 }
                 else
                 {
                     tweaks().appearance.store(migrateThemeIndex(xml->getIntAttribute("tweakAppearance", 0), false));
-                    tweaks().lightTheme.store(kNeobrutalTheme);
-                    tweaks().darkTheme.store(kNeobrutalTheme);
+                    tweaks().lightTheme.store(kClayTheme);
+                    tweaks().darkTheme.store(kClayTheme);
                 }
             }
             tweaks().showTooltips.store(xml->getIntAttribute("tweakShowTooltips", 1) != 0 ? 1 : 0);
@@ -1201,8 +1281,15 @@ void MidiToolkitProcessor::setStateInformation(const void* data, int sizeInBytes
             tweaks().surfaceStyle.store(juce::jlimit(0, (int) SurfaceStyle::Count - 1,
                 xml->getIntAttribute("tweakSurfaceStyle", tweaks().surfaceStyle.load())));
             tweaks().alternateRows.store(xml->getIntAttribute("tweakAlternateRows", 1) != 0 ? 1 : 0);
-            tweaks().separationPct.store(juce::jlimit(50, 300,
-                xml->getIntAttribute("tweakSeparationPct", tweaks().separationPct.load())));
+            {
+                const int contrast = xml->hasAttribute("tweakContrastPct")
+                    ? xml->getIntAttribute("tweakContrastPct", 100)
+                    : xml->getIntAttribute("tweakSeparationPct", 100);
+                tweaks().contrastPct.store(juce::jlimit(50, 200, contrast));
+            }
+            tweaks().noteLabels.store(xml->getIntAttribute("tweakNoteLabels", 1) != 0 ? 1 : 0);
+            tweaks().customPrimary.store((juce::uint32) xml->getStringAttribute("tweakCustomPrimary", "0").getHexValue64());
+            tweaks().customSecondary.store((juce::uint32) xml->getStringAttribute("tweakCustomSecondary", "0").getHexValue64());
             syncSessionBars.store(juce::jlimit(1, 256, xml->getIntAttribute("syncSessionBars",
                 xml->getIntAttribute("arrangementBars", syncSessionBars.load()))));
             lastBrowserDir = xml->getStringAttribute("lastBrowserDir");
@@ -1406,7 +1493,8 @@ void MidiToolkitProcessor::setStateInformation(const void* data, int sizeInBytes
             lockedGroove.velocityRangeHi = juce::jlimit(1, 127, xml->getIntAttribute("lockVelRangeHi", 127));
             if (lockedGroove.velocityRangeHi < lockedGroove.velocityRangeLo)
                 std::swap(lockedGroove.velocityRangeLo, lockedGroove.velocityRangeHi);
-            lockedGroove.variationIndex = juce::jlimit(0, 16, xml->getIntAttribute("lockVariation", 0));
+            lockedGroove.variationIndex = juce::jlimit(0, kMaxVariations, xml->getIntAttribute("lockVariation", 0));
+            lockedGroove.revoice = juce::jlimit(0, kMaxRevoice, xml->getIntAttribute("lockRevoice", 0));
             for (auto* child : xml->getChildIterator())
             {
                 if (child->hasTagName("SavedFolder"))
@@ -1507,7 +1595,8 @@ void MidiToolkitProcessor::setStateInformation(const void* data, int sizeInBytes
                     {
                         if (m->hasTagName("Move"))
                             e.moves[m->getIntAttribute("id")] = {
-                                m->getIntAttribute("dPitch"), m->getIntAttribute("dStep") };
+                                m->getIntAttribute("dPitch"), m->getIntAttribute("dStep"),
+                                m->getDoubleAttribute("dLen", 0.0) };
                         else if (m->hasTagName("Vel"))
                             e.velocities[m->getIntAttribute("id")] =
                                 juce::jlimit(1, 127, m->getIntAttribute("v", 100));
@@ -1630,7 +1719,8 @@ void MidiToolkitProcessor::setStateInformation(const void* data, int sizeInBytes
                     k.velocityRangeHi = juce::jlimit(1, 127, child->getIntAttribute("velRangeHi", 127));
                     if (k.velocityRangeHi < k.velocityRangeLo)
                         std::swap(k.velocityRangeLo, k.velocityRangeHi);
-                    k.variationIndex = juce::jlimit(0, 16, child->getIntAttribute("variation", 0));
+                    k.variationIndex = juce::jlimit(0, kMaxVariations, child->getIntAttribute("variation", 0));
+                    k.revoice = juce::jlimit(0, kMaxRevoice, child->getIntAttribute("revoice", 0));
                     clipGrooves[path] = k;
                 }
             }
@@ -1655,6 +1745,8 @@ void MidiToolkitProcessor::setStateInformation(const void* data, int sizeInBytes
         persistSharedUiSession();
     }
     lockMidiFxPassthrough();
+    // Clip XML stays the source; parameters mirror the active clip's Toolkit state.
+    mirrorHostParamsFromClipState();
 }
 
 juce::AudioProcessorEditor* MidiToolkitProcessor::createEditor()

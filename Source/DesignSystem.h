@@ -164,7 +164,7 @@ juce::Colour colour (Type t);
 /** §5 region metrics (logical px at Medium). */
 namespace region {
     constexpr int toolbarH     = 45;   // header (+5; content stays vertically centered)
-    constexpr int sidebarW     = 200;  // library (Levels mockup)
+    constexpr int sidebarW     = 210;  // library sidebar (fixed)
     constexpr int fileListW    = 368;  // file list column
     constexpr int gridBrowserW = 484;  // five 96 px kind columns + hairlines
     constexpr int toolkitW     = 280;  // Levels: Toolkit + Generator column

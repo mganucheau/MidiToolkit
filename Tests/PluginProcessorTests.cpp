@@ -424,3 +424,87 @@ TEST_CASE("Processor state ignores empty and legacy-safe payloads", "[Processor]
     if (backup.existsAsFile())
         backup.moveFileTo(libFile);
 }
+
+TEST_CASE("Host parameters keep fixed IDs and unique names", "[Processor][HostParams]")
+{
+    MidiToolkitProcessor processor;
+    const auto& hp = processor.hostParams();
+
+    // Append-only list: these IDs are part of saved projects.
+    for (const char* id : { "browser_index", "tk_time", "tk_extend", "tk_quantize_grid",
+                            "tk_quantize_strength", "tk_swing_grid", "tk_swing", "tk_length",
+                            "tk_pocket", "tk_humanize", "tk_articulation", "tk_articulation_strength",
+                            "tk_dynamics", "tk_intensity", "tk_velocity_min", "tk_velocity_max",
+                            "tk_sustain", "tk_octave", "tk_transpose", "tk_pitch_input",
+                            "tk_octave_range", "tk_outside_range", "tk_key", "tk_mode",
+                            "tk_fit_scale", "tk_map_root", "tk_pitch_min", "tk_pitch_max",
+                            "tk_filter_type", "tk_notefilter_c", "tk_notefilter_b", "tk_complexity",
+                            "tk_variations", "tk_revoice", "tk_reverse", "tk_invert",
+                            "tk_delay_time", "tk_delay_amount", "tk_delay_feedback",
+                            "gen_arp_on", "gen_arp_density", "gen_arp_type", "gen_melody_style",
+                            "gen_chords_voicing", "gen_bass_motion", "gen_drums_fill" })
+        REQUIRE(hp.parameterFor(id) != nullptr);
+
+    juce::StringArray ids;
+    for (auto* p : processor.getParameters())
+        if (auto* withId = dynamic_cast<juce::AudioProcessorParameterWithID*>(p))
+            ids.add(withId->paramID);
+    REQUIRE(ids.size() == processor.getParameters().size());
+    REQUIRE(ids.size() == hp.numBindings() + 1);
+    ids.removeDuplicates(false);
+    REQUIRE(ids.size() == processor.getParameters().size());
+}
+
+TEST_CASE("Host parameter moves update the active clip without an editor", "[Processor][HostParams]")
+{
+    juce::ScopedJuceInitialiser_GUI gui;
+    MidiToolkitProcessor processor;
+    processor.selectedClipPath = "/tmp/clip.mid";
+
+    auto* humanize = processor.hostParams().parameterFor("tk_humanize");
+    auto* arp = processor.hostParams().parameterFor("gen_arp_on");
+    auto* drums = processor.hostParams().parameterFor("gen_drums_on");
+    REQUIRE(humanize != nullptr);
+    humanize->setValueNotifyingHost(humanize->convertTo0to1(60.0f));
+    arp->setValueNotifyingHost(1.0f);
+    drums->setValueNotifyingHost(1.0f);
+
+    processor.applyPendingHostParamChanges();
+
+    const auto& groove = processor.grooveFor("/tmp/clip.mid");
+    REQUIRE(groove.humanize == 60);
+    // Generators are exclusive: the last one the host enabled wins the pass.
+    REQUIRE((int) groove.arpEnabled + (int) groove.drumsEnabled == 1);
+}
+
+TEST_CASE("Mirroring state into host parameters never reads back as a host move", "[Processor][HostParams]")
+{
+    MidiToolkitProcessor processor;
+    GrooveParams groove;
+    groove.swing = 40;
+    groove.melodyStyleIndex = (int) MelodyStyle::Drift;
+    ClipEdit edit;
+    edit.pitchShift = 5;
+    edit.root = 2;
+    edit.setNoteFilterEnabled(1, false);
+
+    processor.hostParams().pushFrom(groove, edit, 0.5, false);
+    const auto dirty = processor.hostParams().takeDirty();
+    REQUIRE(dirty.bindings.empty());
+    REQUIRE_FALSE(dirty.browserIndex);
+
+    // The parameters now carry that state and round-trip through applyBindings.
+    GrooveParams outGroove;
+    ClipEdit outEdit;
+    double mult = 1.0;
+    std::vector<int> all((size_t) processor.hostParams().numBindings());
+    for (int i = 0; i < (int) all.size(); ++i)
+        all[(size_t) i] = i;
+    processor.hostParams().applyBindings(all, outGroove, outEdit, mult);
+    REQUIRE(outGroove.swing == 40);
+    REQUIRE(outGroove.melodyStyleIndex == (int) MelodyStyle::Drift);
+    REQUIRE(outEdit.pitchShift == 5);
+    REQUIRE(outEdit.root == 2);
+    REQUIRE_FALSE(outEdit.isNoteFilterEnabled(1));
+    REQUIRE(mult == Approx(0.5));
+}

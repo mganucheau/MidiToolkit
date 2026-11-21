@@ -23,6 +23,8 @@ namespace icons {
     inline constexpr const char* grip          = "grip";
     /** Signal line through a ring — live MIDI runs through the Toolkit. */
     inline constexpr const char* through       = "through";
+    /** Simple arrow pointing right — Input / passthrough chip. */
+    inline constexpr const char* arrowRight    = "arrow-right";
     inline constexpr const char* scissors      = "scissors";
     inline constexpr const char* sliders       = "sliders";
     /** Vertical EQ bars — standard audio Effects glyph. */

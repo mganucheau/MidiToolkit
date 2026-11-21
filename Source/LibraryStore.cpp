@@ -144,28 +144,35 @@ SharedUiSession LibraryStore::uiSessionFromXml(const juce::XmlElement& el)
     if (themeCatalog >= 2)
     {
         s.tweakAppearance = juce::jlimit(0, 2, el.getIntAttribute("tweakAppearance", 0));
-        s.tweakLightTheme = juce::jlimit(0, kNumThemesPerFamily - 1, el.getIntAttribute("tweakLightTheme", kNeobrutalTheme));
-        s.tweakDarkTheme = juce::jlimit(0, kNumThemesPerFamily - 1, el.getIntAttribute("tweakDarkTheme", kNeobrutalTheme));
+        s.tweakLightTheme = juce::jlimit(0, kNumThemesPerFamily - 1, el.getIntAttribute("tweakLightTheme", kClayTheme));
+        s.tweakDarkTheme = juce::jlimit(0, kNumThemesPerFamily - 1, el.getIntAttribute("tweakDarkTheme", kClayTheme));
     }
     else if (themeCatalog == 1)
     {
         // Legacy catalog v1: absolute 0–9 light / 10–19 dark.
         const int named = juce::jlimit(0, 19, el.getIntAttribute("tweakAppearance", 5));
         s.tweakAppearance = named >= 10 ? (int) Appearance::Dark : (int) Appearance::Light;
-        s.tweakLightTheme = named < 10 ? named : kNeobrutalTheme;
-        s.tweakDarkTheme = named >= 10 ? named - 10 : kNeobrutalTheme;
+        s.tweakLightTheme = named < 10 ? named : kClayTheme;
+        s.tweakDarkTheme = named >= 10 ? named - 10 : kClayTheme;
     }
     else
     {
         s.tweakAppearance = migrateThemeIndex(el.getIntAttribute("tweakAppearance", 0), false);
-        s.tweakLightTheme = kNeobrutalTheme;
-        s.tweakDarkTheme = kNeobrutalTheme;
+        s.tweakLightTheme = kClayTheme;
+        s.tweakDarkTheme = kClayTheme;
     }
     s.tweakShowTooltips = el.getIntAttribute("tweakShowTooltips", 1) != 0 ? 1 : 0;
-    s.tweakFontFamily = juce::jlimit(0, 3, el.getIntAttribute("tweakFontFamily", 0));
+    s.tweakFontFamily = juce::jlimit(0, (int) FontFamily::Count - 1, el.getIntAttribute("tweakFontFamily", 0));
     s.tweakSurfaceStyle = juce::jlimit(0, 2, el.getIntAttribute("tweakSurfaceStyle", 0));
     s.tweakAlternateRows = el.getIntAttribute("tweakAlternateRows", 1) != 0 ? 1 : 0;
-    s.tweakSeparationPct = juce::jlimit(50, 300, el.getIntAttribute("tweakSeparationPct", 100));
+    // Prefer contrast; fall back to legacy separation value.
+    const int contrast = el.hasAttribute("tweakContrastPct")
+                             ? el.getIntAttribute("tweakContrastPct", 100)
+                             : el.getIntAttribute("tweakSeparationPct", 100);
+    s.tweakContrastPct = juce::jlimit(50, 200, contrast);
+    s.tweakNoteLabels = el.getIntAttribute("tweakNoteLabels", 1) != 0 ? 1 : 0;
+    s.tweakCustomPrimary = (juce::uint32) el.getStringAttribute("tweakCustomPrimary", "0").getHexValue64();
+    s.tweakCustomSecondary = (juce::uint32) el.getStringAttribute("tweakCustomSecondary", "0").getHexValue64();
     s.hasDefaultView = el.getIntAttribute("hasDefaultView", 0) != 0;
     s.defEditorOpen = el.getIntAttribute("defEditorOpen", 0) != 0;
     s.defEffectsOpen = el.getIntAttribute("defEffectsOpen", 0) != 0;
@@ -246,7 +253,10 @@ void LibraryStore::uiSessionToXml(juce::XmlElement& el, const SharedUiSession& s
     el.setAttribute("tweakFontFamily", s.tweakFontFamily);
     el.setAttribute("tweakSurfaceStyle", s.tweakSurfaceStyle);
     el.setAttribute("tweakAlternateRows", s.tweakAlternateRows);
-    el.setAttribute("tweakSeparationPct", s.tweakSeparationPct);
+    el.setAttribute("tweakContrastPct", s.tweakContrastPct);
+    el.setAttribute("tweakNoteLabels", s.tweakNoteLabels);
+    el.setAttribute("tweakCustomPrimary", juce::String::toHexString((juce::int64) s.tweakCustomPrimary));
+    el.setAttribute("tweakCustomSecondary", juce::String::toHexString((juce::int64) s.tweakCustomSecondary));
     el.setAttribute("hasDefaultView", s.hasDefaultView ? 1 : 0);
     el.setAttribute("defEditorOpen", s.defEditorOpen ? 1 : 0);
     el.setAttribute("defEffectsOpen", s.defEffectsOpen ? 1 : 0);

@@ -78,6 +78,19 @@ private:
     MidiClip buildRenderedClip() const;
     void pushPreviewToProcessor();
     void pushLiveFxToProcessor();
+    /** Inspector → host parameters (no feedback into the inspector). userGesture brackets
+        each write so the host can record it; selection mirrors pass false. */
+    void mirrorInspectorToHostParams(bool userGesture);
+    /** Host parameters → inspector state only (no handlers); used when no clip is selected. */
+    void adoptHostParamsIntoInspector();
+    /** Host moved these bindings: load them into the inspector and run its change handlers. */
+    void applyHostParams(const std::vector<int>& bindings);
+    /** 0-based position of the selected clip among the listed files (-1 = none). */
+    int selectedFilePosition() const;
+    /** Select the file at this list position (clamped to the last file). False if no files yet. */
+    bool selectFilePosition(int position);
+    /** Mirror the selected file's list position into the browser-index parameter. */
+    void publishBrowserIndexToHost();
     void applyPassthroughUi();
     void setLeftPaneTab(int tab);
     void togglePassthrough();
@@ -245,18 +258,15 @@ private:
     public:
         LeftPaneTabs();
         std::function<void(int)> onTab;
-        std::function<void()> onTogglePreview;
         std::function<void()> onToggleGrid;
         void setTab(int t);
-        void setPreviewOpen(bool on);
         void setGrid(bool on);
         void resized() override;
         void paint(juce::Graphics&) override;
     private:
         int tab = 0;
         SegmentToggle tabToggle { "Browser", "Generator" };
-        IconBtn btnGrid { icons::grid, "Grid" };
-        IconBtn btnPreview { icons::noteKeys, "Preview" };
+        IconBtn btnGrid { icons::grid, "Grid View" };
     };
 
     FavoritesSidebar sidebar;
@@ -283,29 +293,7 @@ private:
         void mouseDown(const juce::MouseEvent&) override;
         MidiToolkitEditor& owner;
 
-        struct DragBtn : ChipBtn
-        {
-            using ChipBtn::ChipBtn;
-            std::function<void()> onDragStart;
-            bool started = false;
-            void mouseDrag(const juce::MouseEvent& e) override
-            {
-                if (!started && e.getDistanceFromDragStart() > 4 && onDragStart)
-                {
-                    started = true;
-                    onDragStart();
-                }
-            }
-            void mouseUp(const juce::MouseEvent& e) override
-            {
-                started = false;
-                ChipBtn::mouseUp(e);
-            }
-        };
         ChipBtn btnVel { "Vel" };
-        ChipBtn btnTrim { "Trim" };
-        ChipBtn btnMute { "Mute" };
-        DragBtn btnDrag { "Drag", icons::dragOut };
         juce::String name, meta;
         static constexpr int kHeaderH = 22;
     };
@@ -368,6 +356,10 @@ private:
     void rememberSearchSnapshot(int savedIdx, SearchSnapshot snap);
     void forgetSavedSearchSnapshot(int index);
     int selectedIdx = -1;
+    /** True while a host parameter move is being routed through the inspector handlers. */
+    bool applyingHostParams = false;
+    juce::String lastPublishedBrowserPath;
+    int lastPublishedBrowserPos = -2;
     KeyNavTarget keyNavTarget = KeyNavTarget::Browser;
     int lastWindowH = 700;
     /** Height after the first layout. The window cannot shrink below this. */

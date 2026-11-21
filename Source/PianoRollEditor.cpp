@@ -80,8 +80,7 @@ void PianoRollMini::paint(juce::Graphics& g)
 {
     // Labelled preview roll (direction 3): ruler with bar numbers, key gutter,
     // distinct black-key lanes, a C line per octave, bar > beat grid, notes in the
-    // clip colour with a dark edge and their names when there is room, and the
-    // play-colour playhead with a ruler marker. No velocity lane in the preview.
+    // clip colour with a dark edge, and the play-colour playhead with a ruler marker. No velocity lane in the preview.
     auto b = getLocalBounds().toFloat();
     g.setColour(ds::surface200());
     g.fillRect(b);
@@ -157,8 +156,6 @@ void PianoRollMini::paint(juce::Graphics& g)
     {
         juce::Graphics::ScopedSaveState ss(g);
         g.reduceClipRegion(b.toNearestInt());
-        const bool labels = map.rowH >= 10.0f;
-        g.setFont(monoFontFixed(juce::jlimit(8.0f, 10.0f, map.rowH * 0.72f)));
         for (const auto& n : notes)
         {
             const double v = effectiveVelocity(n, knobs);
@@ -183,11 +180,6 @@ void PianoRollMini::paint(juce::Graphics& g)
             }
             g.setColour(noteColour.darker(0.45f).withAlpha(0.85f));
             g.drawRoundedRectangle(r.reduced(0.5f), rad, 1.0f);
-            if (labels && r.getWidth() >= 24.0f)
-            {
-                g.setColour(juce::Colours::white);
-                g.drawText(pitchName(n.pitch), r.reduced(3.0f, 0.0f), juce::Justification::centredLeft, false);
-            }
         }
     }
 
@@ -312,6 +304,17 @@ PianoRollEditor::PianoRollEditor()
         gutter.repaint();
     };
     addAndMakeVisible(btnScale);
+
+    btnFit.setComponentID("btnFit");
+    btnFit.setTooltip("Fit all notes in view, with one empty row above and below");
+    btnFit.onClick = [this]
+    {
+        // Collapsed rows were trimmed by the last fit; rebuild the full list first.
+        if (rowsCollapsed())
+            rebuildResolved();
+        zoomToClip();
+    };
+    addAndMakeVisible(btnFit);
 
     barsZoomPopup.setItems({ "Clip", "2 bars", "4 bars", "8 bars", "16 bars" }, 0);
     barsZoomPopup.setWantsKeyboardFocus(false);
@@ -592,6 +595,7 @@ void PianoRollEditor::refreshControls()
     btnScale.setEnabled(hasClip && scaleRoot >= 0);
     btnScale.active = scaleFiltered;
     btnScale.repaint();
+    btnFit.setEnabled(hasClip);
     btnRevertNotes.setEnabled(hasClip && hasNoteEdits());
 
     // Edit badges / selection chip removed from the toolbar chrome.
@@ -640,7 +644,8 @@ bool PianoRollEditor::keyPressed(const juce::KeyPress& key)
         }
     }
 
-    if (!selection.empty() && key.getModifiers().isShiftDown())
+    const auto mods = key.getModifiers();
+    if (!selection.empty() && !mods.isCommandDown() && !mods.isCtrlDown() && !mods.isAltDown())
     {
         // Compare key codes only — operator== also requires matching modifiers.
         if (key.isKeyCode(juce::KeyPress::upKey))    { nudgeSelection(1, 0); return true; }
@@ -668,10 +673,22 @@ void PianoRollEditor::nudgeSelection(int dPitch, int dStep)
             auto& mv = e.moves[id];
             mv.dPitch += dPitch;
             mv.dStep += dStep;
-            if (mv.dPitch == 0 && mv.dStep == 0)
+            if (mv.dPitch == 0 && mv.dStep == 0 && mv.dLen == 0.0)
                 e.moves.erase(id);
         }
     });
+}
+
+juce::Colour PianoRollEditor::selectionColour() const
+{
+    // Amber is the one hue the theme-driven note colour rarely lands on; if a
+    // theme does pick amber/orange, fall back to teal so selection stays distinct.
+    const auto amber = ds::active();
+    float dh = std::abs(noteColour.getHue() - amber.getHue());
+    dh = juce::jmin(dh, 1.0f - dh);
+    if (noteColour.getSaturation() > 0.25f && dh < 0.08f)
+        return juce::Colour(0xff2dd4bf);
+    return amber.brighter(0.12f);
 }
 
 void PianoRollEditor::toggleTrim()
@@ -901,7 +918,8 @@ void PianoRollEditor::selectPitch(int pitch, bool additive)
 {
     if (!additive)
         selection.clear();
-    for (const auto& n : resolved.notes)
+    // Match against the notes as painted (grooved / scale-refit pitches).
+    for (const auto& n : grooved)
         if (n.pitch == pitch)
             selection.insert(n.id);
     refreshControls();
@@ -950,13 +968,13 @@ int PianoRollEditor::pitchForRow(int row) const
 }
 
 juce::Rectangle<float> PianoRollEditor::noteRect(const RollNote& n, int rowOffset,
-                                                 double stepOffset) const
+                                                 double stepOffset, double lenOffset) const
 {
     const float pps = pxPerStep();
     const int row = juce::jlimit(0, numRows() - 1, rowForPitch(n.pitch) + rowOffset);
     return { (float) ((n.start + stepOffset) * timeStretch) * pps,
              (float) row * effRowH(),
-             juce::jmax(3.0f, (float) (n.len * timeStretch) * pps - 1.0f),
+             juce::jmax(3.0f, (float) ((n.len + lenOffset) * timeStretch) * pps - 1.0f),
              juce::jmax(3.0f, effRowH() - 1.0f) };
 }
 
@@ -966,6 +984,22 @@ const RollNote* PianoRollEditor::noteAt(juce::Point<float> pos) const
         if (noteRect(*it).contains(pos))
             return &(*it);
     return nullptr;
+}
+
+bool PianoRollEditor::onNoteRightEdge(const RollNote& n, juce::Point<float> pos) const
+{
+    const auto r = noteRect(n);
+    if (!r.contains(pos))
+        return false;
+    const float zone = juce::jlimit(2.0f, 6.0f, r.getWidth() * 0.4f);
+    return pos.x >= r.getRight() - zone;
+}
+
+double PianoRollEditor::clampedLenDelta(const RollNote& n, double dLen) const
+{
+    const double minLen = juce::jmin(1.0, n.len);
+    const double maxLen = juce::jmax(n.len, clipSteps() - n.start);
+    return juce::jlimit(minLen - n.len, maxLen - n.len, dLen);
 }
 
 void PianoRollEditor::computePxPerStepBase()
@@ -1113,42 +1147,62 @@ void PianoRollEditor::zoomToClip()
         return;
     }
 
+    // Pitch span of the notes that are actually painted (scale view hides the rest).
+    const int scaleRoot = edit.root >= 0 ? edit.root : clip.root;
+    const bool filterScale = scaleFiltered && scaleRoot >= 0;
     int loN = 127, hiN = 0;
-    if (rowsCollapsed() && !foldPitches.empty())
+    for (const auto& n : grooved)
     {
-        loN = foldPitches.front();
-        hiN = foldPitches.back();
+        if (filterScale && !pitchInScale(n.pitch, scaleRoot, edit.mode))
+            continue;
+        loN = juce::jmin(loN, n.pitch);
+        hiN = juce::jmax(hiN, n.pitch);
     }
-    else
+    if (loN > hiN)
     {
-        for (const auto& n : resolved.notes)
+        if (rowsCollapsed() && !foldPitches.empty())
         {
-            loN = juce::jmin(loN, n.pitch);
-            hiN = juce::jmax(hiN, n.pitch);
+            loN = foldPitches.front();
+            hiN = foldPitches.back();
         }
-        if (resolved.notes.empty())
+        else
             loN = hiN = 60;
     }
 
-    // One lane below the lowest note and one above the highest — no excess space.
-    const int viewLo = juce::jlimit(0, 126, loN - 1);
-    const int viewHi = juce::jlimit(viewLo + 1, 127, hiN + 1);
-    const int lanes = juce::jmax(1, viewHi - viewLo + 1);
-    rowH = juce::jmax(kMinRowH, (float) visH / (float) lanes);
-
     if (rowsCollapsed())
     {
-        // Keep fold list, but pad endpoints so ±1 lanes exist when possible.
-        std::set<int> padded(foldPitches.begin(), foldPitches.end());
-        padded.insert(viewLo);
-        padded.insert(viewHi);
-        foldPitches.assign(padded.begin(), padded.end());
+        // Folded / scale view: keep only the rows from one row below the lowest
+        // note to one row above the highest. A missing neighbour row (fold has
+        // only note-bearing pitches) is padded with the adjacent semitone.
+        auto lowIt = std::lower_bound(foldPitches.begin(), foldPitches.end(), loN);
+        auto highIt = std::upper_bound(foldPitches.begin(), foldPitches.end(), hiN);
+        std::set<int> kept(lowIt, highIt);
+        kept.insert(loN);
+        kept.insert(hiN);
+        if (lowIt != foldPitches.begin())
+            kept.insert(*std::prev(lowIt));
+        else
+            kept.insert(juce::jmax(0, loN - 1));
+        if (highIt != foldPitches.end())
+            kept.insert(*highIt);
+        else
+            kept.insert(juce::jmin(127, hiN + 1));
+        foldPitches.assign(kept.begin(), kept.end());
+
+        // Folded rows are drawn at 2x rowH, so halve it to fit the viewport.
+        const int lanes = juce::jmax(1, (int) foldPitches.size());
+        rowH = juce::jmax(kMinRowH, (float) visH / (float) lanes * 0.5f);
         pitchWindowActive = false;
         updateRollSize();
         rollViewport.setViewPosition(0, 0);
     }
     else
     {
+        // One lane below the lowest note and one above the highest — no excess space.
+        const int viewLo = juce::jlimit(0, 126, loN - 1);
+        const int viewHi = juce::jlimit(viewLo + 1, 127, hiN + 1);
+        const int lanes = juce::jmax(1, viewHi - viewLo + 1);
+        rowH = juce::jmax(kMinRowH, (float) visH / (float) lanes);
         pitchWindowLo = viewLo;
         pitchWindowHi = viewHi;
         pitchWindowActive = true;
@@ -1235,7 +1289,45 @@ void PianoRollEditor::commitNoteDrag()
             auto& mv = e.moves[id];
             mv.dPitch += dPitch;
             mv.dStep += dStep;
-            if (mv.dPitch == 0 && mv.dStep == 0)
+            if (mv.dPitch == 0 && mv.dStep == 0 && mv.dLen == 0.0)
+                e.moves.erase(id);
+        }
+    });
+}
+
+void PianoRollEditor::commitNoteResize()
+{
+    auto& rc = rollContent;
+    if (rc.dragDLen == 0.0)
+        return;
+
+    std::vector<int> ids;
+    if (selection.count(rc.dragNoteId) > 0)
+        ids.assign(selection.begin(), selection.end());
+    else
+        ids.push_back(rc.dragNoteId);
+
+    // Same clamp as the live preview, taken from the notes as painted.
+    std::map<int, double> lenDelta;
+    for (int id : ids)
+        for (const auto& n : grooved)
+            if (n.id == id)
+            {
+                lenDelta[id] = clampedLenDelta(n, rc.dragDLen);
+                break;
+            }
+
+    applyEdit([&lenDelta](ClipEdit& e)
+    {
+        for (const auto& [id, dLen] : lenDelta)
+        {
+            if (dLen == 0.0)
+                continue;
+            auto& mv = e.moves[id];
+            mv.dLen += dLen;
+            if (std::abs(mv.dLen) < 1.0e-6)
+                mv.dLen = 0.0;
+            if (mv.dPitch == 0 && mv.dStep == 0 && mv.dLen == 0.0)
                 e.moves.erase(id);
         }
     });
@@ -1322,29 +1414,6 @@ void PianoRollEditor::paint(juce::Graphics& g)
         g.drawText(status, sb, juce::Justification::centredLeft, true);
     }
 
-    // Levels status: key · N notes · M selected (left of View/Grid). No file name.
-    if (!titleBounds.isEmpty() && hasClip)
-    {
-        juce::String status;
-        if (edit.root >= 0)
-        {
-            static constexpr const char* kPc[] = {
-                "C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"
-            };
-            status = kPc[edit.root % 12];
-        }
-        const int notes = (int) grooved.size();
-        if (status.isNotEmpty())
-            status += juce::String::fromUTF8(" \xc2\xb7 ");
-        status += juce::String(notes) + (notes == 1 ? " note" : " notes");
-        if (!selection.empty())
-            status += juce::String::fromUTF8(" \xc2\xb7 ") + juce::String((int) selection.size())
-                      + " selected";
-        g.setFont(uiFontFixed(12.0f, true));
-        g.setColour(ds::ink());
-        g.drawText(status, titleBounds, juce::Justification::centredLeft, true);
-    }
-
     if (!zoomLabelBounds.isEmpty())
     {
         g.setFont(uiFontFixed(11.0f, false));
@@ -1361,11 +1430,12 @@ void PianoRollEditor::paint(juce::Graphics& g)
 
 void PianoRollEditor::layoutHeaderTools()
 {
-    // Header: Fold · Scale ······ [clip status…] ······ View [length] · Grid [division]
+    // Header: Fold · Scale · Fit ······ View [length] · Grid [division]
     auto bar = titleBounds;
     const int ctrlH = metrics::chromeIconButton();
     btnFold.setVisible(true);
     btnScale.setVisible(true);
+    btnFit.setVisible(true);
     barsZoomPopup.setVisible(true);
     divisionPopup.setVisible(true);
     btnRevertNotes.setVisible(false);
@@ -1384,6 +1454,7 @@ void PianoRollEditor::layoutHeaderTools()
 
     placeLeft(btnFold, btnFold.idealWidth());
     placeLeft(btnScale, btnScale.idealWidth());
+    placeLeft(btnFit, btnFit.idealWidth());
     bar.removeFromLeft(8);
 
     const int divW = juce::jmax(52, divisionPopup.idealWidth() - 8);
@@ -1397,7 +1468,7 @@ void PianoRollEditor::layoutHeaderTools()
     zoomLabelBounds = tools.removeFromLeft(labelW);
     tools.removeFromLeft(4);
     barsZoomPopup.setBounds(tools.withSizeKeepingCentre(zoomW, ctrlH));
-    titleBounds = bar; // leftover = clip status strip
+    titleBounds = bar; // leftover header space
 }
 
 void PianoRollEditor::setInputMode(bool isInput, const juce::String& subtitle)
@@ -1518,6 +1589,7 @@ void PianoRollEditor::RollContent::paint(juce::Graphics& g)
 
     // MIDI notes use --note; playhead uses --acc (§1 / §6).
     const bool draggingNotes = drag == Drag::Note;
+    const bool resizingNotes = drag == Drag::NoteResize;
     const int scaleRoot = ed.edit.root >= 0 ? ed.edit.root : ed.clip.root;
     for (const auto& n : ed.grooved)
     {
@@ -1527,14 +1599,18 @@ void PianoRollEditor::RollContent::paint(juce::Graphics& g)
         const bool isSelected = ed.selection.count(n.id) > 0;
         const bool inDrag = draggingNotes
             && (n.id == dragNoteId || (ed.selection.count(dragNoteId) > 0 && isSelected));
-        auto r = ed.noteRect(n, inDrag ? dragDRows : 0, inDrag ? (double) dragDStep : 0.0);
+        const bool inResize = resizingNotes
+            && (n.id == dragNoteId || (ed.selection.count(dragNoteId) > 0 && isSelected));
+        auto r = ed.noteRect(n, inDrag ? dragDRows : 0, inDrag ? (double) dragDStep : 0.0,
+                             inResize ? ed.clampedLenDelta(n, dragDLen) : 0.0);
         if (!r.intersects(clipB)) continue;
 
         const double v = effectiveVelocity(n, ed.groove);
         // High-contrast violet notes (reference preview + pre-redesign roll).
-        // Velocity only gently dims; selection brightens. Dark edge separates neighbours.
-        const auto base = isSelected ? ed.noteColour.brighter(0.18f) : ed.noteColour;
-        juce::Colour fill = (n.moved || inDrag) ? base.brighter(0.12f) : base;
+        // Velocity only gently dims; selected notes take the distinct selection colour.
+        // Dark edge separates neighbours.
+        const auto base = isSelected ? ed.selectionColour() : ed.noteColour;
+        juce::Colour fill = (n.moved || inDrag || inResize) ? base.brighter(0.12f) : base;
         auto nr = r.reduced(0.5f, 0.5f);
         const float rad = juce::jmin(3.0f, nr.getHeight() * 0.3f);
         const float a = isSelected ? 1.0f : (float) (0.82 + 0.18 * v);
@@ -1550,13 +1626,6 @@ void PianoRollEditor::RollContent::paint(juce::Graphics& g)
         }
         g.setColour(fill.darker(0.55f).withAlpha(0.9f));
         g.drawRoundedRectangle(nr.reduced(0.5f), rad, 1.0f);
-
-        if (nr.getWidth() >= 26.0f && nr.getHeight() >= 11.0f)
-        {
-            g.setFont(monoFontFixed(juce::jlimit(8.0f, 11.0f, nr.getHeight() * 0.68f), true));
-            g.setColour(juce::Colours::white);
-            g.drawText(pitchName(n.pitch), nr.reduced(4.0f, 0.0f), juce::Justification::centredLeft, false);
-        }
     }
 
     // Marquee band
@@ -1596,17 +1665,25 @@ void PianoRollEditor::RollContent::mouseDown(const juce::MouseEvent& e)
         return;
     }
 
-    if (const int handle = ed.hitLoopHandle(e.position.x); handle >= 0)
+    // A note's right edge wins over a loop handle sitting on it (the ruler still
+    // reaches the handle); everywhere else the loop handles take priority.
+    const auto* hit = ed.noteAt(e.position);
+    const bool onEdge = hit != nullptr && ed.onNoteRightEdge(*hit, e.position);
+
+    if (const int handle = ed.hitLoopHandle(e.position.x); handle >= 0 && !onEdge)
     {
         drag = handle == 0 ? Drag::LoopStart : Drag::LoopEnd;
         setMouseCursor(juce::MouseCursor::LeftRightResizeCursor);
         return;
     }
 
-    if (const auto* n = ed.noteAt(e.position))
+    if (const auto* n = hit)
     {
         dragNoteId = n->id;
-        drag = Drag::Note;
+        dragDLen = 0.0;
+        drag = onEdge ? Drag::NoteResize : Drag::Note;
+        if (onEdge)
+            setMouseCursor(juce::MouseCursor::LeftRightResizeCursor);
         if (e.mods.isShiftDown())
         {
             if (!ed.selection.insert(n->id).second)
@@ -1668,11 +1745,33 @@ void PianoRollEditor::RollContent::mouseDrag(const juce::MouseEvent& e)
         }
         return;
     }
+    if (drag == Drag::NoteResize)
+    {
+        const float dx = e.position.x - dragStart.x;
+        const int div = juce::jmax(1, ed.divisionSteps);
+        const float stepPx = ed.pxPerStep() * (float) ed.timeStretch;
+        const double dLen = (double) ((int) std::round(dx / juce::jmax(0.01f, stepPx) / (float) div) * div);
+        if (dLen != dragDLen)
+        {
+            dragDLen = dLen;
+            repaint();
+        }
+        return;
+    }
     if (drag == Drag::Marquee)
     {
         marquee = juce::Rectangle<float>(dragStart, e.position);
         repaint();
     }
+}
+
+void PianoRollEditor::RollContent::mouseMove(const juce::MouseEvent& e)
+{
+    // Resize cursor over a note's right edge (drag lengthens / shortens it).
+    auto& ed = owner;
+    const auto* n = ed.hasClip ? ed.noteAt(e.position) : nullptr;
+    const bool edge = n != nullptr && ed.onNoteRightEdge(*n, e.position);
+    setMouseCursor(edge ? juce::MouseCursor::LeftRightResizeCursor : juce::MouseCursor::NormalCursor);
 }
 
 void PianoRollEditor::RollContent::mouseUp(const juce::MouseEvent&)
@@ -1692,6 +1791,11 @@ void PianoRollEditor::RollContent::mouseUp(const juce::MouseEvent&)
         ed.commitNoteDrag();
         dragNoteId = -1;
     }
+    else if (drag == Drag::NoteResize)
+    {
+        ed.commitNoteResize();
+        dragNoteId = -1;
+    }
     else if (drag == Drag::Marquee)
     {
         if (marquee.getWidth() > 2.0f || marquee.getHeight() > 2.0f)
@@ -1708,6 +1812,7 @@ void PianoRollEditor::RollContent::mouseUp(const juce::MouseEvent&)
     }
     drag = Drag::None;
     dragDRows = dragDStep = 0;
+    dragDLen = 0.0;
     setMouseCursor(juce::MouseCursor::NormalCursor);
     repaint();
 }
@@ -1815,9 +1920,10 @@ void PianoRollEditor::KeyGutter::paint(juce::Graphics& g)
     const int viewY = ed.rollViewport.getViewPositionY();
     const float rowH = ed.effRowH();
     const float W = (float) getWidth() - 1.0f;
+    const auto selCol = ed.selectionColour();
 
     std::set<int> selectedPitches;
-    for (const auto& n : ed.resolved.notes)
+    for (const auto& n : ed.grooved)
         if (ed.selection.count(n.id) > 0)
             selectedPitches.insert(n.pitch);
 
@@ -1843,9 +1949,9 @@ void PianoRollEditor::KeyGutter::paint(juce::Graphics& g)
         }
         if (selectedPitches.count(pitch) > 0)
         {
-            g.setColour(colours::accentSoft());
+            g.setColour(selCol.withAlpha(0.35f));
             g.fillRect(key);
-            g.setColour(colours::accent());
+            g.setColour(selCol);
             g.fillRect(W - 2.0f, y, 2.0f, rowH);
         }
 
@@ -1873,30 +1979,44 @@ void PianoRollEditor::KeyGutter::paint(juce::Graphics& g)
 
         if (selectedPitches.count(pitch) > 0)
         {
-            g.setColour(colours::accent());
+            g.setColour(selCol);
             g.drawRoundedRectangle(key.reduced(0.5f), juce::jmin(2.0f, rowH * 0.25f), 1.2f);
         }
     }
 
-    // Pass 3 — Levels: horizontal mono labels, right-aligned in the gutter.
-    for (int row = firstRow; row <= lastRow; ++row)
+    // Pass 3 — key names (Settings → Note labels). Horizontal mono labels: white
+    // keys right-aligned across the gutter; black keys sit on the black key itself
+    // (in scale / fold view, where every row is named).
+    if (tweaks().noteLabels.load() != 0)
     {
-        const int pitch = ed.pitchForRow(row);
-        const bool isC = (pitch % 12 == 0);
-        if (!(ed.rowsCollapsed() || isC) || rowH < 9.0f) continue;
-        if (isBlackKeyPitch(pitch) && !ed.rowsCollapsed()) continue;
+        for (int row = firstRow; row <= lastRow; ++row)
+        {
+            const int pitch = ed.pitchForRow(row);
+            const bool isC = (pitch % 12 == 0);
+            if (!(ed.rowsCollapsed() || isC) || rowH < 9.0f) continue;
+            const bool black = isBlackKeyPitch(pitch);
+            if (black && !ed.rowsCollapsed()) continue;
 
-        const float y = (float) row * rowH - (float) viewY;
-        const float fontPt = juce::jlimit(9.0f, 12.0f, rowH * 0.8f);
-        const bool black = isBlackKeyPitch(pitch);
-        const bool selected = selectedPitches.count(pitch) > 0;
-        g.setFont(monoFont(fontPt, true));
-        g.setColour(selected ? colours::accent()
-                   : black ? contrastInkOn(colours::kbBlack())
-                           : ds::ink());
-        g.drawText(pitchName(pitch),
-                   juce::Rectangle<float>(0.0f, y, W - 6.0f, rowH).toNearestInt(),
-                   juce::Justification::centredRight, false);
+            const float y = (float) row * rowH - (float) viewY;
+            const float fontPt = juce::jlimit(9.0f, 12.0f, rowH * 0.8f);
+            g.setFont(monoFont(fontPt, true));
+            if (black)
+            {
+                // Inside the black key (same bounds as pass 2), never over the white keys.
+                const float keyW = W * 0.62f;
+                g.setColour(contrastInkOn(colours::kbBlack()));
+                g.drawText(pitchName(pitch),
+                           juce::Rectangle<float>(0.0f, y + 0.5f, keyW - 4.0f, rowH - 1.0f).toNearestInt(),
+                           juce::Justification::centredRight, false);
+            }
+            else
+            {
+                g.setColour(ds::ink());
+                g.drawText(pitchName(pitch),
+                           juce::Rectangle<float>(0.0f, y, W - 6.0f, rowH).toNearestInt(),
+                           juce::Justification::centredRight, false);
+            }
+        }
     }
 
     g.setColour(colours::line());
@@ -1972,7 +2092,7 @@ void PianoRollEditor::VelocityLane::paint(juce::Graphics& g)
         }
     }
 
-    // Bar graph: violet velocity stems matching the roll notes (selection brightens).
+    // Bar graph: velocity stems matching the roll notes (selected notes use the selection colour).
     g.setFont(monoFontFixed(9.0f));
     for (const auto& n : ed.grooved)
     {
@@ -1985,7 +2105,8 @@ void PianoRollEditor::VelocityLane::paint(juce::Graphics& g)
         const bool sel = ed.selection.count(n.id) > 0;
         const float bw = juce::jlimit(3.0f, 7.0f, noteW - 2.0f);
         const float a = juce::jmax(0.70f, (float) vel / 127.0f);
-        const auto col = (sel ? ed.noteColour.brighter(0.18f) : ed.noteColour).withAlpha(a);
+        const auto stemCol = sel ? ed.selectionColour() : ed.noteColour;
+        const auto col = stemCol.withAlpha(a);
         {
             juce::Path path;
             const float rad = juce::jmin(3.0f, bw * 0.5f);
@@ -2000,7 +2121,7 @@ void PianoRollEditor::VelocityLane::paint(juce::Graphics& g)
         }
         if (noteW >= 18.0f && top - laneTop >= 12.0f)
         {
-            g.setColour(sel ? ed.noteColour.brighter(0.18f) : colours::text2());
+            g.setColour(sel ? stemCol : colours::text2());
             g.drawText(juce::String(vel), juce::Rectangle<float>(x - 4.0f, top - 12.0f, 28.0f, 11.0f),
                        juce::Justification::centredLeft, false);
         }

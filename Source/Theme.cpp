@@ -195,36 +195,50 @@ static juce::Font makeUiFont(float pt, bool semibold)
     const int weight = semibold ? 600 : (pt < 12.0f ? 500 : 400);
     const auto family = (FontFamily) juce::jlimit(0, (int) FontFamily::Count - 1,
                                                   tweaks().fontFamily.load());
-    // Skill themes can steer typeface when the user leaves Font on Archivo/Inter.
-    if (family == FontFamily::Archivo)
+    switch (family)
     {
-        switch (themeFace())
+        case FontFamily::Inter:
+            return grooveFont(pt, weight, false);
+        case FontFamily::JetBrainsMono:
+        case FontFamily::IBMPlexMono:
+            return grooveFont(pt, weight, true);
+        case FontFamily::Archivo:
+            switch (themeFace())
+            {
+                case ThemeFace::Mono:
+                    return grooveFont(pt, weight, true);
+                case ThemeFace::Serif:
+                {
+                    const int flags = semibold ? juce::Font::bold : juce::Font::plain;
+                    return juce::Font(juce::FontOptions("New York", pt, flags));
+                }
+                case ThemeFace::Rounded:
+                {
+                    const int flags = semibold ? juce::Font::bold : juce::Font::plain;
+                    return juce::Font(juce::FontOptions("SF Pro Rounded", pt, flags));
+                }
+                case ThemeFace::Sans:
+                default:
+                    return grooveFont(pt, weight, false);
+            }
+        case FontFamily::System:
         {
-            case ThemeFace::Mono:
-                return grooveFont(pt, weight, true);
-            case ThemeFace::Serif:
-            {
-                const int flags = semibold ? juce::Font::bold : juce::Font::plain;
-                return juce::Font(juce::FontOptions("New York", pt, flags));
-            }
-            case ThemeFace::Rounded:
-            {
-                const int flags = semibold ? juce::Font::bold : juce::Font::plain;
-                return juce::Font(juce::FontOptions("SF Pro Rounded", pt, flags));
-            }
-            case ThemeFace::Sans:
-            default:
-                return grooveFont(pt, weight, false);
+            const int flags = semibold ? juce::Font::bold : juce::Font::plain;
+            return juce::Font(juce::FontOptions(juce::Font::getDefaultSansSerifFontName(), pt, flags));
         }
+        case FontFamily::Helvetica:
+        {
+            const int flags = semibold ? juce::Font::bold : juce::Font::plain;
+            return juce::Font(juce::FontOptions("Helvetica Neue", pt, flags));
+        }
+        case FontFamily::Avenir:
+        {
+            const int flags = semibold ? juce::Font::bold : juce::Font::plain;
+            return juce::Font(juce::FontOptions("Avenir Next", pt, flags));
+        }
+        default:
+            return grooveFont(pt, weight, false);
     }
-
-    juce::String name = "Helvetica Neue";
-    if (family == FontFamily::System)
-        name = juce::Font::getDefaultSansSerifFontName();
-    else if (family == FontFamily::Avenir)
-        name = "Avenir Next";
-    const int flags = semibold ? juce::Font::bold : juce::Font::plain;
-    return juce::Font(juce::FontOptions(name, pt, flags));
 }
 
 juce::Colour contrastInkOn(juce::Colour surface)

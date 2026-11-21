@@ -57,10 +57,10 @@ bool GrooveParams::isDefault() const
         && articulationStrength == 0
         && sustainPedalMode == (int) SustainPedalMode::Off
         && complexityTarget < 0
-        && syncopation == 0
         && delayAmount == 0
         && velocityRangeLo <= 1 && velocityRangeHi >= 127
         && variationIndex == 0
+        && revoice == 0
         && !arpEnabled
         && !melodyEnabled
         && !chordsEnabled
@@ -78,10 +78,10 @@ int GrooveParams::activeCount() const
     if (articulationIndex != (int) Articulation::Off && articulationStrength > 0) ++n;
     if (sustainPedalMode != (int) SustainPedalMode::Off) ++n;
     if (complexityTarget >= 0) ++n;
-    if (syncopation > 0) ++n;
     if (delayAmount > 0) ++n;
     if (velocityRangeLo > 1 || velocityRangeHi < 127) ++n;
     if (variationIndex > 0) ++n;
+    if (revoice > 0) ++n;
     if (arpEnabled) ++n;
     if (melodyEnabled) ++n;
     if (chordsEnabled) ++n;
@@ -121,8 +121,8 @@ void applyGrooveSectionLock(const GrooveParams& locked, GrooveParams& target, ui
     if ((locks & toolkitLock::Effects) != 0)
     {
         target.complexityTarget = locked.complexityTarget;
-        target.syncopation = locked.syncopation;
         target.variationIndex = locked.variationIndex;
+        target.revoice = locked.revoice;
         target.delayTimeIndex = locked.delayTimeIndex;
         target.delayAmount = locked.delayAmount;
         target.delayFeedback = locked.delayFeedback;
@@ -909,7 +909,7 @@ std::vector<RollNote> applyMusicalVariation(std::vector<RollNote> notes, int var
     if (notes.empty() || variationIndex <= 0)
         return notes;
 
-    const int var = juce::jlimit(1, 16, variationIndex);
+    const int var = juce::jlimit(1, kMaxVariations, variationIndex);
     const auto anchors = anchorOnsets(notes, kind);
     constexpr int kCandidates = 10;
     std::vector<RollNote> best = notes;
@@ -1023,6 +1023,118 @@ std::vector<RollNote> applyMusicalVariation(std::vector<RollNote> notes, int var
     return found ? best : notes;
 }
 
+/** Revoice: group simultaneous notes into chords and re-stack each one with
+    voice-leading from the chord before it (smallest total voice movement, register
+    kept near the original). Pitch classes never change — only octave placement,
+    inversion and spread. amount 0 = original voicing; 1..kMaxRevoice = how many chords
+    change and how freely they may invert / open. Run on the source notes, before any
+    timing transform, so humanize/swing cannot split a chord. */
+std::vector<RollNote> applyRevoice(const std::vector<RollNote>& notes, int amount)
+{
+    amount = juce::jlimit(0, kMaxRevoice, amount);
+    if (amount <= 0 || notes.size() < 2)
+        return notes;
+
+    const double t = (double) amount / (double) kMaxRevoice;
+    const auto groups = groupChords(notes);
+    std::vector<RollNote> out = notes;
+    std::vector<int> prev; // sorted pitches of the previous chord as it now sounds
+
+    auto mean = [](const std::vector<int>& v)
+    {
+        double s = 0.0;
+        for (int p : v) s += (double) p;
+        return v.empty() ? 0.0 : s / (double) v.size();
+    };
+
+    for (size_t gi = 0; gi < groups.size(); ++gi)
+    {
+        if (groups[gi].indices.size() < 2)
+            continue;
+
+        std::vector<size_t> idx = groups[gi].indices;
+        std::sort(idx.begin(), idx.end(), [&](size_t a, size_t b)
+        {
+            return notes[a].pitch < notes[b].pitch;
+        });
+        std::vector<int> orig;
+        orig.reserve(idx.size());
+        for (size_t i : idx) orig.push_back(notes[i].pitch);
+
+        const uint32_t h = knuthHash(amount * 131 + (int) gi * 17);
+        if ((h % 100u) >= (uint32_t) std::lround(35.0 + 65.0 * t))
+        {
+            prev = orig;
+            continue;
+        }
+
+        const int n = (int) orig.size();
+        const double origMean = mean(orig);
+        const double target = prev.empty() ? origMean : mean(prev);
+        const int winLo = std::max(0, orig.front() - 12);
+        const int winHi = std::min(127, orig.back() + 12);
+
+        std::vector<int> best = orig;
+        double bestCost = 1.0e12;
+        for (int inv = 0; inv < n; ++inv)
+        {
+            std::vector<int> v = orig;
+            for (int j = 0; j < inv; ++j) v[(size_t) j] += 12; // inversion: lowest voices up
+            std::sort(v.begin(), v.end());
+            for (int open = 0; open < (n >= 3 ? 2 : 1); ++open)
+            {
+                std::vector<int> w = v;
+                if (open == 1) w[1] += 12; // open spread: lift the second voice an octave
+                std::sort(w.begin(), w.end());
+
+                const int shift = (int) std::lround((target - mean(w)) / 12.0) * 12;
+                bool fits = true;
+                for (auto& p : w)
+                {
+                    p += shift;
+                    if (p < winLo || p > winHi) fits = false;
+                }
+                if (!fits)
+                    continue;
+
+                double cost = 0.0;
+                if (!prev.empty())
+                {
+                    const int m = (int) prev.size();
+                    for (int i = 0; i < n; ++i)
+                    {
+                        const int j = n > 1 ? (int) std::lround((double) i * (double) (m - 1)
+                                                                / (double) (n - 1)) : 0;
+                        cost += std::abs(w[(size_t) i] - prev[(size_t) j]);
+                    }
+                }
+                cost += 0.5 * std::abs(mean(w) - origMean);
+                cost += (1.0 - t) * 3.0 * (double) inv + (1.0 - t) * 4.0 * (double) open;
+                cost += (hashSigned(amount * 977 + (int) gi * 13 + inv * 3 + open, 5) + 1.0) * 0.5
+                        * (1.5 + 4.0 * t);
+                if (cost < bestCost)
+                {
+                    bestCost = cost;
+                    best = w;
+                }
+            }
+        }
+
+        for (size_t r = 0; r < idx.size(); ++r)
+        {
+            auto& note = out[idx[r]];
+            const int p = juce::jlimit(0, 127, best[r]);
+            if (p != note.pitch)
+            {
+                note.pitch = p;
+                note.moved = true;
+            }
+        }
+        prev = best;
+    }
+    return out;
+}
+
 std::vector<RollNote> applyDelay(std::vector<RollNote> notes, const GrooveParams& k)
 {
     if (k.delayAmount <= 0 || notes.empty())
@@ -1082,7 +1194,9 @@ std::vector<RollNote> applyGroove(const std::vector<RollNote>& notes, const Groo
     const double artAmt = articOn ? juce::jlimit(0.0, 1.0, k.articulationStrength / 100.0) : 0.0;
     const auto art = k.articulation();
 
-    std::vector<RollNote> sorted = notes;
+    std::vector<RollNote> sorted = (k.revoice > 0 && kind != ClipKind::Drums)
+                                       ? applyRevoice(notes, k.revoice)
+                                       : notes;
     std::stable_sort(sorted.begin(), sorted.end(),
                      [](const RollNote& a, const RollNote& b) { return a.start < b.start; });
 
@@ -1105,19 +1219,6 @@ std::vector<RollNote> applyGroove(const std::vector<RollNote>& notes, const Groo
             const int slot = (int) std::floor(start / (double) period);
             if (((slot % 2) + 2) % 2 == 1)
                 start += (k.swing / 100.0) * swingMax;
-        }
-
-        // Syncopation: anticipate offbeats (pull earlier toward the previous 16th).
-        if (k.syncopation > 0)
-        {
-            constexpr double sixteenth = 1.0; // steps
-            const double phase = std::fmod(std::abs(start), sixteenth * 2.0);
-            if (phase > sixteenth * 0.35 && phase < sixteenth * 1.65)
-            {
-                const double toward = std::floor(start / sixteenth) * sixteenth;
-                const double pull = (k.syncopation / 100.0) * 0.85 * sixteenth;
-                start -= juce::jmin(pull, std::abs(start - toward) + pull * 0.5);
-            }
         }
 
         if (k.pocket != 0)

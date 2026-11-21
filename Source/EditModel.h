@@ -135,6 +135,15 @@ struct ScaleAnalysis
     Mode primaryMode = Mode::Ionian;
     /** 0 = Off (notes within one octave). Else 1..3 spanning octaves. */
     int octaveRange = 0;
+    /** Per root pitch-class: % of the clip's note weight (length-weighted) that sits inside
+        that root's best-fitting mode. 100 = the root is a candidate key (covers every note). */
+    std::array<int, 12> rootCoverage {};
+    /** Per root: how convincingly it reads as the tonic, 0..100. Candidate roots blend full
+        coverage with root/third/fifth emphasis relative to the strongest root; non-candidates
+        scale down with their coverage. Heuristic — drives the key-chip hover readout. */
+    std::array<int, 12> rootCertainty {};
+    /** Per root: suggested mode (best covering mode there, Major/Minor-leaning on ties). */
+    std::array<Mode, 12> rootMode {};
 };
 
 /** Detect viable keys/modes and octave span from clip note content. */
@@ -192,7 +201,9 @@ inline int mapPitchToOctaveWindow(int pitch, int octaveIndex, int octaveRange, O
 
 // ── Edit record (one per clip; the clip itself is never touched) ─────────────
 
-struct NoteMove { int dPitch = 0; int dStep = 0; };
+/** Per-note manual edit: pitch / start move (steps) and duration change (steps,
+    positive = longer). dLen is last so existing {dPitch, dStep} initialisers stay valid. */
+struct NoteMove { int dPitch = 0; int dStep = 0; double dLen = 0.0; };
 
 struct ClipEdit
 {

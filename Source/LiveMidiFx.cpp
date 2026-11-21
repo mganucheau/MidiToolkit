@@ -123,8 +123,22 @@ int timingOffsetSamplesFor(const GrooveParams& k, double stepPos, int noteId,
 
 } // namespace
 
+int pitchInputDelta(int latchedMidi, const ClipEdit& edit, int sourceRoot)
+{
+    if (!edit.pitchInput || latchedMidi < 0)
+        return 0;
+    // Map to Root already moves the clip onto the Key chip; transpose from there.
+    const int ref = (edit.mapToRoot && edit.root >= 0 && sourceRoot >= 0) ? edit.root : sourceRoot;
+    if (ref < 0)
+        return 0;
+    int d = ((latchedMidi % 12) - (ref % 12)) % 12;
+    if (d > 6)  d -= 12;
+    if (d < -6) d += 12;
+    return d;
+}
+
 int transformLivePitch(int midi, const ClipEdit& edit, int sourceRoot, int sourceOctave,
-                       bool drumChannel)
+                       bool drumChannel, int pitchInputMidi)
 {
     int pitch = juce::jlimit(0, 127, midi);
     if (drumChannel)
@@ -144,6 +158,8 @@ int transformLivePitch(int midi, const ClipEdit& edit, int sourceRoot, int sourc
         if (d < -6) d += 12;
         pitch += d;
     }
+
+    pitch += pitchInputDelta(pitchInputMidi, edit, sourceRoot);
 
     if (edit.fitScale && edit.root >= 0)
         pitch = fitToScale(pitch, edit.root, edit.mode);
@@ -307,6 +323,23 @@ void LiveMidiFx::flush(juce::MidiBuffer& out, int samplePosition)
     sustainLatched_.fill(false);
 }
 
+void LiveMidiFx::observePitchInput(const juce::MidiBuffer& midi)
+{
+    bool latchOn = false;
+    {
+        juce::ScopedLock sl(lock_);
+        latchOn = state_.edit.pitchInput && !state_.recording;
+    }
+    if (!latchOn)
+        return;
+    for (const auto metadata : midi)
+    {
+        const auto msg = metadata.getMessage();
+        if (msg.isNoteOn() && msg.getVelocity() > 0 && msg.getChannel() != 10)
+            pitchLatchMidi_.store(juce::jlimit(0, 127, msg.getNoteNumber()));
+    }
+}
+
 std::vector<int> LiveMidiFx::heldPitchesSorted(bool asPlayed) const
 {
     struct Item { int pitch; int order; };
@@ -434,11 +467,15 @@ void LiveMidiFx::runGenerators(juce::MidiBuffer& out, const LiveFxState& snap, d
     const bool inputOnly = !allowGeneratorPlayback;
 
     std::vector<gen::Event> events;
-    if (snap.groove.arpEnabled && (!inputOnly || snap.groove.arpInput))
+    if (snap.groove.arpEnabled)
     {
-        const int* arpChord = snap.groove.arpInput ? chordPtr : nullptr;
-        const int arpCount = snap.groove.arpInput ? chordCount : 0;
-        gen::renderArp(snap.groove, startPpq, endPpq, arpChord, arpCount, keyRoot, mode, events);
+        // No Arp Input row any more: effect mode arpeggiates the held notes (and stays
+        // silent with none); generate mode freeruns from the key.
+        GrooveParams arpParams = snap.groove;
+        arpParams.arpInput = inputOnly;
+        const int* arpChord = inputOnly ? chordPtr : nullptr;
+        const int arpCount = inputOnly ? chordCount : 0;
+        gen::renderArp(arpParams, startPpq, endPpq, arpChord, arpCount, keyRoot, mode, events);
         emitEvents(events, 1, false);
     }
     if (snap.groove.melodyEnabled && (!inputOnly || snap.groove.melodyInput))
@@ -509,7 +546,8 @@ void LiveMidiFx::process(juce::MidiBuffer& midi, double sampleRate, double hostB
         pending_.swap(keep);
     }
 
-    const bool arpConsumes = snap.groove.arpEnabled && snap.groove.arpInput;
+    // Effect mode: the arp eats melodic input (it plays the held notes as a pattern).
+    const bool arpConsumes = snap.groove.arpEnabled && !allowGeneratorPlayback;
 
     for (const auto metadata : midi)
     {

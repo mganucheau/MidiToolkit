@@ -47,13 +47,16 @@ struct SharedUiSession
     int tweakSize = 1;          // ContentSize::Medium
     int tweakTextScalePct = 100;
     int tweakAppearance = 0;    // Appearance::System (Auto) / Light / Dark
-    int tweakLightTheme = 20;   // Neobrutal (skill pack)
-    int tweakDarkTheme = 20;    // Neobrutal (skill pack, dark twin)
+    int tweakLightTheme = 29;   // Clay (skill pack)
+    int tweakDarkTheme = 29;    // Clay (skill pack, dark twin)
     int tweakShowTooltips = 1;
-    int tweakFontFamily = 0;    // FontFamily::Archivo
+    int tweakFontFamily = 0;    // FontFamily::Inter
     int tweakSurfaceStyle = 0;  // SurfaceStyle::Flat
     int tweakAlternateRows = 1; // on by default
-    int tweakSeparationPct = 100; // 50–300
+    int tweakContrastPct = 100; // 50–200
+    int tweakNoteLabels = 1;    // show key names
+    juce::uint32 tweakCustomPrimary = 0;
+    juce::uint32 tweakCustomSecondary = 0;
 
     bool hasDefaultView = false;
     bool defEditorOpen = false;

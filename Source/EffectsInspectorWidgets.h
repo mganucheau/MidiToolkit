@@ -61,8 +61,8 @@ inline juce::Font inspectorMono(bool semibold = false) { return monoFontFixed(kF
 inline juce::Font popupFont(bool semibold = false) { return uiFontFixed(kPopupFontPt, semibold); }
 inline juce::Font sectionTitleFont()
 {
-    // Levels section label: mono 12, caps, slight tracking.
-    auto f = monoFontFixed(12.0f, true);
+    // Follow Settings → Font so section titles match the chosen face.
+    auto f = uiFontFixed(12.0f, true);
     f.setExtraKerningFactor(0.04f);
     return f;
 }
@@ -210,6 +210,93 @@ public:
 
 // ── FlatSwitch ───────────────────────────────────────────────────────────────
 
+/** Face of a row switch inside `bounds`: ~28×16 pill, inset so thick theme borders never clip. */
+inline juce::Rectangle<float> switchFace(juce::Rectangle<float> bounds)
+{
+    const float border = themeDepth() == ThemeDepth::Brutal
+                             ? juce::jmax(1.5f, themeBorderPx())
+                             : 1.0f;
+    const float pad = border + 1.0f;
+    const float maxH = juce::jmax(10.0f, bounds.getHeight() - pad * 2.0f);
+    const float h = juce::jmin(16.0f, maxH);
+    const float w = juce::jmin(bounds.getWidth() - pad * 2.0f, h * 1.75f);
+    return bounds.withSizeKeepingCentre(w, h);
+}
+
+/** Row switch / section lock toggle. Returns the face for focus rings.
+    `glyph` (optional icon name) is stroked inside the knob. */
+inline juce::Rectangle<float> paintSwitchPill(juce::Graphics& g, juce::Rectangle<float> bounds,
+                                              bool on, bool enabled, bool over, bool tipHot,
+                                              const juce::String& glyph = {})
+{
+    const float border = themeDepth() == ThemeDepth::Brutal
+                             ? juce::jmax(1.5f, themeBorderPx())
+                             : 1.0f;
+    auto face = switchFace(bounds);
+    const float h = face.getHeight();
+    const float rad = h * 0.5f;
+
+    juce::Path trackPath;
+    trackPath.addRoundedRectangle(face, rad);
+    {
+        juce::Graphics::ScopedSaveState ss(g);
+        g.reduceClipRegion(trackPath);
+        auto track = tipHot ? tooltipAccent() : (on ? ds::acc() : ds::edge());
+        if (!enabled) track = track.withMultipliedAlpha(0.45f);
+        else if (over && !on)
+            track = track.withMultipliedAlpha(0.8f).overlaidWith(ds::inkFaint().withAlpha(0.25f));
+        g.setColour(track);
+        g.fillRect(face); // clipped to rounded path — no white corner bleed
+        const float knob = juce::jmax(6.0f, h - 4.0f);
+        auto knobR = juce::Rectangle<float>(knob, knob)
+                         .withCentre({ on ? face.getRight() - rad : face.getX() + rad,
+                                       face.getCentreY() });
+        g.setColour(on ? juce::Colours::white : ds::surface100());
+        g.fillEllipse(knobR);
+        if (glyph.isNotEmpty())
+            drawIcon(g, glyph, knobR.reduced(knob * 0.2f),
+                     on ? ds::acc() : ds::inkMuted(), 1.1f);
+    }
+    if (themeDepth() == ThemeDepth::Brutal)
+    {
+        g.setColour(ds::ink());
+        g.drawRoundedRectangle(face.reduced(border * 0.5f), rad, border);
+    }
+    return face;
+}
+
+/** Momentary button at the same size and pill language as a row switch (section Reset).
+    `pressed` lights it while the mouse is down. */
+inline void paintMomentaryPill(juce::Graphics& g, juce::Rectangle<float> bounds, bool pressed,
+                               bool enabled, bool over, const juce::String& glyph)
+{
+    const float border = themeDepth() == ThemeDepth::Brutal
+                             ? juce::jmax(1.5f, themeBorderPx())
+                             : 1.0f;
+    auto face = switchFace(bounds);
+    const float rad = face.getHeight() * 0.5f;
+
+    juce::Path path;
+    path.addRoundedRectangle(face, rad);
+    {
+        juce::Graphics::ScopedSaveState ss(g);
+        g.reduceClipRegion(path);
+        auto fill = pressed && enabled ? ds::acc() : ds::edge();
+        if (!enabled) fill = fill.withMultipliedAlpha(0.45f);
+        else if (over && !pressed)
+            fill = fill.withMultipliedAlpha(0.8f).overlaidWith(ds::inkFaint().withAlpha(0.25f));
+        g.setColour(fill);
+        g.fillRect(face);
+    }
+    if (themeDepth() == ThemeDepth::Brutal)
+    {
+        g.setColour(ds::ink());
+        g.drawRoundedRectangle(face.reduced(border * 0.5f), rad, border);
+    }
+    drawIcon(g, glyph, face.withSizeKeepingCentre(10.0f, 10.0f),
+             !enabled ? ds::inkFaint() : (pressed ? juce::Colours::white : ds::ink()), 1.3f);
+}
+
 class FlatSwitch : public juce::Button
 {
 public:
@@ -226,44 +313,10 @@ public:
 
     void paintButton(juce::Graphics& g, bool, bool) override
     {
-        // Levels switch: ~28×16 pill. Inset so thick theme borders never clip.
-        const bool on = getToggleState();
-        const bool tipHot = hasTooltipHighlight(this);
-        const float border = themeDepth() == ThemeDepth::Brutal
-                                 ? juce::jmax(1.5f, themeBorderPx())
-                                 : 1.0f;
-        const float pad = border + 1.0f;
-        const float maxH = juce::jmax(10.0f, (float) getHeight() - pad * 2.0f);
-        const float h = juce::jmin(16.0f, maxH);
-        const float w = juce::jmin((float) getWidth() - pad * 2.0f, h * 1.75f);
-        auto face = getLocalBounds().toFloat().withSizeKeepingCentre(w, h);
-        const float rad = face.getHeight() * 0.5f;
-
-        juce::Path trackPath;
-        trackPath.addRoundedRectangle(face, rad);
-        {
-            juce::Graphics::ScopedSaveState ss(g);
-            g.reduceClipRegion(trackPath);
-            auto track = tipHot ? tooltipAccent() : (on ? ds::acc() : ds::edge());
-            if (!isEnabled()) track = track.withMultipliedAlpha(0.45f);
-            else if (isMouseOver() && !on)
-                track = track.withMultipliedAlpha(0.8f).overlaidWith(ds::inkFaint().withAlpha(0.25f));
-            g.setColour(track);
-            g.fillRect(face); // clipped to rounded path — no white corner bleed
-            const float knob = juce::jmax(6.0f, h - 4.0f);
-            auto knobR = juce::Rectangle<float>(knob, knob)
-                             .withCentre({ on ? face.getRight() - rad : face.getX() + rad,
-                                           face.getCentreY() });
-            g.setColour(on ? juce::Colours::white : ds::surface100());
-            g.fillEllipse(knobR);
-        }
-        if (themeDepth() == ThemeDepth::Brutal)
-        {
-            g.setColour(ds::ink());
-            g.drawRoundedRectangle(face.reduced(border * 0.5f), rad, border);
-        }
+        const auto face = paintSwitchPill(g, getLocalBounds().toFloat(), getToggleState(),
+                                          isEnabled(), isMouseOver(), hasTooltipHighlight(this));
         if (hasKeyboardFocus(true))
-            drawFocusRing(g, face, rad);
+            drawFocusRing(g, face, face.getHeight() * 0.5f);
     }
 
     int idealWidth() const { return 28; }
@@ -563,94 +616,6 @@ public:
         g.drawFittedText(text, r.withTrimmedLeft(minusW).withWidth(valueW).toNearestInt(),
                          juce::Justification::centred, 1);
     }
-};
-
-// ── TempoToggle ──────────────────────────────────────────────────────────────
-
-class TempoToggle : public juce::Component, public juce::SettableTooltipClient
-{
-public:
-    TempoToggle()
-    {
-        setWantsKeyboardFocus(false);
-        setTooltip("Halve or double playback tempo vs the clip / host");
-    }
-    enum class Sel { None, Half, Double };
-    std::function<void(double)> onChange;
-
-    void setMultiplier(double m, juce::NotificationType notify = juce::dontSendNotification)
-    {
-        Sel next = Sel::None;
-        if (m < 0.75) next = Sel::Half;
-        else if (m > 1.5) next = Sel::Double;
-        if (next == selected) return;
-        selected = next;
-        repaint();
-        if (notify != juce::dontSendNotification && onChange)
-            onChange(multiplier());
-    }
-
-    double multiplier() const
-    {
-        switch (selected)
-        {
-            case Sel::Half: return 0.5;
-            case Sel::Double: return 2.0;
-            case Sel::None: break;
-        }
-        return 1.0;
-    }
-
-    void mouseDown(const juce::MouseEvent& e) override
-    {
-        const auto r = getLocalBounds().toFloat();
-        const bool left = e.x < r.getCentreX();
-        const Sel seg = left ? Sel::Half : Sel::Double;
-        selected = (selected == seg) ? Sel::None : seg;
-        repaint();
-        if (onChange) onChange(multiplier());
-    }
-
-    int idealWidth() const
-    {
-        // Fit Half|Double into half a toolkit row (same as former select width).
-        return kSelectHalfW;
-    }
-
-    void paint(juce::Graphics& g) override
-    {
-        // Two Groove toggles side by side (2 px apart).
-        // Levels segmented control: muted track, selected cell is a raised
-        // surface with an edge border.
-        auto r = getLocalBounds().toFloat().withSizeKeepingCentre((float) getWidth(), 22.0f);
-        g.setColour(ds::surface300());
-        g.fillRoundedRectangle(r, ds::radius::md);
-        auto inner = r.reduced(2.0f);
-        auto left = inner.withTrimmedRight(inner.getWidth() * 0.5f);
-        auto right = inner.withTrimmedLeft(inner.getWidth() * 0.5f);
-        for (auto [cell, sel] : { std::pair<juce::Rectangle<float>, Sel>{ left, Sel::Half },
-                                  std::pair<juce::Rectangle<float>, Sel>{ right, Sel::Double } })
-        {
-            if (selected != sel) continue;
-            g.setColour(ds::surface200());
-            g.fillRoundedRectangle(cell, ds::radius::md - 2.0f);
-            g.setColour(ds::edge());
-            g.drawRoundedRectangle(cell.reduced(0.5f), ds::radius::md - 2.0f, 1.0f);
-        }
-
-        g.setFont(uiFontFixed(12.0f, true));
-        auto textCol = [&](Sel s)
-        {
-            return selected == s ? ds::ink() : ds::inkMuted();
-        };
-        g.setColour(textCol(Sel::Half));
-        g.drawText("Half", left.toNearestInt(), juce::Justification::centred, false);
-        g.setColour(textCol(Sel::Double));
-        g.drawText("Double", right.toNearestInt(), juce::Justification::centred, false);
-    }
-
-private:
-    Sel selected = Sel::None;
 };
 
 // ── FlatSliderRow (tall Photos Adjust: label + value inside, hover highlight) ─
@@ -1064,7 +1029,7 @@ private:
 
 // ── ChipGrid (2×N key / articulation / mode buttons) ─────────────────────────
 
-class ChipGrid : public juce::Component
+class ChipGrid : public juce::Component, public juce::SettableTooltipClient
 {
 public:
     /** SolidPrimary = key chips (primary fill + onPrimary text).
@@ -1072,6 +1037,9 @@ public:
     enum class SelectStyle { SolidPrimary = 0, Accent };
 
     std::function<void()> onChange;
+    /** Hover text for a chip (empty = none). Shown through the app tooltip while the
+        mouse is over that chip — e.g. the key chips' certainty % and suggested mode. */
+    std::function<juce::String(int)> hoverTip;
     bool multiSelect = false;
     int columns = 6;
     /** When true, chip width follows label text and rows wrap to available width. */
@@ -1315,6 +1283,22 @@ public:
             g.drawText(hint, getLocalBounds().removeFromBottom(14),
                        juce::Justification::centredLeft, true);
         }
+    }
+
+    void mouseMove(const juce::MouseEvent& e) override
+    {
+        if (!hoverTip) return;
+        rebuildChipBounds();
+        const int idx = (collapsible && collapsed) ? -1 : hitIndex(e.getPosition());
+        const auto tip = idx >= 0 ? hoverTip(idx) : juce::String();
+        if (tip != getTooltip())
+            setTooltip(tip);
+    }
+
+    void mouseExit(const juce::MouseEvent&) override
+    {
+        if (getTooltip().isNotEmpty())
+            setTooltip({});
     }
 
     void mouseDown(const juce::MouseEvent& e) override
@@ -2393,6 +2377,9 @@ public:
         }
         if (showHeaderChrome && resetBounds().contains(e.getPosition()))
         {
+            // Momentary: lit while held, fires once on press (never toggles).
+            resetPressed = true;
+            repaint(resetBounds());
             if (onReset && modifiedCount() > 0 && !locked) onReset();
             return;
         }
@@ -2427,6 +2414,11 @@ public:
     void mouseUp(const juce::MouseEvent&) override
     {
         stopTimer();
+        if (resetPressed)
+        {
+            resetPressed = false;
+            repaint(resetBounds());
+        }
         if (dragging)
         {
             dragging = false;
@@ -2444,9 +2436,13 @@ public:
     void mouseMove(const juce::MouseEvent& e) override
     {
         const bool over = e.y <= kSectionHeaderH && e.y >= 0;
-        if (over != headerHover)
+        const bool overLock = showHeaderChrome && lockBounds().contains(e.getPosition());
+        const bool overReset = showHeaderChrome && resetBounds().contains(e.getPosition());
+        if (over != headerHover || overLock != lockHover || overReset != resetHover)
         {
             headerHover = over;
+            lockHover = overLock;
+            resetHover = overReset;
             repaint();
         }
         setMouseCursor(over ? juce::MouseCursor::PointingHandCursor
@@ -2455,9 +2451,9 @@ public:
 
     void mouseExit(const juce::MouseEvent&) override
     {
-        if (headerHover)
+        if (headerHover || lockHover || resetHover)
         {
-            headerHover = false;
+            headerHover = lockHover = resetHover = false;
             repaint();
         }
         setMouseCursor(juce::MouseCursor::NormalCursor);
@@ -2492,43 +2488,17 @@ public:
         g.drawText(titleCaps, titleR.removeFromLeft(juce::jmin(titleW, titleR.getWidth())),
                    juce::Justification::centredLeft, true);
 
-        if (showHeaderChrome && mods > 0)
-        {
-            // Count-only badge: violet 12% tag, ink mono digits (Levels).
-            titleR.removeFromLeft(8);
-            const auto txt = juce::String(mods);
-            const auto bf = monoFontFixed(12.0f, true);
-            const float bw = juce::jmax(20.0f, juce::GlyphArrangement::getStringWidth(bf, txt) + 12.0f);
-            // Levels: the count sits at the right of the header, before reset/lock.
-            const float rightEdge = showHeaderChrome ? (float) resetBounds().getX() - 6.0f
-                                                     : (float) getWidth() - 12.0f;
-            auto badge = juce::Rectangle<float>(rightEdge - bw, (float) titleR.getCentreY() - 10.0f, bw, 20.0f);
-            if (badge.getX() >= (float) titleR.getX())
-            {
-                g.setColour(ds::acc().withAlpha(ds::dark() ? 0.22f : 0.12f));
-                g.fillRoundedRectangle(badge, ds::radius::sm);
-                g.setFont(bf);
-                g.setColour(ds::ink());
-                g.drawText(txt, badge.toNearestInt(), juce::Justification::centred, false);
-            }
-        }
-
         if (showHeaderChrome)
         {
-            // Reset: live when this section has changes and is not locked.
+            // Same height and toggle language as the row switches (~28×16 pill).
+            // Reset: momentary button, live when this section has changes and is not locked.
             const bool canReset = mods > 0 && !locked;
-            drawIcon(g, icons::undo, resetBounds().toFloat().withSizeKeepingCentre(10.0f, 10.0f),
-                     canReset ? ds::ink() : ds::inkFaint(), 1.3f);
+            paintMomentaryPill(g, resetBounds().toFloat(), resetPressed, canReset,
+                               resetHover && canReset, icons::undo);
 
-            // Lock: a control-sm toggle; lit (accent) while locked.
-            auto lock = lockBounds().toFloat().withSizeKeepingCentre(16.0f, 14.0f);
-            if (locked)
-            {
-                ds::drawActive(g, lock, ds::radius::sm);
-            }
-            // Unlocked: bare icon (Levels ghost icon button).
-            drawIcon(g, locked ? icons::lockClosed : icons::lockOpen, lock.withSizeKeepingCentre(9.0f, 9.0f),
-                     locked ? ds::acc() : ds::inkMuted(), 1.2f);
+            // Lock: a real toggle — knob right and accent while locked.
+            paintSwitchPill(g, lockBounds().toFloat(), locked, true, lockHover, false,
+                            locked ? icons::lockClosed : icons::lockOpen);
         }
 
         g.setColour(dragging ? ds::acc() : ds::line());
@@ -2540,7 +2510,7 @@ public:
     /** Folded by default; when folded, dirty (changed) rows stay visible. */
     bool open = false;
     bool locked = false;
-    /** When false, header omits lock / reset / "X changed" (generator sections). */
+    /** When false, header omits the reset button and lock toggle (generator sections). */
     bool showHeaderChrome = true;
     bool showBottomDivider = false;   // legacy; frames replace dividers
     std::function<void()> onToggle;
@@ -2573,18 +2543,23 @@ private:
         dragArmed = true;
     }
 
+    static constexpr int kChromeW = 28;   // matches FlatSwitch::idealWidth
+    static constexpr int kChromeH = 16;   // matches the switch pill height
+    static constexpr int kChromePadR = 12;
+    static constexpr int kChromeGap = 6;
+
     juce::Rectangle<int> lockBounds() const
     {
         auto h = getLocalBounds().removeFromTop(kSectionHeaderH);
-        h.removeFromRight(8);
-        return h.removeFromRight(20);
+        h.removeFromRight(kChromePadR);
+        return h.removeFromRight(kChromeW).withSizeKeepingCentre(kChromeW, kChromeH);
     }
 
     juce::Rectangle<int> resetBounds() const
     {
         auto h = getLocalBounds().removeFromTop(kSectionHeaderH);
-        h.removeFromRight(8 + 20 + 4);
-        return h.removeFromRight(20);
+        h.removeFromRight(kChromePadR + kChromeW + kChromeGap);
+        return h.removeFromRight(kChromeW).withSizeKeepingCentre(kChromeW, kChromeH);
     }
 
     juce::Rectangle<int> chevronBounds() const
@@ -2597,11 +2572,14 @@ private:
     {
         auto h = getLocalBounds().removeFromTop(kSectionHeaderH);
         if (showHeaderChrome)
-            h.removeFromRight(4 + 20 + 20);
+            h.setRight(resetBounds().getX() - 4);
         return h;
     }
 
     bool headerHover = false;
+    bool lockHover = false;
+    bool resetHover = false;
+    bool resetPressed = false;
     bool pressInHeader = false;
     bool dragging = false;
     bool dragArmed = false; // hold completed; waiting for move to start reorder

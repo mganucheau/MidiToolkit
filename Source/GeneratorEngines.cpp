@@ -326,7 +326,13 @@ struct ArpBanks
     int velLayer[16];  // 0=rest, 1=soft, 2=mid, 3=accent
     float gateMul[16]; // duration scale
     int octShift[16];  // -1 / 0 / +1
+    bool slide[16];    // Acid: note holds into the next step (overlap = legato glide)
 };
+
+// Arp Gate / Intensity / Dynamics have no UI any more; these are the old defaults.
+constexpr float kArpGate = 0.70f;
+constexpr float kArpIntensity = 0.70f;
+constexpr float kArpDynamics = 0.55f;
 
 void buildPitchPool(const GrooveParams& g, const int* chordNotes, int chordCount,
                     int keyRoot, Mode mode, std::vector<int>& pool)
@@ -344,7 +350,8 @@ void buildPitchPool(const GrooveParams& g, const int* chordNotes, int chordCount
     }
     if (pool.empty())
     {
-        const int root = 60 + juce::jlimit(0, 11, keyRoot);
+        // Acid lives a register lower (C3) so octave jumps stay in synth-bass range.
+        const int root = (g.arpShape() == ArpShape::Acid ? 48 : 60) + juce::jlimit(0, 11, keyRoot);
         int count = 0;
         const int* deg = scaleDegrees(mode, count);
         pool.push_back(root);
@@ -367,19 +374,38 @@ void generateArpBanks(const GrooveParams& g, std::uint32_t seed, int salt, ArpBa
     const float density = clampf((float) g.arpDensity / 100.0f, 0.0f, 1.0f);
     const bool fillAll = g.arpDensity >= 100;
     // Shape index acts like Sting Type: low = more random intervals, high = chord tones.
-    const float type = (float) g.arpShapeIndex / (float) juce::jmax(1, (int) ArpShape::Count - 1);
+    const bool acid = g.arpShape() == ArpShape::Acid;
+    // Walk..Climb keep their original 0..1 spread; Acid has its own generator.
+    const float type = (float) juce::jmin(g.arpShapeIndex, (int) ArpShape::Climb)
+                       / (float) juce::jmax(1, (int) ArpShape::Climb);
 
     for (int i = 0; i < 16; ++i)
     {
         const float r = unit(seed, i, salt, 3);
         const bool strong = (i % 4) == 0;
         const bool play = fillAll || (strong ? (r < density * 1.15f + 0.15f) : (r < density));
+        banks.slide[i] = false;
         if (!play)
         {
             banks.noteIdx[i] = 0;
             banks.velLayer[i] = 0;
             banks.gateMul[i] = 0.5f;
             banks.octShift[i] = 0;
+            continue;
+        }
+
+        if (acid)
+        {
+            // 303-style: root-heavy low line, accents on strong steps, octave
+            // jumps up (and the odd dip), slides that tie into the next step.
+            const float pick = unit(seed, i, salt, 9);
+            banks.noteIdx[i] = pick < 0.5f ? 0 : (int) (unit(seed, i, salt, 11) * 4.0f);
+            const float accentRoll = unit(seed, i, salt, 17);
+            banks.velLayer[i] = (strong || accentRoll > 0.7f) ? 3 : (accentRoll > 0.3f ? 2 : 1);
+            banks.gateMul[i] = 0.75f;
+            const float oRoll = unit(seed, i, salt, 23);
+            banks.octShift[i] = oRoll < 0.30f ? 1 : (oRoll > 0.9f ? -1 : 0);
+            banks.slide[i] = unit(seed, i, salt, 29) < 0.28f;
             continue;
         }
 
@@ -419,40 +445,46 @@ void renderArpBanksBar(const GrooveParams& g, const ArpBanks& banks,
 {
     if (pool.empty()) return;
     const double stepLength = delayPeriodBeats(g.arpRate());
-    const float gateScale = clampf(g.arpGate / 100.0f, 0.08f, 1.2f);
-    const float intensity = clampf((float) g.arpIntensity / 100.0f, 0.15f, 1.0f);
-    const float dynamics = clampf((float) g.arpDynamics / 100.0f, 0.0f, 1.0f);
-    const int velLo = juce::roundToInt(48.0f + 20.0f * intensity);
-    const int velMid = juce::roundToInt(72.0f + 28.0f * intensity);
-    const int velHi = juce::roundToInt(96.0f + 28.0f * intensity);
+    const bool acid = g.arpShape() == ArpShape::Acid;
+    const int velLo = juce::roundToInt(48.0f + 20.0f * kArpIntensity);
+    const int velMid = juce::roundToInt(72.0f + 28.0f * kArpIntensity);
+    const int velHi = juce::roundToInt(96.0f + 28.0f * kArpIntensity);
 
-    const int stepsPerBar = juce::jmax(1, (int) std::lround(4.0 / stepLength));
+    // Density 100%: a note on every step of the selected rate (1/16 → every 16th),
+    // not a probability. Steps sit on the rate grid, so dotted rates stay even
+    // across bar lines.
     const bool fillAll = g.arpDensity >= 100;
-    for (int s = 0; s < stepsPerBar; ++s)
+    const double barStart = (double) bar * 4.0;
+    const int firstStep = (int) std::ceil(barStart / stepLength - 1.0e-6);
+    const int endStep = (int) std::ceil((barStart + 4.0) / stepLength - 1.0e-6);
+    for (int k = firstStep; k < endStep; ++k)
     {
+        const int s = k - firstStep;
         const int patternStep = s % 16;
+        const bool planned = banks.velLayer[patternStep] > 0;
         int layer = banks.velLayer[patternStep];
-        // Density 100%: every rate step gets a note (1/8 → every eighth, etc.).
-        if (layer <= 0)
+        if (!planned)
         {
             if (!fillAll) continue;
             layer = (s % 4) == 0 ? 3 : 2;
         }
 
-        int flat = juce::jlimit(1, 127, (velLo + velMid + velHi) / 3);
-        int layered = layer == 1 ? velLo : (layer == 2 ? velMid : velHi);
+        const int flat = juce::jlimit(1, 127, (velLo + velMid + velHi) / 3);
+        const int layered = layer == 1 ? velLo : (layer == 2 ? velMid : velHi);
         const int velocity = juce::jlimit(1, 127,
-            juce::roundToInt((float) flat * (1.0f - dynamics) + (float) layered * dynamics));
+            juce::roundToInt((float) flat * (1.0f - kArpDynamics) + (float) layered * kArpDynamics));
 
-        const int rawIdx = banks.velLayer[patternStep] > 0 ? banks.noteIdx[patternStep] : s;
+        const int rawIdx = planned ? banks.noteIdx[patternStep] : s;
         const int idx = ((rawIdx % (int) pool.size()) + (int) pool.size()) % (int) pool.size();
-        const int oct = banks.velLayer[patternStep] > 0 ? banks.octShift[patternStep] : 0;
-        const float gMul = banks.velLayer[patternStep] > 0 ? banks.gateMul[patternStep] : 0.75f;
-        int note = pool[(size_t) idx] + oct * 12;
-        note = juce::jlimit(0, 127, note);
+        const int oct = planned ? banks.octShift[patternStep] : 0;
+        const float gMul = planned ? banks.gateMul[patternStep] : 0.75f;
+        const int note = juce::jlimit(0, 127, pool[(size_t) idx] + oct * 12);
 
-        const double onPpq = bar * 4.0 + s * stepLength;
-        const double offPpq = onPpq + stepLength * (double) (gMul * gateScale);
+        const double onPpq = (double) k * stepLength;
+        // Acid slides run a hair past the next onset so the notes overlap (legato glide).
+        const bool slide = acid && planned && banks.slide[patternStep];
+        const double offPpq = slide ? onPpq + stepLength * 1.08
+                                    : onPpq + stepLength * (double) (gMul * kArpGate);
         if (onPpq >= startPpq && onPpq < endPpq)
             out.push_back({ onPpq, note, velocity });
         if (offPpq >= startPpq && offPpq < endPpq)
@@ -486,6 +518,7 @@ void renderArp(const GrooveParams& g, double startPpq, double endPpq,
                          : (bankA.velLayer[i] > 0 ? 1 : 0);
         bankB.gateMul[i] = bankA.gateMul[j];
         bankB.octShift[i] = -bankA.octShift[j];
+        bankB.slide[i] = bankA.slide[j];
 
         if ((i % 2) == 1)
         {
@@ -493,6 +526,7 @@ void renderArp(const GrooveParams& g, double startPpq, double endPpq,
             bankC.noteIdx[i] = (bankA.noteIdx[i] + 2) % 4;
             bankC.octShift[i] = bankA.octShift[i] != 0 ? bankA.octShift[i] : 1;
             bankC.gateMul[i] = 0.55f;
+            bankC.slide[i] = bankA.slide[i];
         }
         else
         {
@@ -500,6 +534,7 @@ void renderArp(const GrooveParams& g, double startPpq, double endPpq,
             bankC.velLayer[i] = bankA.velLayer[i];
             bankC.gateMul[i] = bankA.gateMul[i];
             bankC.octShift[i] = bankA.octShift[i];
+            bankC.slide[i] = bankA.slide[i];
         }
     }
 
@@ -517,7 +552,8 @@ void renderArp(const GrooveParams& g, double startPpq, double endPpq,
         juce::ignoreUnused(local);
         renderArpBanksBar(g, *banks[juce::jlimit(0, 2, letter)], pool, absBar, startPpq, endPpq, out);
     }
-    if (isFullPhraseWindow(startPpq, endPpq, phraseBars))
+    // Density 100% promises a note on every step — the QA thinning pass would drop some.
+    if (g.arpDensity < 100 && isFullPhraseWindow(startPpq, endPpq, phraseBars))
         musicalQaPass(out, phraseBars, false);
     sortEvents(out);
 }

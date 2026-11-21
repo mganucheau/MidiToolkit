@@ -142,6 +142,8 @@ private:
     int clipComplexity = 50;
     uint16_t candidateKeyMask = 0;
     uint16_t candidateModeMask = 0;
+    /** Per-root certainty / suggested mode for the key-chip hover. */
+    ScaleAnalysis clipAnalysis;
 
     IconBtn btnReset { icons::undo, "Reset Toolkit to defaults" };
     IconBtn btnEffectsLock { icons::lockOpen, "Lock Toolkit while browsing" };
@@ -164,7 +166,7 @@ private:
     fx::Section formSec { "Form" };
     fx::Section effectsSec { "Delay" };
 
-    fx::TempoToggle tempoToggle;
+    fx::FlatPopup tempoPopup;   // Time: 1x / 0.5x / 2x (bpmMultiplier)
     fx::InlineRow tempoRow;
     fx::FlatSwitch trimSwitch;
     fx::FlatSwitch reverseSwitch;
@@ -194,8 +196,8 @@ private:
     fx::InlineRow sustainRow;
 
     fx::FlatSliderRow complexitySl;
-    fx::FlatSliderRow syncopationSl;
     fx::FlatSliderRow variationsSl;
+    fx::FlatSliderRow revoiceSl;
     fx::FlatPopup delayTimePopup;
     fx::FlatSliderRow delayAmountSl;
     fx::GridAmountBlock delayBlock { "Delay", delayTimePopup, delayAmountSl };
@@ -203,8 +205,6 @@ private:
 
     fx::FlatTextButton arpGenerateBtn { "New" };
     fx::InlineRow arpGenerateRow;
-    fx::FlatSwitch arpInputSwitch;
-    fx::InlineRow arpInputRow;
     fx::FlatPopup arpLengthPopup;
     fx::InlineRow arpLengthRow;
     fx::FlatPopup arpFormPopup;
@@ -214,9 +214,6 @@ private:
     fx::FlatPopup arpRatePopup;
     fx::InlineRow arpRateRow;
     fx::FlatSliderRow arpDensitySl;
-    fx::FlatSliderRow arpIntensitySl;
-    fx::FlatSliderRow arpDynamicsSl;
-    fx::FlatSliderRow arpGateSl;
 
     fx::FlatTextButton melodyGenerateBtn { "New" };
     fx::InlineRow melodyGenerateRow;

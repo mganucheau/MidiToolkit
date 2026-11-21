@@ -255,6 +255,7 @@ juce_add_binary_data(MidiToolkitAssets
 
 set(MIDITOOLKIT_SOURCES
     Source/PluginProcessor.cpp
+    Source/HostParams.cpp
     Source/PluginEditor.cpp
     Source/MidiFileData.cpp
     Source/EditModel.cpp

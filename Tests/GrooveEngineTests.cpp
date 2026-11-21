@@ -290,3 +290,50 @@ TEST_CASE("grooveValueText formats bipolar and percent", "[groove]")
     CHECK(grooveValueText(kKnobDefs[0], 50) == "50%");
     CHECK(grooveValueText(kKnobDefs[5], 100) == "100%");
 }
+
+TEST_CASE("revoice 0 keeps voicing; >0 keeps chord size and timing", "[groove]")
+{
+    // Two chords of three simultaneous notes (C major, then F major).
+    std::vector<RollNote> chords = {
+        { 0, 60, 0.0, 4.0 }, { 1, 64, 0.0, 4.0 }, { 2, 67, 0.0, 4.0 },
+        { 3, 65, 8.0, 4.0 }, { 4, 69, 8.0, 4.0 }, { 5, 72, 8.0, 4.0 },
+    };
+
+    GrooveParams k;
+    CHECK(k.isDefault());
+    const auto same = applyGroove(chords, k, -1, ClipKind::Keys, 0, Mode::Ionian);
+    REQUIRE(same.size() == chords.size());
+    for (size_t i = 0; i < same.size(); ++i)
+        CHECK(same[i].pitch == chords[i].pitch);
+
+    k.revoice = kMaxRevoice;
+    CHECK_FALSE(k.isDefault());
+    CHECK(k.activeCount() == 1);
+    const auto moved = applyGroove(chords, k, -1, ClipKind::Keys, 0, Mode::Ionian);
+    REQUIRE(moved.size() == chords.size());
+    for (const auto& n : moved)
+    {
+        const auto it = std::find_if(chords.begin(), chords.end(),
+                                     [&](const RollNote& o) { return o.id == n.id; });
+        REQUIRE(it != chords.end());
+        CHECK(n.start == Approx(it->start));
+        CHECK(juce::isPositiveAndBelow(n.pitch, 128));
+        CHECK(((n.pitch - it->pitch) % 12) == 0); // pitch classes preserved
+    }
+}
+
+TEST_CASE("variation index is clamped to kMaxVariations", "[groove]")
+{
+    CHECK(kMaxVariations == 25);
+    GrooveParams k;
+    k.variationIndex = kMaxVariations;
+    const auto a = applyGroove(testNotes(), k, -1, ClipKind::Lead, 0, Mode::Ionian);
+    k.variationIndex = kMaxVariations + 40;
+    const auto b = applyGroove(testNotes(), k, -1, ClipKind::Lead, 0, Mode::Ionian);
+    REQUIRE(a.size() == b.size());
+    for (size_t i = 0; i < a.size(); ++i)
+    {
+        CHECK(a[i].pitch == b[i].pitch);
+        CHECK(a[i].start == Approx(b[i].start));
+    }
+}

@@ -12,7 +12,7 @@ constexpr int kSidebarHeaderH = 24;   // panel header band
 constexpr int kSidebarSectionH = 22;  // section caps row
 /** Same height as file-browser clip rows (metrics::listRowH). */
 constexpr int kSidebarRowH = ds::region::listRowH;
-constexpr int kOpenFolderH = 32;      // mockup secondary button height
+constexpr int kOpenFolderH = 28;      // match Browser/Generator SegmentToggle height
 constexpr int kCardHeaderH = 22;
 constexpr int kSectionGap = 16;       // air between LIBRARY / FAVORITES blocks
 constexpr int kHeaderToRows = 6;      // caps → first row
@@ -694,9 +694,14 @@ void FavoritesSidebar::SearchQueryPanel::paint(juce::Graphics& g)
     auto well = queryWell.toFloat();
     if (!well.isEmpty())
     {
-        // Levels field: surface, edge border, radius-md, 2px primary focus ring.
-        g.setColour(ds::surface200());
-        g.fillRoundedRectangle(well, ds::radius::md);
+        juce::Path wellPath;
+        wellPath.addRoundedRectangle(well, ds::radius::md);
+        {
+            juce::Graphics::ScopedSaveState ss(g);
+            g.reduceClipRegion(wellPath);
+            g.setColour(ds::surface200());
+            g.fillRect(well);
+        }
         g.setColour(ds::edge());
         g.drawRoundedRectangle(well.reduced(0.5f), ds::radius::md, 1.0f);
         if (focused)
@@ -729,8 +734,10 @@ void FavoritesSidebar::SearchQueryPanel::resized()
         saveChipBounds = querySlot.removeFromRight(chipW + 2).withTrimmedRight(2)
                              .withSizeKeepingCentre(chipW, juce::jmax(10, querySlot.getHeight() - 4));
     }
-    auto field = querySlot.withTrimmedLeft(20);
+    auto field = querySlot.withTrimmedLeft(20).withTrimmedRight(2);
+    // Clip the editor to the rounded well so white corners never bleed.
     queryField.setBounds(field);
+    queryField.setBorder(juce::BorderSize<int>(0));
     // Vertically centre the text inside the field (JUCE TextEditor indents from the top).
     const float fontH = queryField.getFont().getHeight();
     const int top = juce::jmax(0, (int) std::round(((float) field.getHeight() - fontH) * 0.5f) - 1);
@@ -3201,6 +3208,11 @@ void BrowserToolbar::setTitle(const juce::String& t)
     repaint();
 }
 
+void BrowserToolbar::setFolderPath(const juce::File& folder)
+{
+    folderPath = folder;
+}
+
 void BrowserToolbar::setCount(int shown, int total)
 {
     if (shownCount == shown && totalCount == total) return;
@@ -3296,7 +3308,22 @@ void BrowserToolbar::resized()
 void BrowserToolbar::mouseDown(const juce::MouseEvent& e)
 {
     if (resetBounds.contains(e.getPosition()) && onResetFilters)
+    {
         onResetFilters();
+        return;
+    }
+    if (e.mods.isPopupMenu() && titleBounds.contains(e.getPosition()) && folderPath.isDirectory())
+    {
+        juce::PopupMenu m;
+        m.addItem(1, "Open in Finder");
+        m.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(this)
+                             .withTargetScreenArea(localAreaToGlobal(titleBounds)),
+                        [path = folderPath](int r)
+                        {
+                            if (r != 1) return;
+                            path.revealToUser();
+                        });
+    }
 }
 
 void BrowserToolbar::mouseMove(const juce::MouseEvent& e)
@@ -3327,14 +3354,14 @@ void BrowserToolbar::paint(juce::Graphics& g)
 
     if (!titleBounds.isEmpty() && titleText.isNotEmpty())
     {
-        // Mockup: 16 pt title, muted "N of M" immediately after (no pill).
-        const auto titleFont = uiFontFixed(14.0f, true); // Levels: 14 / 600
+        // Match Open Folder label size (12 / 600); show parent/folder path style.
+        const auto titleFont = uiFontFixed(12.0f, true);
         g.setFont(titleFont);
         g.setColour(ds::ink());
         const float titleW = juce::GlyphArrangement::getStringWidth(titleFont, titleText);
         auto titleDraw = titleBounds;
         g.drawText(titleText, titleDraw.removeFromLeft((int) std::ceil(titleW) + 2),
-                   juce::Justification::centredLeft, false);
+                   juce::Justification::centredLeft, true);
 
         juce::String countTxt;
         if (totalCount > 0)

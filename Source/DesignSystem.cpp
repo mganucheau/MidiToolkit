@@ -16,12 +16,12 @@ juce::Colour rgba(juce::uint8 r, juce::uint8 g, juce::uint8 b, float a)
     return juce::Colour(r, g, b).withAlpha(a);
 }
 
-/** Surface separation: push a neutral layer further from (or closer to) the base
+/** Contrast: push a neutral layer further from (or closer to) the base
     background. Opaque colours scale their per-channel distance from base;
     translucent washes scale their alpha. */
 juce::Colour separate(juce::Colour c, juce::Colour base)
 {
-    const float k = (float) juce::jlimit(50, 300, tweaks().separationPct.load()) / 100.0f;
+    const float k = (float) juce::jlimit(50, 200, tweaks().contrastPct.load()) / 100.0f;
     if (std::abs(k - 1.0f) < 0.001f) return c;
     if (c.getFloatAlpha() < 0.999f)
         return c.withAlpha(juce::jlimit(0.0f, 1.0f, c.getFloatAlpha() * k));
@@ -144,10 +144,15 @@ const Palette& palette()
 
     static Palette cached;
     static int cachedTheme = -1;
-    static int cachedSeparation = -1;
+    static int cachedContrast = -1;
+    static juce::uint32 cachedPrimary = 0;
+    static juce::uint32 cachedSecondary = 0;
     const int theme = themeIndex();
-    const int separation = tweaks().separationPct.load();
-    if (theme != cachedTheme || separation != cachedSeparation)
+    const int contrast = tweaks().contrastPct.load();
+    const juce::uint32 customPrim = tweaks().customPrimary.load();
+    const juce::uint32 customSec = tweaks().customSecondary.load();
+    if (theme != cachedTheme || contrast != cachedContrast
+        || customPrim != cachedPrimary || customSec != cachedSecondary)
     {
         const auto& spec = themeAt(theme);
         cached = tinted(spec.dark ? dark : light);
@@ -211,8 +216,25 @@ const Palette& palette()
         cached.kw = juce::Colours::white;
         cached.kb = juce::Colours::black;
 
+        // User primary / secondary overrides from Settings.
+        if (customPrim != 0)
+        {
+            cached.note = juce::Colour(customPrim);
+            cached.kfInW = cached.note;
+            cached.kfInB = cached.note;
+        }
+        if (customSec != 0)
+        {
+            cached.acc = juce::Colour(customSec);
+            cached.selsoft = cached.bg.interpolatedWith(cached.acc, spec.dark ? 0.28f : 0.14f);
+            cached.kindBass = cached.acc;
+            cached.logoNoteHi = cached.acc;
+        }
+
         cachedTheme = theme;
-        cachedSeparation = separation;
+        cachedContrast = contrast;
+        cachedPrimary = customPrim;
+        cachedSecondary = customSec;
     }
     return cached;
 }
@@ -236,6 +258,8 @@ const Palette& palette()
 namespace {
 juce::Colour themedPrimaryColour()
 {
+    if (const auto custom = tweaks().customPrimary.load(); custom != 0)
+        return juce::Colour(custom);
     const auto& spec = themeAt(themeIndex());
     if (spec.primary != 0)
         return juce::Colour(spec.primary);

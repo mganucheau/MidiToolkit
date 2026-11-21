@@ -113,6 +113,8 @@ public:
     void setScalePlacement(ScalePlacement placement);
     bool hasSelection() const { return !selection.empty(); }
     const std::set<int>& selectedNoteIds() const { return selection; }
+    /** Current px-per-semitone (accounts for folded / scale-filtered rows). */
+    float currentRowHeight() const { return effRowH(); }
     void deleteSelectedNotes();   // non-destructive (edit.deleted)
     void toggleTrim();
 
@@ -135,17 +137,19 @@ private:
         void mouseDown(const juce::MouseEvent&) override;
         void mouseDrag(const juce::MouseEvent&) override;
         void mouseUp(const juce::MouseEvent&) override;
+        void mouseMove(const juce::MouseEvent&) override;
         void mouseWheelMove(const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
         void mouseMagnify(const juce::MouseEvent&, float scaleFactor) override;
         PianoRollEditor& owner;
 
         // interaction state
-        enum class Drag { None, Note, Marquee, Pan, LoopStart, LoopEnd };
+        enum class Drag { None, Note, NoteResize, Marquee, Pan, LoopStart, LoopEnd };
         Drag drag = Drag::None;
         int dragNoteId = -1;
         juce::Point<float> dragStart;
         juce::Point<int> panStartView;
         int dragDRows = 0, dragDStep = 0;       // live preview offsets
+        double dragDLen = 0.0;                  // live length delta (steps) while resizing
         juce::Rectangle<float> marquee;
         bool marqueeAdditive = false;
     };
@@ -231,6 +235,9 @@ private:
     void zoomToClip();
     void layoutScaleControls(juce::Rectangle<int> area);
     void nudgeSelection(int dPitch, int dStep);
+    /** Colour for selected notes, their velocity stems and highlighted keys.
+        Fixed amber so it never matches the (theme-driven) note colour. */
+    juce::Colour selectionColour() const;
 
     // ── row geometry ──
     float pxPerStep() const { return pxPerStepBase * zoomX; }
@@ -250,12 +257,18 @@ private:
     }
     int rowForPitch(int pitch) const;
     int pitchForRow(int row) const;
-    juce::Rectangle<float> noteRect(const RollNote&, int rowOffset = 0, double stepOffset = 0.0) const;
+    juce::Rectangle<float> noteRect(const RollNote&, int rowOffset = 0, double stepOffset = 0.0,
+                                    double lenOffset = 0.0) const;
     const RollNote* noteAt(juce::Point<float> contentPos) const;
+    /** True when contentPos is on the note's right-edge resize zone. */
+    bool onNoteRightEdge(const RollNote&, juce::Point<float> contentPos) const;
+    /** Clamp a length delta (steps) so the note stays >= one step and inside the clip. */
+    double clampedLenDelta(const RollNote&, double dLen) const;
     void computePxPerStepBase();
     void zoomXAround(float factor, float contentX);
     void zoomRowsAround(float factor, float contentY);
     void commitNoteDrag();
+    void commitNoteResize();
     void selectPitch(int pitch, bool additive);
     void refreshTrimButtonState();
     int velocityForNote(const RollNote& n) const;
@@ -325,6 +338,7 @@ private:
     IconBtn btnRevert { icons::undo, "Revert all edits" };
     ChipBtn btnFold { "Fold", icons::foldRows };
     ChipBtn btnScale { "Scale" };
+    ChipBtn btnFit { "Fit" };
     IconBtn btnZoomOut { icons::zoomOut, "Zoom out" };
     IconBtn btnZoomIn { icons::zoomIn, "Zoom in" };
     ChipBtn selBadge { "0 sel" };

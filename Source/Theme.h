@@ -125,6 +125,8 @@ inline constexpr int kNumThemesPerFamily = 30; // 10 classic + 20 skill
 inline constexpr int kPearlTheme = 5;
 /** Default skill pack (family index): Neobrutal — light 20 / dark 50. */
 inline constexpr int kNeobrutalTheme = 20;
+/** Default theme for new installs — Clay light/dark twins. */
+inline constexpr int kClayTheme = 29;
 inline constexpr int kInkTheme = 30; // first classic dark
 
 inline const ThemeSpec& themeAt(int index)
@@ -214,29 +216,43 @@ void drawInspectorControlSurface(juce::Graphics& g, juce::Rectangle<float> bound
 void drawInspectorDivider(juce::Graphics& g, juce::Rectangle<int> bounds);
 
 /** App-level runtime Tweaks (density / content size / appearance). */
-enum class FontFamily : int { Archivo = 0, System = 1, Helvetica = 2, Avenir = 3, Count };
+enum class FontFamily : int
+{
+    Inter = 0,
+    JetBrainsMono = 1,
+    Archivo = 2,
+    IBMPlexMono = 3,
+    System = 4,
+    Helvetica = 5,
+    Avenir = 6,
+    Count
+};
 enum class SurfaceStyle : int { Flat = 0, Depth = 1, Liquid = 2, Count };
 
 struct Tweaks
 {
     std::atomic<int> density { (int) Density::Comfortable };
     std::atomic<int> size    { (int) ContentSize::Medium };
-    /** Type + icon glyph scale as percent; 100% = former 115% size. Independent of UI size. */
+    /** Type + icon glyph scale as percent; 100% matches the former 115% size. */
     std::atomic<int> textScalePct { 100 };
     std::atomic<int> appearance { (int) Appearance::System };
     /** Light-family theme index 0–29 (classic + skill packs). */
-    std::atomic<int> lightTheme { kNeobrutalTheme };
+    std::atomic<int> lightTheme { kClayTheme };
     /** Dark-family theme index 0–29 → absolute 30–59. */
-    std::atomic<int> darkTheme { kNeobrutalTheme };
+    std::atomic<int> darkTheme { kClayTheme };
     std::atomic<int> showTooltips { 1 }; // 1 = on
-    std::atomic<int> fontFamily { (int) FontFamily::Archivo };
+    std::atomic<int> fontFamily { (int) FontFamily::Inter };
     std::atomic<int> surfaceStyle { (int) SurfaceStyle::Flat };
     /** Shade every other file-list row for readability. */
     std::atomic<int> alternateRows { 1 }; // 1 = on (default)
-    /** Surface separation, 50–300 %. Scales how far neutral layers (sidebar, section
-        cards, wells, lines, borders, selection tints) sit from the window background.
-        Text and accents are untouched. 100 = Levels default. */
-    std::atomic<int> separationPct { 100 };
+    /** Contrast 50–200 %. Pushes surfaces and ink apart. 100 = theme default. */
+    std::atomic<int> contrastPct { 100 };
+    /** Show pitch names on piano-roll keys. */
+    std::atomic<int> noteLabels { 1 }; // 1 = on
+    /** 0 = use theme primary; otherwise ARGB override. */
+    std::atomic<uint32_t> customPrimary { 0 };
+    /** 0 = use theme accent; otherwise ARGB override. */
+    std::atomic<uint32_t> customSecondary { 0 };
 };
 
 /** Standout amber used for tip bubbles and the control highlight under them. */
@@ -495,6 +511,8 @@ namespace metrics {
     constexpr int effectsPaneW      = ds::region::toolkitW;
     constexpr int openRollW         = editorPaneW;
     constexpr int openRollMinW      = 360;
+    /** Piano roll may grow to 2× the default pane so a 4-bar loop can show 8 bars. */
+    constexpr int openRollMaxW      = editorPaneW * 2;
     constexpr int foldedWindowW     = sidebarRailW + fileTableW;
     constexpr int openWindowW       = sidebarExpandedW + fileTableW + editorPaneW;
     /** Header chrome icon button (play / effects / etc.). */
@@ -512,7 +530,8 @@ namespace metrics {
     inline int miniRollH()        { return scaled(ds::region::previewH); }
     /** Scale with Text & icons setting so chrome stays proportional. */
     inline int sidebarRailWidth() { return scaled(sidebarRailW); }
-    inline int sidebarExpandedWidth() { return scaled(sidebarExpandedW); }
+    /** Expanded library sidebar is a fixed 210 px (does not follow UI size). */
+    inline int sidebarExpandedWidth() { return sidebarExpandedW; }
     inline int chromeIconButton() { return scaled(chromeIconBtn); }
     inline int chromeIconGlyphSize()
     {
@@ -521,9 +540,11 @@ namespace metrics {
     inline int fileTableWidth()   { return scaled(fileTableW); }
     inline int fileTableMaxWidth(){ return scaled(fileTableMaxW); }
     inline int editorPaneWidth()  { return scaled(editorPaneW); }
+    inline int editorPaneMaxWidth() { return scaled(openRollMaxW); }
     inline int effectsPaneWidth() { return scaled(effectsPaneW); }
     inline int browserMinWidthScaled() { return scaled(browserMinWidth); }
     inline int openRollMinWidth() { return scaled(openRollMinW); }
+    inline int openRollMaxWidth() { return scaled(openRollMaxW); }
 }
 
 inline void styleSectionLabel(juce::Label& lbl, const juce::String& text)

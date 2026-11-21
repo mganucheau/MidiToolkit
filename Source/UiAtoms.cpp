@@ -84,6 +84,15 @@ void drawIcon(juce::Graphics& g, const juce::String& name,
         g.drawText("P", juce::Rectangle<float>(cx - s * 1.2f, cy - s * 1.2f, s * 2.4f, s * 2.4f),
                    juce::Justification::centred, false);
     }
+    else if (name == icons::arrowRight)
+    {
+        g.drawLine(cx - s * 0.95f, cy, cx + s * 0.55f, cy, px);
+        juce::Path head;
+        head.startNewSubPath(cx + s * 0.15f, cy - s * 0.55f);
+        head.lineTo(cx + s * 0.95f, cy);
+        head.lineTo(cx + s * 0.15f, cy + s * 0.55f);
+        g.strokePath(head, st);
+    }
     else if (name == icons::dragOut)
     {
         // Arrow entering a tray: the clip leaving the browser for a DAW track.

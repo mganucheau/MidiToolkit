@@ -266,8 +266,8 @@ TransportBar::TransportBar()
 
     prep(btnPassthrough);
     btnPassthrough.setComponentID("btnPassthrough");
-    btnPassthrough.icon = icons::through;
-    btnPassthrough.setTooltip("Passthrough: live MIDI input runs through the Toolkit — no file/generator playback (P)");
+    btnPassthrough.icon = icons::arrowRight;
+    btnPassthrough.setTooltip("Input: live MIDI runs through the Toolkit — no file/generator playback (P)");
     btnPassthrough.onClick = [this] { if (onTogglePassthrough) onTogglePassthrough(); };
     addAndMakeVisible(btnPassthrough);
 
@@ -644,7 +644,7 @@ void TransportBar::applyHeaderCaptionsTier(int tier)
 {
     // 2 = all labels, 1 = Passthrough + Toolkit (drop Piano roll), 0 = icons only.
     btnSync.caption = {};
-    btnPassthrough.caption = tier >= 1 ? "Passthrough" : juce::String();
+    btnPassthrough.caption = tier >= 1 ? "Input" : juce::String();
     btnEffects.caption = tier >= 1 ? "Toolkit" : juce::String();
     btnEditor.caption = tier >= 2 ? "Piano roll" : juce::String();
 }
@@ -670,36 +670,35 @@ void TransportBar::resized()
     // Drag Me sits between Effects and Settings when a clip is available.
     btnDragToDaw.setVisible(hasClip && !passthrough);
     btnEditor.setVisible(true);
-    // Levels: Through stays next to Record whenever browser transport is visible
-    // (not gated on Effects). MIDI FX build can still lock it off.
-    const bool showThrough = transportControlsVisible && !passthroughLocked;
-    btnPassthrough.setVisible(showThrough);
+    // Input chip sits with Piano roll / Toolkit on the right cluster.
+    const bool showInput = transportControlsVisible && !passthroughLocked;
+    btnPassthrough.setVisible(showInput);
     btnPlay.setVisible(transportControlsVisible);
     // Browser mode: keep Record hidden (Play remains).
     const bool showRecord = false;
     btnRecord.setVisible(showRecord);
 
-    // Passthrough: Sync + BPM leave the header — through-mode has no tempo group.
+    // Input mode: Sync + BPM leave the header — through-mode has no tempo group.
     const bool showBpm = !compactChrome && !passthrough;
     const int pillW = showBpm ? statusPill.idealWidth() : 0;
     btnDragToDaw.iconOnly = compactChrome;
     const int chipW = btnDragToDaw.isVisible() ? btnDragToDaw.idealWidth() : 0;
+    const int gearGap = juce::roundToInt(18.0f * sc); // larger gap between Drag Me and gear
 
     auto leftWidth = [&]()
     {
-        const int passChipW = showThrough ? btnPassthrough.captionWidth() : 0;
         const int playRecW = transportControlsVisible
-            ? (btn + tight + (showRecord ? btn + tight : 0)
-               + (showThrough ? tight + passChipW : 0) + groupGap)
+            ? (btn + tight + (showRecord ? btn + tight : 0) + groupGap)
             : 0;
-        return (showBpm ? pillW + groupGap : 0) + playRecW + btn;
+        return (showBpm ? pillW + groupGap : 0) + playRecW;
     };
     auto rightWidth = [&]()
     {
-        int w = btn + groupGap;   // settings
+        int w = btn + gearGap;   // settings (+ larger gap before gear)
         if (chipW > 0)              w += chipW + tight; // Drag Me before Settings
-        if (btnEffects.isVisible()) w += btnEffects.captionWidth();
-        if (btnEditor.isVisible())  w += tight + btnEditor.captionWidth();
+        if (btnEffects.isVisible()) w += btnEffects.captionWidth() + tight;
+        if (btnEditor.isVisible())  w += btnEditor.captionWidth() + tight;
+        if (showInput)              w += btnPassthrough.captionWidth() + groupGap;
         return w;
     };
 
@@ -767,30 +766,18 @@ void TransportBar::resized()
         {
             btnRecord.setBounds({});
         }
-        if (showThrough)
-        {
-            const int pw = btnPassthrough.captionWidth();
-            btnPassthrough.setBounds(x, y, pw, btn);
-            x += pw + groupGap;
-        }
-        else
-        {
-            btnPassthrough.setBounds({});
-            x += groupGap - tight;
-        }
     }
     else
     {
         btnPlay.setBounds({});
         btnRecord.setBounds({});
-        btnPassthrough.setBounds({});
     }
     transportGroupBounds = {};
     dividerBounds = {};
 
     int xr = getWidth() - rightPad;
     btnSettings.setBounds(xr - btn, y, btn, btn);
-    xr -= btn + tight;
+    xr -= btn + gearGap;
     if (chipW > 0)
     {
         btnDragToDaw.setBounds(xr - chipW, y, chipW, btn);
@@ -811,7 +798,17 @@ void TransportBar::resized()
     {
         const int w = btnEditor.captionWidth();
         btnEditor.setBounds(xr - w, y, w, btn);
-        xr -= w + groupGap;
+        xr -= w + tight;
+    }
+    if (showInput)
+    {
+        const int pw = btnPassthrough.captionWidth();
+        btnPassthrough.setBounds(xr - pw, y, pw, btn);
+        xr -= pw + groupGap;
+    }
+    else
+    {
+        btnPassthrough.setBounds({});
     }
 }
 
