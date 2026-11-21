@@ -1242,6 +1242,8 @@ void EffectsInspector::setLiveStreamMode(bool on)
     }
     liveStream = on;
     refreshFormClipGating();
+    layoutSections(); // hide/show Playback + Form for Input mode
+    repaint();
 }
 
 void EffectsInspector::setTrimState(bool active, bool enabled, const juce::String&)
@@ -1415,6 +1417,11 @@ void EffectsInspector::notifyEdit()
     refreshDirtySections();
 }
 
+bool EffectsInspector::hiddenByInputMode(const fx::Section* sec) const
+{
+    return liveStream && (sec == &playback || sec == &formSec);
+}
+
 void EffectsInspector::layoutSections()
 {
     // Match the Generator column: sections inset 8 px with 4 px gaps between them.
@@ -1458,8 +1465,9 @@ void EffectsInspector::layoutSections()
             place(bassSec, false);
             place(drumSec, false);
         }
+        // Input mode: Playback + Form have nothing to act on — force-hide them.
         for (auto* sec : sectionOrder)
-            place(*sec, true);
+            place(*sec, !hiddenByInputMode(sec));
     }
     y += pad - gap;
     // Follow section content so fold/unfold shrinks empty space; window snap uses contentHeight().
@@ -1583,7 +1591,8 @@ int EffectsInspector::contentHeight() const
     else
     {
         for (auto* sec : sectionOrder)
-            y += sec->idealHeight() + gap;
+            if (!hiddenByInputMode(sec))
+                y += sec->idealHeight() + gap;
     }
     return y + pad - gap;
 }
@@ -1661,8 +1670,8 @@ bool EffectsInspector::anySectionOpen() const
 {
     if (paneTab == 0)
         return arpSec.open || melodySec.open || chordsSec.open || bassSec.open || drumSec.open;
-    if (playback.open) return true;
-    return timing.open || performance.open || pitchSec.open || formSec.open || effectsSec.open;
+    if (!liveStream && (playback.open || formSec.open)) return true;
+    return timing.open || performance.open || pitchSec.open || effectsSec.open;
 }
 
 void EffectsInspector::foldAllSections()
@@ -1677,7 +1686,8 @@ void EffectsInspector::foldAllSections()
     else
     {
         for (auto* sec : sectionOrder)
-            sec->setOpen(expand);
+            if (!hiddenByInputMode(sec))
+                sec->setOpen(expand);
     }
     // Re-evaluate dirty predicates after the fold so Key / Mode / Fit / Map stay up.
     refreshDirtySections();

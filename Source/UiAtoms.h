@@ -77,6 +77,10 @@ namespace icons {
     inline constexpr const char* foldRows      = "fold-rows";
     inline constexpr const char* infinity      = "infinity";
     inline constexpr const char* search        = "search";
+    /** Arrow into tray — download / export folder. */
+    inline constexpr const char* download      = "download";
+    /** Finder / reveal-in-OS folder glyph. */
+    inline constexpr const char* finder        = "finder";
     inline constexpr const char* moon          = "moon";
     inline constexpr const char* sun           = "sun";
 }
@@ -114,12 +118,18 @@ public:
     bool outlined = false;
     /** Left cell of a joined group (Levels tempo group): left-rounded tint, no border. */
     bool groupLeft = false;
+    /** Right cell of a joined group (Play in the tempo pill): right-rounded tint, no border. */
+    bool groupRight = false;
+    /** Toggle chip: always draws surface fill + edge border (even icon-only); `active` swaps in the accent tint. */
+    bool chipChrome = false;
     float iconScale = 1.0f;
     /** When set, the button draws this label beside the icon and grows to fit. */
     juce::String caption;
     /** Used instead of the accent colour while `active`, when not transparent. */
     juce::Colour activeTint {};
     int captionWidth() const;
+    /** Captioned or explicit chips always show fill + border; `active` only changes colours. */
+    bool hasChipChrome() const { return caption.isNotEmpty() || chipChrome; }
 };
 
 /** Rounded chip with optional leading icon; used for Trim, badges, Editor btn. */

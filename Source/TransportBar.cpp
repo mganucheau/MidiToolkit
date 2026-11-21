@@ -227,7 +227,8 @@ TransportBar::TransportBar()
     // Play and stop share one button: play glyph while stopped, stop glyph while playing.
     prep(btnPlay);
     btnPlay.activeTint = ds::play();
-    btnPlay.solid = true;         // Levels: the one solid transport control
+    btnPlay.solid = false;        // Joins the Sync + BPM tempo pill
+    btnPlay.groupRight = true;
     btnPlay.setTooltip("Play preview (Space)");
     btnPlay.onClick = [this]
     {
@@ -265,6 +266,7 @@ TransportBar::TransportBar()
     addAndMakeVisible(btnSync);
 
     prep(btnPassthrough);
+    btnPassthrough.chipChrome = true;   // toggle chips keep their face when icon-only
     btnPassthrough.setComponentID("btnPassthrough");
     btnPassthrough.icon = icons::arrowRight;
     btnPassthrough.setTooltip("Input: live MIDI runs through the Toolkit — no file/generator playback (P)");
@@ -280,11 +282,13 @@ TransportBar::TransportBar()
     addAndMakeVisible(btnDragToDaw);
 
     prep(btnEditor);
+    btnEditor.chipChrome = true;
     btnEditor.setTooltip("Piano Roll (E)");
     btnEditor.onClick = [this] { if (onToggleEditor) onToggleEditor(); };
     addAndMakeVisible(btnEditor);
 
     prep(btnEffects);
+    btnEffects.chipChrome = true;
     btnEffects.setTooltip("Toolkit (F)");
     btnEffects.onClick = [this] { if (onToggleEffects) onToggleEffects(); };
     addAndMakeVisible(btnEffects);
@@ -642,20 +646,21 @@ void TransportBar::applyHeaderCaptions(bool withText)
 
 void TransportBar::applyHeaderCaptionsTier(int tier)
 {
-    // 2 = all labels, 1 = Passthrough + Toolkit (drop Piano roll), 0 = icons only.
+    // 2 = all labels, 1 = Input + Toolkit (drop Piano), 0 = icons only (Drag Me too).
     btnSync.caption = {};
     btnPassthrough.caption = tier >= 1 ? "Input" : juce::String();
     btnEffects.caption = tier >= 1 ? "Toolkit" : juce::String();
-    btnEditor.caption = tier >= 2 ? "Piano roll" : juce::String();
+    btnEditor.caption = tier >= 2 ? "Piano" : juce::String();
+    btnDragToDaw.iconOnly = compactChrome || tier <= 0;
 }
 
 void TransportBar::resized()
 {
-    // [lights] Wordmark · BPM · Play/Stop · Rec · Sync ······ Passthrough · Piano Roll · Effects · Settings
+    // [lights] Wordmark · Sync+BPM[+Play] ····· Input · Piano · Toolkit · Settings
     const int h = getHeight();
     const float sc = juce::jmax(0.5f, contentScale());
-    // Mockup: ~5 px vertical inset in the 40 px band.
-    const int btn = juce::jmin(h - 8, juce::roundToInt((float) kBtnH * sc));
+    // Match Fold / Scale / Fit chip height.
+    const int btn = juce::jmin(h - 8, metrics::chromeIconButton());
     const int y = (h - btn) / 2;
     const int tight = juce::roundToInt(6.0f * sc);     // within a group
     const int groupGap = juce::roundToInt(12.0f * sc); // between groups
@@ -670,40 +675,44 @@ void TransportBar::resized()
     // Drag Me sits between Effects and Settings when a clip is available.
     btnDragToDaw.setVisible(hasClip && !passthrough);
     btnEditor.setVisible(true);
-    // Input chip sits with Piano roll / Toolkit on the right cluster.
-    const bool showInput = transportControlsVisible && !passthroughLocked;
+    // Input chip sits with Piano / Toolkit on the right cluster — always shown
+    // (even in the generator-only column) unless a MIDI FX build locks it off.
+    const bool showInput = !passthroughLocked;
     btnPassthrough.setVisible(showInput);
-    btnPlay.setVisible(transportControlsVisible);
-    // Browser mode: keep Record hidden (Play remains).
+    // Browser mode: keep Record hidden (Play joins the tempo pill).
     const bool showRecord = false;
     btnRecord.setVisible(showRecord);
 
-    // Input mode: Sync + BPM leave the header — through-mode has no tempo group.
-    const bool showBpm = !compactChrome && !passthrough;
+    // Sync + BPM stay visible in generator-only chrome; through-mode has no tempo group.
+    // Play sits inside the same pill whenever transport controls are on.
+    const bool showBpm = !passthrough;
+    const bool playInPill = showBpm && transportControlsVisible;
+    btnPlay.setVisible(playInPill);
     const int pillW = showBpm ? statusPill.idealWidth() : 0;
-    btnDragToDaw.iconOnly = compactChrome;
-    const int chipW = btnDragToDaw.isVisible() ? btnDragToDaw.idealWidth() : 0;
-    const int gearGap = juce::roundToInt(18.0f * sc); // larger gap between Drag Me and gear
+    btnDragToDaw.iconOnly = compactChrome;   // applyHeaderCaptionsTier(0) also forces icon-only
+    // Drag Me width follows its icon-only state, which the caption tiers below change.
+    auto chipWidth = [&] { return btnDragToDaw.isVisible() ? btnDragToDaw.idealWidth() : 0; };
+    // Generator-only column: Input / Piano / Toolkit / Drag Me hug the gear.
+    const int gearGap = compactChrome ? tight : juce::roundToInt(18.0f * sc); // gap before gear
+    const int clusterGap = compactChrome ? tight : groupGap;                 // after Input / Drag Me
 
     auto leftWidth = [&]()
     {
-        const int playRecW = transportControlsVisible
-            ? (btn + tight + (showRecord ? btn + tight : 0) + groupGap)
-            : 0;
-        return (showBpm ? pillW + groupGap : 0) + playRecW;
+        if (!showBpm) return 0;
+        return pillW + btn + (playInPill ? btn : 0) + groupGap;
     };
     auto rightWidth = [&]()
     {
-        int w = btn + gearGap;   // settings (+ larger gap before gear)
-        if (chipW > 0)              w += chipW + tight; // Drag Me before Settings
+        int w = btn + gearGap;   // settings (+ gap before gear)
+        if (const int cw = chipWidth(); cw > 0) w += cw + clusterGap; // Drag Me before Settings
         if (btnEffects.isVisible()) w += btnEffects.captionWidth() + tight;
         if (btnEditor.isVisible())  w += btnEditor.captionWidth() + tight;
-        if (showInput)              w += btnPassthrough.captionWidth() + groupGap;
+        if (showInput)              w += btnPassthrough.captionWidth() + clusterGap;
         return w;
     };
 
-    // Prefer: full wordmark + all labels → shorten wordmark → drop Piano roll
-    // label → drop wordmark → icons only. Through stays labeled as long as possible.
+    // Prefer: full wordmark + all labels → shorten wordmark → drop Piano
+    // label → drop wordmark → icons only (Input, Piano, Toolkit, Drag Me).
     applyHeaderCaptionsTier(2);
     int leftW = leftWidth();
     int rightW = rightWidth();
@@ -711,14 +720,17 @@ void TransportBar::resized()
     const int midiW = logoMidiWidth();
     const int avail = getWidth() - lightsZoneW - rightPad;
 
-    auto fits = [&](int logo) { return (logo > 0 ? logo + groupGap : 0) + leftW + groupGap + rightW <= avail; };
+    auto fits = [&](int logo)
+    {
+        return (logo > 0 ? logo + groupGap : 0) + leftW + groupGap + rightW <= avail;
+    };
 
     int titleW = fullW;
     logoLevel = 2;
     if (!fits(fullW)) { titleW = midiW; logoLevel = 1; }
     if (!fits(titleW))
     {
-        applyHeaderCaptionsTier(1); // keep Through + Toolkit
+        applyHeaderCaptionsTier(1); // keep Input + Toolkit
         leftW = leftWidth();
         rightW = rightWidth();
     }
@@ -737,56 +749,55 @@ void TransportBar::resized()
     btnSync.setVisible(showBpm);
     if (showBpm)
     {
-        // Levels tempo group: Sync toggle flush against the BPM readout.
+        // Tempo pill: Sync | BPM [| Play] — one shared frame.
         btnSync.groupLeft = true;
         statusPill.grouped = true;
+        btnPlay.groupRight = playInPill;
+        btnPlay.solid = false;
         btnSync.setBounds(x, y, btn, btn);
         x += btn;
         statusPill.setBounds(x, y, pillW, btn);
+        x += pillW;
         tempoGroupBounds = btnSync.getBounds().getUnion(statusPill.getBounds());
-        x += pillW + groupGap;
+        if (playInPill)
+        {
+            btnPlay.setBounds(x, y, btn, btn);
+            tempoGroupBounds = tempoGroupBounds.getUnion(btnPlay.getBounds());
+            x += btn;
+        }
+        else
+        {
+            btnPlay.setBounds({});
+        }
+        x += groupGap;
     }
     else
     {
         statusPill.setBounds({});
         btnSync.setBounds({});
+        btnPlay.setBounds({});
         btnSync.groupLeft = false;
         statusPill.grouped = false;
+        btnPlay.groupRight = false;
         tempoGroupBounds = {};
     }
-    if (transportControlsVisible)
-    {
-        btnPlay.setBounds(x, y, btn, btn);            x += btn + tight;
-        if (showRecord)
-        {
-            btnRecord.setBounds(x, y, btn, btn);
-            x += btn + tight;
-        }
-        else
-        {
-            btnRecord.setBounds({});
-        }
-    }
-    else
-    {
-        btnPlay.setBounds({});
-        btnRecord.setBounds({});
-    }
+    btnRecord.setBounds({});
     transportGroupBounds = {};
     dividerBounds = {};
 
     int xr = getWidth() - rightPad;
     btnSettings.setBounds(xr - btn, y, btn, btn);
     xr -= btn + gearGap;
+    const int chipW = chipWidth();
     if (chipW > 0)
     {
         btnDragToDaw.setBounds(xr - chipW, y, chipW, btn);
-        xr -= chipW + groupGap;
+        xr -= chipW + clusterGap;
     }
     else
     {
         btnDragToDaw.setBounds({});
-        xr -= groupGap - tight;
+        xr -= clusterGap - tight;
     }
     if (btnEffects.isVisible())
     {
@@ -804,12 +815,13 @@ void TransportBar::resized()
     {
         const int pw = btnPassthrough.captionWidth();
         btnPassthrough.setBounds(xr - pw, y, pw, btn);
-        xr -= pw + groupGap;
+        xr -= pw + clusterGap;
     }
     else
     {
         btnPassthrough.setBounds({});
     }
+    juce::ignoreUnused(xr);
 }
 
 void TransportBar::paint(juce::Graphics& g)
@@ -824,12 +836,14 @@ void TransportBar::paint(juce::Graphics& g)
 
 void TransportBar::paintOverChildren(juce::Graphics& g)
 {
-    // Levels tempo group: one 18 % frame (radius-md) around Sync + BPM, 1 px divider.
+    // Tempo pill: one frame around Sync + BPM (+ Play), 1 px dividers between cells.
     if (tempoGroupBounds.isEmpty() || !statusPill.isVisible()) return;
     auto r = tempoGroupBounds.toFloat();
     g.setColour(ds::edge());
     g.drawRoundedRectangle(r.reduced(0.5f), ds::radius::md, 1.0f);
     g.fillRect((float) btnSync.getRight() - 0.5f, r.getY() + 1.0f, 1.0f, r.getHeight() - 2.0f);
+    if (btnPlay.isVisible() && !btnPlay.getBounds().isEmpty())
+        g.fillRect((float) statusPill.getRight() - 0.5f, r.getY() + 1.0f, 1.0f, r.getHeight() - 2.0f);
 }
 
 } // namespace pflow

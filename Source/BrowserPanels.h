@@ -716,18 +716,16 @@ public:
     void mouseExit(const juce::MouseEvent&) override;
     int idealHeight() const;
 
-    /** Host the sidebar's search field in the search row. */
-    void setSearchComponent(juce::Component* c);
     void setTitle(const juce::String&);
-    /** Absolute folder path used for “Open in Finder” on the title. */
+    /** Absolute folder path used for Finder / export actions. */
     void setFolderPath(const juce::File& folder);
     void setCount(int, int);
     void setGrid(bool);
     void setSubfolders(bool);
     void setSaved(bool, bool);
+    void setStarred(bool on);
+    void setLibraryFolder(bool on);
     void setFiltersActive(bool open, int activeCount, const juce::String& summary = {});
-    /** Screen-local bounds of the Filters chip (for anchoring the popover). */
-    juce::Rectangle<int> getFiltersButtonBounds() const { return btnFilters.getBounds(); }
 
     std::function<void()> onToggleGrid;
     std::function<void()> onToggleSubfolders;
@@ -736,14 +734,19 @@ public:
     std::function<void()> onToggleFilters;
     /** Clears active browser filters (mockup Reset link on the summary strip). */
     std::function<void()> onResetFilters;
+    std::function<void()> onToggleStarFolder;
+    std::function<void()> onRevealInFinder;
+    std::function<void()> onExportLibraryFolder;
 
 private:
     juce::String filterStripText() const;
+    juce::String countLabel() const;
 
-    juce::Component* search = nullptr;
     IconBtn btnSubfolders { icons::subfolders, "Include files in subfolders" };
     IconBtn btnGrid { icons::grid, "Grid view: files as clips in columns by kind" };
     IconBtn btnFilters { icons::funnel, "Filters" };
+    IconBtn btnStar { icons::starOutline, "Star folder" };
+    IconBtn btnReveal { icons::finder, "Show in Finder" };
     bool filtersOpen = false;
     int filtersActiveCount = 0;
     juce::String filtersSummary;
@@ -751,6 +754,8 @@ private:
     juce::File folderPath;
     int shownCount = 0;
     int totalCount = 0;
+    bool starred = false;
+    bool libraryFolder = false;
     juce::Rectangle<int> titleBounds, countBounds, filtersBadgeBounds;
     juce::Rectangle<int> filterStripBounds, resetBounds;
     bool resetHover = false;

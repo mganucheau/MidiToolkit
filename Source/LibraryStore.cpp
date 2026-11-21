@@ -169,7 +169,7 @@ SharedUiSession LibraryStore::uiSessionFromXml(const juce::XmlElement& el)
     const int contrast = el.hasAttribute("tweakContrastPct")
                              ? el.getIntAttribute("tweakContrastPct", 100)
                              : el.getIntAttribute("tweakSeparationPct", 100);
-    s.tweakContrastPct = juce::jlimit(50, 200, contrast);
+    s.tweakContrastPct = juce::jlimit(50, 400, contrast);
     s.tweakNoteLabels = el.getIntAttribute("tweakNoteLabels", 1) != 0 ? 1 : 0;
     s.tweakCustomPrimary = (juce::uint32) el.getStringAttribute("tweakCustomPrimary", "0").getHexValue64();
     s.tweakCustomSecondary = (juce::uint32) el.getStringAttribute("tweakCustomSecondary", "0").getHexValue64();

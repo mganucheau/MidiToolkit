@@ -102,7 +102,7 @@ void MidiToolkitProcessor::applySharedUiSessionFromLibrary()
     tweaks().fontFamily.store(juce::jlimit(0, (int) FontFamily::Count - 1, s.tweakFontFamily));
     tweaks().surfaceStyle.store(juce::jlimit(0, (int) SurfaceStyle::Count - 1, s.tweakSurfaceStyle));
     tweaks().alternateRows.store(s.tweakAlternateRows != 0 ? 1 : 0);
-    tweaks().contrastPct.store(juce::jlimit(50, 200, s.tweakContrastPct));
+    tweaks().contrastPct.store(juce::jlimit(50, 400, s.tweakContrastPct));
     tweaks().noteLabels.store(s.tweakNoteLabels != 0 ? 1 : 0);
     tweaks().customPrimary.store(s.tweakCustomPrimary);
     tweaks().customSecondary.store(s.tweakCustomSecondary);
@@ -1285,7 +1285,7 @@ void MidiToolkitProcessor::setStateInformation(const void* data, int sizeInBytes
                 const int contrast = xml->hasAttribute("tweakContrastPct")
                     ? xml->getIntAttribute("tweakContrastPct", 100)
                     : xml->getIntAttribute("tweakSeparationPct", 100);
-                tweaks().contrastPct.store(juce::jlimit(50, 200, contrast));
+                tweaks().contrastPct.store(juce::jlimit(50, 400, contrast));
             }
             tweaks().noteLabels.store(xml->getIntAttribute("tweakNoteLabels", 1) != 0 ? 1 : 0);
             tweaks().customPrimary.store((juce::uint32) xml->getStringAttribute("tweakCustomPrimary", "0").getHexValue64());

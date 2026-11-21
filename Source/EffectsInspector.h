@@ -39,7 +39,7 @@ public:
     /** Clip baseline complexity (1..100) — drives the Complexity slider position. */
     void setClipComplexity(int complexity);
     void setTrimState(bool active, bool enabled, const juce::String& label = {});
-    /** Live MIDI stream: hide Playback, Complexity, and Variations. */
+    /** Input (live MIDI) mode: force-hide the Playback and Form sections. */
     void setLiveStreamMode(bool on);
 
     std::function<void(const GrooveParams&)> onGrooveChanged;
@@ -99,6 +99,8 @@ private:
     void notifyGroove();
     void notifyEdit();
     void layoutSections();
+    /** True for Playback / Form while Input mode is on. */
+    bool hiddenByInputMode(const fx::Section* sec) const;
     void refreshDirtySections();
     void refreshPitchAnnotation();
     void refreshComplexitySlider();

@@ -101,6 +101,7 @@ private:
     void startDragOriginalFile(const juce::File& file);
     void copyFileToFolder(const juce::File& file);
     void copyStarredToFolder();
+    void exportLibraryFolder();
     void copyRenderedClipToFolder();
     void applyLayoutState();
     void updateWindowLimits();
@@ -259,14 +260,21 @@ private:
         LeftPaneTabs();
         std::function<void(int)> onTab;
         std::function<void()> onToggleGrid;
+        std::function<void()> onToggleSearch;
+        std::function<void()> onToggleFilters;
         void setTab(int t);
         void setGrid(bool on);
+        void setSearchOpen(bool on);
+        void setFiltersActive(bool open, int activeCount, const juce::String& summary = {});
+        juce::Rectangle<int> getFiltersButtonBounds() const { return btnFilters.getBounds(); }
         void resized() override;
         void paint(juce::Graphics&) override;
     private:
         int tab = 0;
         SegmentToggle tabToggle { "Browser", "Generator" };
-        IconBtn btnGrid { icons::grid, "Grid View" };
+        IconBtn btnSearch { icons::search, "Search" };
+        IconBtn btnFilters { icons::funnel, "Filters" };
+        IconBtn btnGrid { icons::grid, "Grid" };
     };
 
     FavoritesSidebar sidebar;
@@ -300,6 +308,7 @@ private:
     PreviewHeader previewHeader { *this };
     KindGridView kindGrid;
     bool gridView = false;
+    bool browserSearchOpen = false;
     bool showPreviewVelocity = false;
     bool previewMuted = false;
     int browserContentWidth() const;
@@ -402,6 +411,8 @@ private:
     void syncPassthroughWindowHeight();
     /** User-dragged passthrough height above the default fold. 0 = use default. */
     int userPassthroughH = 0;
+    /** Window height before Settings expanded it; restored on close. 0 = not open. */
+    int heightBeforeSettings = 0;
     double layoutAnimStartMs = 0.0;
     static constexpr double kLayoutAnimMs = 220.0;
 

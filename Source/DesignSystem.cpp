@@ -21,7 +21,7 @@ juce::Colour rgba(juce::uint8 r, juce::uint8 g, juce::uint8 b, float a)
     translucent washes scale their alpha. */
 juce::Colour separate(juce::Colour c, juce::Colour base)
 {
-    const float k = (float) juce::jlimit(50, 200, tweaks().contrastPct.load()) / 100.0f;
+    const float k = (float) juce::jlimit(50, 400, tweaks().contrastPct.load()) / 100.0f;
     if (std::abs(k - 1.0f) < 0.001f) return c;
     if (c.getFloatAlpha() < 0.999f)
         return c.withAlpha(juce::jlimit(0.0f, 1.0f, c.getFloatAlpha() * k));

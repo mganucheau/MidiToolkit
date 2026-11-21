@@ -407,6 +407,28 @@ void drawIcon(juce::Graphics& g, const juce::String& name,
         g.drawEllipse(cx - s * 0.55f, cy - s * 0.65f, s * 1.05f, s * 1.05f, px);
         g.drawLine(cx + s * 0.35f, cy + s * 0.45f, cx + s * 0.95f, cy + s * 1.05f, px * 1.2f);
     }
+    else if (name == icons::download)
+    {
+        // Arrow into a tray.
+        g.drawLine(cx, cy - s * 0.95f, cx, cy + s * 0.25f, px * 1.15f);
+        g.drawLine(cx - s * 0.45f, cy - s * 0.15f, cx, cy + s * 0.35f, px * 1.15f);
+        g.drawLine(cx + s * 0.45f, cy - s * 0.15f, cx, cy + s * 0.35f, px * 1.15f);
+        g.drawLine(cx - s * 0.75f, cy + s * 0.65f, cx + s * 0.75f, cy + s * 0.65f, px * 1.15f);
+        g.drawLine(cx - s * 0.75f, cy + s * 0.65f, cx - s * 0.75f, cy + s * 0.95f, px);
+        g.drawLine(cx + s * 0.75f, cy + s * 0.65f, cx + s * 0.75f, cy + s * 0.95f, px);
+    }
+    else if (name == icons::finder)
+    {
+        // Stylized Finder face: rounded square + smile + dots.
+        g.drawRoundedRectangle(cx - s * 0.85f, cy - s * 0.85f, s * 1.7f, s * 1.7f, s * 0.35f, px);
+        g.fillEllipse(cx - s * 0.38f, cy - s * 0.28f, s * 0.22f, s * 0.22f);
+        g.fillEllipse(cx + s * 0.16f, cy - s * 0.28f, s * 0.22f, s * 0.22f);
+        juce::Path smile;
+        smile.startNewSubPath(cx - s * 0.40f, cy + s * 0.25f);
+        smile.quadraticTo(cx, cy + s * 0.55f, cx + s * 0.40f, cy + s * 0.25f);
+        g.strokePath(smile, juce::PathStrokeType(px, juce::PathStrokeType::curved,
+                                                 juce::PathStrokeType::rounded));
+    }
     else if (name == icons::moon)
     {
         // Typical site moon: solid crescent.
@@ -430,27 +452,26 @@ void drawIcon(juce::Graphics& g, const juce::String& name,
     }
     else if (name == icons::gear)
     {
-        // Standard 6-tooth settings cog: outer teeth + rim + hub.
+        // Settings cog: one toothed outline (8 trapezoid teeth on a round body) + a hub hole.
+        constexpr int kTeeth = 8;
+        const float pitch = juce::MathConstants<float>::twoPi / (float) kTeeth;
+        const float rTip = s * 1.0f, rRoot = s * 0.74f;
+        auto pt = [&](float r, float a) { return juce::Point<float>(cx + r * std::cos(a), cy + r * std::sin(a)); };
         juce::Path cog;
-        constexpr int kTeeth = 6;
-        constexpr int kSteps = kTeeth * 2;
-        for (int i = 0; i < kSteps; ++i)
+        for (int i = 0; i < kTeeth; ++i)
         {
-            const float a0 = juce::MathConstants<float>::twoPi * ((float) i) / (float) kSteps
-                             - juce::MathConstants<float>::halfPi;
-            const float a1 = juce::MathConstants<float>::twoPi * ((float) i + 0.55f) / (float) kSteps
-                             - juce::MathConstants<float>::halfPi;
-            const float r = (i % 2 == 0) ? s * 0.98f : s * 0.68f;
-            const float x0 = cx + r * std::cos(a0), y0 = cy + r * std::sin(a0);
-            const float x1 = cx + r * std::cos(a1), y1 = cy + r * std::sin(a1);
-            if (i == 0) cog.startNewSubPath(x0, y0);
-            else        cog.lineTo(x0, y0);
-            cog.lineTo(x1, y1);
+            const float a = pitch * (float) i - juce::MathConstants<float>::halfPi;
+            const auto p0 = pt(rRoot, a - pitch * 0.30f);
+            if (i == 0) cog.startNewSubPath(p0);
+            else        cog.lineTo(p0);
+            cog.lineTo(pt(rTip, a - pitch * 0.16f));
+            cog.lineTo(pt(rTip, a + pitch * 0.16f));
+            cog.lineTo(pt(rRoot, a + pitch * 0.30f));
+            cog.lineTo(pt(rRoot, a + pitch * 0.50f)); // follow the body between teeth
         }
         cog.closeSubPath();
         g.strokePath(cog, st);
-        g.drawEllipse(cx - s * 0.42f, cy - s * 0.42f, s * 0.84f, s * 0.84f, px);
-        g.drawEllipse(cx - s * 0.18f, cy - s * 0.18f, s * 0.36f, s * 0.36f, px);
+        g.drawEllipse(cx - s * 0.30f, cy - s * 0.30f, s * 0.60f, s * 0.60f, px);
     }
     else if (name == icons::grid)
     {
@@ -515,15 +536,21 @@ void IconBtn::paintButton(juce::Graphics& g, bool over, bool down)
     juce::ignoreUnused(ghost);
     const float face = ds::radius::sm;
     const juce::Colour litCol = activeTint.isTransparent() ? ds::acc() : activeTint;
-    if (groupLeft)
+    if (groupLeft || groupRight)
     {
         // Joined-group cell: the parent draws the shared border and divider.
         if (active || over || down)
         {
             juce::Path p;
-            p.addRoundedRectangle(b.getX() + 1.0f, b.getY() + 1.0f, b.getWidth() - 1.0f, b.getHeight() - 2.0f,
-                                  ds::radius::md - 1.0f, ds::radius::md - 1.0f, true, false, true, false);
-            g.setColour(active ? ds::acc().withAlpha(ds::dark() ? 0.22f : 0.12f) : ds::surface300());
+            const float rr = ds::radius::md - 1.0f;
+            if (groupLeft)
+                p.addRoundedRectangle(b.getX() + 1.0f, b.getY() + 1.0f, b.getWidth() - 1.0f, b.getHeight() - 2.0f,
+                                      rr, rr, true, false, true, false);
+            else
+                p.addRoundedRectangle(b.getX(), b.getY() + 1.0f, b.getWidth() - 1.0f, b.getHeight() - 2.0f,
+                                      rr, rr, false, true, false, true);
+            const auto tint = activeTint.isTransparent() ? ds::acc() : activeTint;
+            g.setColour(active ? tint.withAlpha(ds::dark() ? 0.22f : 0.12f) : ds::surface300());
             g.fillPath(p);
         }
     }
@@ -550,6 +577,22 @@ void IconBtn::paintButton(juce::Graphics& g, bool over, bool down)
             g.fillRoundedRectangle(b, ds::radius::md);
             g.setColour(ds::edge());
             g.drawRoundedRectangle(b.reduced(0.5f), ds::radius::md, 1.0f);
+        }
+    }
+    else if (hasChipChrome())
+    {
+        // Toggle chip: the surface + edge border is always there; `active` only
+        // swaps it for the accent tint + accent border (no invisible → visible jump).
+        if (active && isEnabled())
+        {
+            ds::drawActive(g, b.reduced(0.5f), face);
+        }
+        else
+        {
+            g.setColour((over || down) && isEnabled() ? ds::surface300() : ds::surface200());
+            g.fillRoundedRectangle(b, face);
+            g.setColour(ds::edge());
+            g.drawRoundedRectangle(b.reduced(0.5f), face, 1.0f);
         }
     }
     else if (active && isEnabled())

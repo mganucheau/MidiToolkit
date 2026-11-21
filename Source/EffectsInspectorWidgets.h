@@ -2490,15 +2490,15 @@ public:
 
         if (showHeaderChrome)
         {
-            // Same height and toggle language as the row switches (~28×16 pill).
-            // Reset: momentary button, live when this section has changes and is not locked.
+            // Plain icon buttons (~24 px hit target, ~19 px glyph).
+            // Reset: momentary, live when this section has changes and is not locked.
             const bool canReset = mods > 0 && !locked;
-            paintMomentaryPill(g, resetBounds().toFloat(), resetPressed, canReset,
-                               resetHover && canReset, icons::undo);
+            paintHeaderIcon(g, resetBounds().toFloat(), icons::undo, resetPressed && canReset,
+                            canReset, resetHover && canReset);
 
-            // Lock: a real toggle — knob right and accent while locked.
-            paintSwitchPill(g, lockBounds().toFloat(), locked, true, lockHover, false,
-                            locked ? icons::lockClosed : icons::lockOpen);
+            // Lock: a real toggle — accent glyph + tint while locked.
+            paintHeaderIcon(g, lockBounds().toFloat(), locked ? icons::lockClosed : icons::lockOpen,
+                            locked, true, lockHover);
         }
 
         g.setColour(dragging ? ds::acc() : ds::line());
@@ -2543,10 +2543,26 @@ private:
         dragArmed = true;
     }
 
-    static constexpr int kChromeW = 28;   // matches FlatSwitch::idealWidth
-    static constexpr int kChromeH = 16;   // matches the switch pill height
-    static constexpr int kChromePadR = 12;
-    static constexpr int kChromeGap = 6;
+    static constexpr int kChromeW = 24;   // icon-button hit target
+    static constexpr int kChromeH = 24;
+    static constexpr int kChromePadR = 10;
+    static constexpr int kChromeGap = 4;
+
+    /** Icon button face: ghost glyph, soft tint on hover, accent tint + glyph while `on`. */
+    static void paintHeaderIcon(juce::Graphics& g, juce::Rectangle<float> bounds,
+                                const juce::String& glyph, bool on, bool enabled, bool over)
+    {
+        if (enabled && (on || over))
+        {
+            g.setColour(on ? ds::acc().withAlpha(ds::dark() ? 0.22f : 0.14f)
+                           : ds::ink().withAlpha(0.07f));
+            g.fillRoundedRectangle(bounds, ds::radius::sm);
+        }
+        juce::Colour col = on ? ds::acc() : (over ? ds::ink() : ds::inkMuted());
+        if (!enabled) col = ds::inkFaint().withMultipliedAlpha(0.6f);
+        // drawIcon spans ~0.72 of its bounds, so 26 px bounds give a ~19 px glyph.
+        drawIcon(g, glyph, bounds.withSizeKeepingCentre(26.0f, 26.0f), col, 1.6f);
+    }
 
     juce::Rectangle<int> lockBounds() const
     {

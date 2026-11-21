@@ -19,7 +19,7 @@ enum class ThemeDepth : uint8_t { Flat = 0, Soft = 1, Glass = 2, Neo = 3, Brutal
 enum class ThemeFace : uint8_t { Sans = 0, Rounded = 1, Mono = 2, Serif = 3 };
 
 /** Named themes. First half of the catalog is light, second half is dark.
-    Indexes 0–9 / 30–39 are the classic tint themes; 10–29 / 40–59 are skill packs. */
+    Indexes 0–9 / 32–41 are the classic tint themes; 10–31 / 42–63 are skill packs. */
 struct ThemeSpec
 {
     const char* name;
@@ -81,8 +81,10 @@ inline constexpr ThemeSpec kThemes[] = {
     PF_SKILL_L("Gradient",     0xffe60076, 0xfffaf5ff, 0xff1e1033, 0xff990ffa, 6, 12,1.10f, ThemeDepth::Glass,  ThemeFace::Rounded, 1.0f),
     PF_SKILL_L("Bold",         0xff009866, 0xfff4f7fb, 0xff0b1220, 0xff0077bc, 2, 4, 1.00f, ThemeDepth::Brutal, ThemeFace::Sans,    2.0f),
     PF_SKILL_L("Clay",         0xff3b82f6, 0xffeef4ff, 0xff1c398e, 0xff3b82f6, 12,20,1.15f, ThemeDepth::Neo,    ThemeFace::Rounded, 0.0f),
+    PF_SKILL_L("Cursor",       0xff3b82f6, 0xfff3f3f3, 0xff1f1f1f, 0xff3b82f6, 4, 6, 0.95f, ThemeDepth::Flat,   ThemeFace::Sans,    1.0f),
+    PF_SKILL_L("FilmCraft",    0xffe8a317, 0xfff4f1ea, 0xff1c1917, 0xffe8a317, 2, 4, 0.92f, ThemeDepth::Flat,   ThemeFace::Sans,    1.0f),
 
-    // ── Classic dark (30–39) ─────────────────────────────────────────────────
+    // ── Classic dark (32–41) ─────────────────────────────────────────────────
     { "Ink",      true,  0.00f, 0.00f,  0.00f },
     { "Carbon",   true,  0.00f, 0.00f, -0.04f },
     { "Slate",    true,  0.58f, 0.28f,  0.00f },
@@ -94,7 +96,7 @@ inline constexpr ThemeSpec kThemes[] = {
     { "Midnight", true,  0.64f, 0.42f, -0.04f },
     { "Cocoa",    true,  0.07f, 0.26f, -0.01f },
 
-    // ── Skill dark (40–59) ───────────────────────────────────────────────────
+    // ── Skill dark (42–63) ───────────────────────────────────────────────────
     PF_SKILL_D("Minimal",      0xffa5b4fc, 0xff0c0c09, 0xfff4f4f1, 0xffa5b4fc, 4, 8, 1.15f, ThemeDepth::Flat,   ThemeFace::Sans,    1.0f),
     PF_SKILL_D("Clean",        0xff818cf8, 0xff0f172a, 0xfff8fafc, 0xff60a5fa, 6, 12,1.20f, ThemeDepth::Soft,   ThemeFace::Rounded, 1.0f),
     PF_SKILL_D("Professional", 0xfffece14, 0xff111111, 0xfffafafa, 0xfffece14, 4, 8, 0.95f, ThemeDepth::Soft,   ThemeFace::Sans,    1.0f),
@@ -115,19 +117,21 @@ inline constexpr ThemeSpec kThemes[] = {
     PF_SKILL_D("Gradient",     0xffe60076, 0xff12081f, 0xfffaf5ff, 0xff990ffa, 6, 12,1.10f, ThemeDepth::Glass,  ThemeFace::Rounded, 1.0f),
     PF_SKILL_D("Bold",         0xff00c98a, 0xff0b1220, 0xfff4f7fb, 0xff0077bc, 2, 4, 1.00f, ThemeDepth::Brutal, ThemeFace::Sans,    2.0f),
     PF_SKILL_D("Clay",         0xff60a5fa, 0xff101828, 0xffdbeafe, 0xff3b82f6, 12,20,1.15f, ThemeDepth::Neo,    ThemeFace::Rounded, 0.0f),
+    PF_SKILL_D("Cursor",       0xff3b82f6, 0xff181818, 0xffe4e4e7, 0xff3b82f6, 4, 6, 0.95f, ThemeDepth::Flat,   ThemeFace::Sans,    1.0f),
+    PF_SKILL_D("FilmCraft",    0xffe8a317, 0xff1a1a1a, 0xfff2f2f2, 0xffe8a317, 2, 4, 0.92f, ThemeDepth::Flat,   ThemeFace::Sans,    1.0f),
 };
 
 #undef PF_SKILL_L
 #undef PF_SKILL_D
 
 inline constexpr int kNumThemes = (int) (sizeof(kThemes) / sizeof(kThemes[0]));
-inline constexpr int kNumThemesPerFamily = 30; // 10 classic + 20 skill
+inline constexpr int kNumThemesPerFamily = 32; // 10 classic + 22 skill
 inline constexpr int kPearlTheme = 5;
-/** Default skill pack (family index): Neobrutal — light 20 / dark 50. */
+/** Default skill pack (family index): Neobrutal — light 20 / dark 52. */
 inline constexpr int kNeobrutalTheme = 20;
 /** Default theme for new installs — Clay light/dark twins. */
 inline constexpr int kClayTheme = 29;
-inline constexpr int kInkTheme = 30; // first classic dark
+inline constexpr int kInkTheme = 32; // first classic dark
 
 inline const ThemeSpec& themeAt(int index)
 {
@@ -530,7 +534,7 @@ namespace metrics {
     inline int miniRollH()        { return scaled(ds::region::previewH); }
     /** Scale with Text & icons setting so chrome stays proportional. */
     inline int sidebarRailWidth() { return scaled(sidebarRailW); }
-    /** Expanded library sidebar is a fixed 210 px (does not follow UI size). */
+    /** Expanded library sidebar is a fixed 150 px (does not follow UI size). */
     inline int sidebarExpandedWidth() { return sidebarExpandedW; }
     inline int chromeIconButton() { return scaled(chromeIconBtn); }
     inline int chromeIconGlyphSize()
