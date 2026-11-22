@@ -16,6 +16,7 @@ public:
 
     void resized() override;
     void paint(juce::Graphics&) override;
+    void paintOverChildren(juce::Graphics&) override;
     void mouseDown(const juce::MouseEvent&) override;
     void mouseMove(const juce::MouseEvent&) override;
 
@@ -56,6 +57,8 @@ public:
     std::function<void()> onActivated;
     /** Transport + toolkit header + current section heights. */
     int contentHeight() const;
+    /** Generator parts only (Arp through Drums), including the same gap under the last part. */
+    int generatorColumnHeight() const;
     /** Screenshot fold: Timing + Performance open, Pitch & Effects closed (Playback hidden in live). */
     int defaultFoldHeight() const;
     /** Fired when a section fold changes the preferred pane height. */

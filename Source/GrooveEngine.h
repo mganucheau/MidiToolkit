@@ -566,8 +566,8 @@ struct GrooveParams
 
     /** 0 = original. 1..kMaxVariations = alternate slight variations of the clip. */
     int variationIndex = 0;
-    /** 0 = original voicing. 1..kMaxRevoice groups simultaneous notes into chords and
-        revoices them with voice-leading (higher = more chords change, more inversions). */
+    /** 0 = original voicing. 1..kMaxRevoice puts the third, then the fifth, in the bass,
+        and opens the chord at the top of the range. Pitch classes stay; only octaves move. */
     int revoice = 0;
 
     int  get(int knobIndex) const;

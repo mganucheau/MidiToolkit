@@ -189,6 +189,7 @@ void TransportBar::DragChip::paintButton(juce::Graphics& g, bool over, bool down
     const auto fill = down ? base.interpolatedWith(ds::bg(), 0.15f) : base;
     juce::ignoreUnused(over);
     g.setColour(fill.withMultipliedAlpha(foregroundAlpha));
+    // Same corner as the header chips and the tempo pill.
     g.fillRoundedRectangle(face, ds::radius::md);
 
     const float sc = juce::jmax(0.5f, contentScale());
@@ -267,6 +268,7 @@ TransportBar::TransportBar()
 
     prep(btnPassthrough);
     btnPassthrough.chipChrome = true;   // toggle chips keep their face when icon-only
+    btnPassthrough.chipRadiusMd = true;
     btnPassthrough.setComponentID("btnPassthrough");
     btnPassthrough.icon = icons::arrowRight;
     btnPassthrough.setTooltip("Input: live MIDI runs through the Toolkit — no file/generator playback (P)");
@@ -283,12 +285,14 @@ TransportBar::TransportBar()
 
     prep(btnEditor);
     btnEditor.chipChrome = true;
+    btnEditor.chipRadiusMd = true;
     btnEditor.setTooltip("Piano Roll (E)");
     btnEditor.onClick = [this] { if (onToggleEditor) onToggleEditor(); };
     addAndMakeVisible(btnEditor);
 
     prep(btnEffects);
     btnEffects.chipChrome = true;
+    btnEffects.chipRadiusMd = true;
     btnEffects.setTooltip("Toolkit (F)");
     btnEffects.onClick = [this] { if (onToggleEffects) onToggleEffects(); };
     addAndMakeVisible(btnEffects);
@@ -673,7 +677,8 @@ void TransportBar::resized()
     btnStop.setVisible(false);
     btnEffects.setVisible(true);
     // Drag Me sits between Effects and Settings when a clip is available.
-    btnDragToDaw.setVisible(hasClip && !passthrough);
+    // Generator-only matches the passthrough header: logo, three toggles, settings.
+    btnDragToDaw.setVisible(hasClip && !passthrough && !compactChrome);
     btnEditor.setVisible(true);
     // Input chip sits with Piano / Toolkit on the right cluster — always shown
     // (even in the generator-only column) unless a MIDI FX build locks it off.
@@ -683,18 +688,17 @@ void TransportBar::resized()
     const bool showRecord = false;
     btnRecord.setVisible(showRecord);
 
-    // Sync + BPM stay visible in generator-only chrome; through-mode has no tempo group.
+    // Generator-only and passthrough share a header with no tempo pill.
     // Play sits inside the same pill whenever transport controls are on.
-    const bool showBpm = !passthrough;
+    const bool showBpm = !passthrough && !compactChrome;
     const bool playInPill = showBpm && transportControlsVisible;
     btnPlay.setVisible(playInPill);
     const int pillW = showBpm ? statusPill.idealWidth() : 0;
     btnDragToDaw.iconOnly = compactChrome;   // applyHeaderCaptionsTier(0) also forces icon-only
     // Drag Me width follows its icon-only state, which the caption tiers below change.
     auto chipWidth = [&] { return btnDragToDaw.isVisible() ? btnDragToDaw.idealWidth() : 0; };
-    // Single-column (compact): keep Toolkit next to Settings so the logo still fits.
-    const int gearGap = compactChrome ? tight : juce::roundToInt(18.0f * sc); // gap before gear
-    const int clusterGap = compactChrome ? tight : groupGap;                 // after Input / Drag Me
+    // Input stays a group away from Piano. Toolkit, Drag Me, and Settings share `tight`.
+    const int clusterGap = compactChrome ? tight : groupGap;
 
     auto leftWidth = [&]()
     {
@@ -703,8 +707,9 @@ void TransportBar::resized()
     };
     auto rightWidth = [&]()
     {
-        int w = btn + gearGap;   // settings (+ gap before gear)
-        if (const int cw = chipWidth(); cw > 0) w += cw + clusterGap; // Drag Me before Settings
+        // Piano–Toolkit, Toolkit–Drag Me, and Drag Me–Settings share `tight`.
+        int w = btn + tight;
+        if (const int cw = chipWidth(); cw > 0) w += cw + tight;
         if (btnEffects.isVisible()) w += btnEffects.captionWidth() + tight;
         if (btnEditor.isVisible())  w += btnEditor.captionWidth() + tight;
         if (showInput)              w += btnPassthrough.captionWidth() + clusterGap;
@@ -797,17 +802,16 @@ void TransportBar::resized()
 
     int xr = getWidth() - rightPad;
     btnSettings.setBounds(xr - btn, y, btn, btn);
-    xr -= btn + gearGap;
+    xr -= btn + tight;
     const int chipW = chipWidth();
     if (chipW > 0)
     {
         btnDragToDaw.setBounds(xr - chipW, y, chipW, btn);
-        xr -= chipW + clusterGap;
+        xr -= chipW + tight;
     }
     else
     {
         btnDragToDaw.setBounds({});
-        xr -= clusterGap - tight;
     }
     if (btnEffects.isVisible())
     {

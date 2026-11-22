@@ -1077,22 +1077,19 @@ std::vector<FavoritesSidebar::LayoutItem> FavoritesSidebar::collectLayout() cons
 
     y += sidebarBodyPadT();
     {
-        // Open hugs the label width, left-aligned (not full sidebar width).
+        // "Open" hugs its label on the left. The fold icon floats on the right of this row.
         const auto openFont = uiFontFixed(12.0f, true);
-        const int openW = juce::jmin(W - padH * 2,
-            (int) std::ceil(juce::GlyphArrangement::getStringWidth(openFont, "Open"))
-                + metrics::scaled(12) + 15 + 6 + metrics::scaled(12));
+        const int fold = metrics::chromeIconButton();
+        const int gap = metrics::scaled(8);
+        const int labelW = (int) std::ceil(juce::GlyphArrangement::getStringWidth(openFont, "Open"))
+                         + metrics::scaled(12) + 15 + 6 + metrics::scaled(12);
+        const int openW = juce::jlimit(metrics::scaled(64),
+                                       juce::jmax(metrics::scaled(64), W - padH * 2 - fold - gap),
+                                       labelW);
         out.push_back({ LayoutKind::OpenBtn, -1,
                         juce::Rectangle<int>(padH, y, openW, openFolderH()) });
     }
     y += openFolderH() + metrics::scaled(kOpenToLibrary);
-    if (active.isNotEmpty() && juce::File(active).isDirectory())
-    {
-        // Active-folder card only when not already listed under LIBRARY.
-        out.push_back({ LayoutKind::FolderCard, -1,
-                        juce::Rectangle<int>(padH, y, W - padH * 2, sidebarRowH()) });
-        y += sidebarRowH() + sidebarSectionGap();
-    }
 
     auto placeSection = [&](SectionId id)
     {
@@ -1455,15 +1452,14 @@ void FavoritesSidebar::layoutChildren()
     {
         if (item.kind == LayoutKind::OpenBtn)
         {
-            auto row = item.bounds;
-            // Mockup: fold chip matches Open Folder height, with a clear gap.
-            const int gap = metrics::scaled(6);
-            const int foldH = juce::jmin(row.getHeight(), openFolderH());
-            const auto fold = row.removeFromRight(foldH).withSizeKeepingCentre(foldH, foldH);
-            row.removeFromRight(gap);
-            btnToggle.setBounds(fold);
-            libraryPlusBounds = row;
-            openFolderBounds = row;
+            // Open stays left, full label. Collapse floats to the right edge of the row.
+            openFolderBounds = item.bounds;
+            libraryPlusBounds = item.bounds;
+            const int fold = juce::jmin(item.bounds.getHeight(), metrics::chromeIconButton());
+            const int x = juce::jmax(item.bounds.getRight() + metrics::scaled(6),
+                                     getWidth() - sidebarPadH() - fold);
+            const int y = item.bounds.getY() + (item.bounds.getHeight() - fold) / 2;
+            btnToggle.setBounds(x, y, fold, fold);
         }
         else if (item.kind == LayoutKind::FolderCard)
         {
@@ -1918,7 +1914,9 @@ void FavoritesSidebar::paintRow(juce::Graphics& g, int rowIdx, const juce::Recta
         g.fillRoundedRectangle(wash, ds::radius::sm);
     }
 
-    auto textArea = r.reduced(sidebarRowPadX(), 0);
+    // Highlight stays on the row gutter. The star sits further in, so it is not flush with the wash.
+    auto textArea = r.withTrimmedLeft(sidebarRowPadX() + metrics::scaled(8))
+                      .withTrimmedRight(sidebarRowPadX());
     auto leadSlot = textArea.removeFromLeft(sidebarIconCol()).toFloat();
     if (lead == Lead::Dot)
     {
@@ -1951,9 +1949,7 @@ void FavoritesSidebar::paintRow(juce::Graphics& g, int rowIdx, const juce::Recta
 
     // Mockup: muted plain count on the trailing edge (no pill).
     int badgeN = 0;
-    if (row.kind == RowKind::Starred && starredCount > 0)
-        badgeN = starredCount;
-    else if (row.kind == RowKind::SavedDir && dirs[row.index] == active && currentClipCount > 0)
+    if (row.kind == RowKind::SavedDir && dirs[row.index] == active && currentClipCount > 0)
         badgeN = currentClipCount;
     else if (row.kind == RowKind::SavedSearch)
         badgeN = (int) savedSearches[(size_t) row.index].resultPaths.size();
@@ -2075,6 +2071,7 @@ void FileListPanel::setEmptyHint(const juce::String& hint)
 void FileListPanel::setEntries(std::vector<FileListEntry> e)
 {
     entries = std::move(e);
+    metaWidthsDirty = true;
     selected = juce::jlimit(-1, (int) entries.size() - 1, selected);
     content.clearDragState();
     rebuildSortOrder();
@@ -2092,6 +2089,7 @@ void FileListPanel::updateEntry(int index, const FileListEntry& entry)
     if (!juce::isPositiveAndBelow(index, (int) entries.size()))
         return;
     entries[(size_t) index] = entry;
+    metaWidthsDirty = true;
     rebuildSortOrder();
     content.repaint();
 }
@@ -2360,17 +2358,83 @@ bool FileListPanel::isColumnVisible(SortColumn col) const
     return false;
 }
 
+int FileListPanel::metaColumnPx(SortColumn col) const
+{
+    if (metaWidthsDirty)
+        rebuildMetaWidths();
+    switch (col)
+    {
+        case SortColumn::Key:        return cachedMetaPx[0];
+        case SortColumn::Tempo:      return cachedMetaPx[1];
+        case SortColumn::Bars:       return cachedMetaPx[2];
+        case SortColumn::Kind:       return cachedMetaPx[3];
+        case SortColumn::Complexity: return cachedMetaPx[4];
+        case SortColumn::DifNotes:   return cachedMetaPx[5];
+        case SortColumn::TimeSig:    return cachedMetaPx[6];
+        case SortColumn::Notes:      return cachedMetaPx[7];
+        case SortColumn::Name:       return metrics::scaled(nameColumnW);
+    }
+    return 0;
+}
+
+void FileListPanel::rebuildMetaWidths() const
+{
+    metaWidthsDirty = false;
+    const auto headerFont = ds::font(ds::Type::TableHeader);
+    const auto cellFont = ds::font(ds::Type::Metadata);
+    const int pad = metrics::scaled(kColPad) * 2;
+    const int arrow = metrics::scaled(kSortArrowW);
+
+    auto measure = [&](const juce::String& header, const auto& valueOf) -> int
+    {
+        float w = juce::GlyphArrangement::getStringWidth(headerFont, header.toUpperCase()) + (float) arrow;
+        constexpr int kMeasureCap = 400;
+        const int n = (int) entries.size();
+        const int step = n > kMeasureCap ? juce::jmax(1, n / kMeasureCap) : 1;
+        for (int i = 0; i < n; i += step)
+        {
+            const auto text = valueOf(entries[(size_t) i]);
+            if (text.isNotEmpty())
+                w = juce::jmax(w, juce::GlyphArrangement::getStringWidth(cellFont, text));
+        }
+        return (int) std::ceil(w) + pad;
+    };
+
+    cachedMetaPx[0] = measure("Key", [](const FileListEntry& e) { return e.rootName; });
+    cachedMetaPx[1] = measure("BPM", [](const FileListEntry& e) {
+        return e.bpm > 0.0 ? juce::String((int) std::lround(e.bpm)) : juce::String();
+    });
+    cachedMetaPx[2] = measure("Bars", [](const FileListEntry& e) {
+        return e.bars > 0 ? juce::String(e.bars) : juce::String();
+    });
+    cachedMetaPx[3] = measure("Kind", [](const FileListEntry& e) {
+        return e.isDirectory ? juce::String() : juce::String(clipKindName(e.kind));
+    });
+    cachedMetaPx[4] = measure("Cx", [](const FileListEntry& e) {
+        return e.complexity > 0 ? juce::String(e.complexity) : juce::String();
+    });
+    cachedMetaPx[5] = measure("DifNotes", [](const FileListEntry& e) {
+        return e.difNotes > 0 ? juce::String(e.difNotes) : juce::String();
+    });
+    cachedMetaPx[6] = measure("TimeSig", [](const FileListEntry& e) {
+        return e.timeSigDen > 0 ? juce::String(e.timeSigNum) + "/" + juce::String(e.timeSigDen) : juce::String();
+    });
+    cachedMetaPx[7] = measure("Notes", [](const FileListEntry& e) {
+        return e.noteCount > 0 ? juce::String(e.noteCount) : juce::String();
+    });
+}
+
 int FileListPanel::totalContentWidth() const
 {
-    int w = metrics::scaled(8) * 2 + metrics::scaled(nameColumnW) + metrics::scaled(6);
-    if (columnsVisible.key)        w += metrics::scaled(kKeyW);
-    if (columnsVisible.tempo)      w += metrics::scaled(kTempoW);
-    if (columnsVisible.bars)       w += metrics::scaled(kBarsW);
-    if (columnsVisible.kind)       w += metrics::scaled(kKindW);
-    if (columnsVisible.complexity) w += metrics::scaled(kComplexityW);
-    if (columnsVisible.difNotes)   w += metrics::scaled(kDifNotesW);
-    if (columnsVisible.timeSig)    w += metrics::scaled(kTimeSigW);
-    if (columnsVisible.notes)      w += metrics::scaled(kNotesW);
+    int w = metrics::scaled(8) * 2 + metrics::scaled(nameColumnW);
+    if (columnsVisible.key)        w += metaColumnPx(SortColumn::Key);
+    if (columnsVisible.tempo)      w += metaColumnPx(SortColumn::Tempo);
+    if (columnsVisible.bars)       w += metaColumnPx(SortColumn::Bars);
+    if (columnsVisible.kind)       w += metaColumnPx(SortColumn::Kind);
+    if (columnsVisible.complexity) w += metaColumnPx(SortColumn::Complexity);
+    if (columnsVisible.difNotes)   w += metaColumnPx(SortColumn::DifNotes);
+    if (columnsVisible.timeSig)    w += metaColumnPx(SortColumn::TimeSig);
+    if (columnsVisible.notes)      w += metaColumnPx(SortColumn::Notes);
     return w;
 }
 
@@ -2570,24 +2634,22 @@ FileListPanel::ColumnRects FileListPanel::splitRowColumns(juce::Rectangle<int> r
     ColumnRects cols;
     row = row.reduced(metrics::scaled(8), 0);
     cols.name = row.removeFromLeft(metrics::scaled(nameColumnW));
-    // Groove: a 6 px gutter keeps the key right beside the name.
-    row.removeFromLeft(metrics::scaled(6));
     if (columnsVisible.key)
-        cols.key = row.removeFromLeft(metrics::scaled(kKeyW));
+        cols.key = row.removeFromLeft(metaColumnPx(SortColumn::Key));
     if (columnsVisible.tempo)
-        cols.tempo = row.removeFromLeft(metrics::scaled(kTempoW));
+        cols.tempo = row.removeFromLeft(metaColumnPx(SortColumn::Tempo));
     if (columnsVisible.bars)
-        cols.bars = row.removeFromLeft(metrics::scaled(kBarsW));
+        cols.bars = row.removeFromLeft(metaColumnPx(SortColumn::Bars));
     if (columnsVisible.kind)
-        cols.kind = row.removeFromLeft(metrics::scaled(kKindW));
+        cols.kind = row.removeFromLeft(metaColumnPx(SortColumn::Kind));
     if (columnsVisible.complexity)
-        cols.complexity = row.removeFromLeft(metrics::scaled(kComplexityW));
+        cols.complexity = row.removeFromLeft(metaColumnPx(SortColumn::Complexity));
     if (columnsVisible.difNotes)
-        cols.difNotes = row.removeFromLeft(metrics::scaled(kDifNotesW));
+        cols.difNotes = row.removeFromLeft(metaColumnPx(SortColumn::DifNotes));
     if (columnsVisible.timeSig)
-        cols.timeSig = row.removeFromLeft(metrics::scaled(kTimeSigW));
+        cols.timeSig = row.removeFromLeft(metaColumnPx(SortColumn::TimeSig));
     if (columnsVisible.notes)
-        cols.notes = row.removeFromLeft(metrics::scaled(kNotesW));
+        cols.notes = row.removeFromLeft(metaColumnPx(SortColumn::Notes));
     return cols;
 }
 
@@ -2639,6 +2701,9 @@ void FileListPanel::paint(juce::Graphics& g)
 {
     g.fillAll(ds::surface100());
     paintColumnHeader(g);
+    // Rule under the column titles, between the header and the file rows.
+    g.setColour(ds::line());
+    g.fillRect(0, metrics::listHeaderH() - 1, getWidth(), 1);
 
     if (searching)
     {
@@ -2767,10 +2832,6 @@ void FileListPanel::mouseExit(const juce::MouseEvent&)
 
 void FileListPanel::paintColumnHeader(juce::Graphics& g)
 {
-    auto headerClip = getLocalBounds().removeFromTop(metrics::listHeaderH());
-    g.setColour(colours::line());
-    g.fillRect(headerClip.removeFromBottom(1));
-
     // Paint headers in content coordinates, shifted by the viewport's X scroll
     // so titles stay locked to their columns while rows scroll sideways.
     const int viewX = viewport.getViewPositionX();
@@ -2778,12 +2839,14 @@ void FileListPanel::paintColumnHeader(juce::Graphics& g)
     g.reduceClipRegion(getLocalBounds().removeFromTop(metrics::listHeaderH()));
     g.addTransform(juce::AffineTransform::translation((float) -viewX, 0.0f));
 
+    const int titlePad = metrics::scaled(kColPad);
     auto drawCol = [&](SortColumn col, const juce::String& label)
     {
         if (!isColumnVisible(col))
             return;
         // Bounds in panel space already account for viewX; undo that for content paint.
         auto r = headerColumnBounds(col).translated(viewX, 0);
+        r.removeFromLeft(juce::jmin(titlePad, juce::jmax(0, r.getWidth() - 4)));
         const bool active = sortColumn == col;
         g.setColour(ds::colour(ds::Type::TableHeader));
         g.setFont(ds::font(ds::Type::TableHeader));
@@ -2818,30 +2881,32 @@ void FileListPanel::paintColumnHeader(juce::Graphics& g)
     drawCol(SortColumn::TimeSig, "TimeSig");
     drawCol(SortColumn::Notes, "Notes");
 
-    // Vertical rules between columns (content coordinates; transform already applied).
+    // One vertical rule on each column's right edge. The name rule is the resize handle.
     {
         const auto cols = splitRowColumns({ 0, 0, juce::jmax(getWidth(), totalContentWidth()),
                                             metrics::listHeaderH() });
-        g.setColour(ds::line());
-        auto drawRule = [&](const juce::Rectangle<int>& col)
-        {
-            if (!col.isEmpty())
-                g.fillRect(col.getX() - 1, 0, 1, metrics::listHeaderH());
+        const juce::Rectangle<int> order[] = {
+            cols.name, cols.key, cols.tempo, cols.bars, cols.kind,
+            cols.complexity, cols.difNotes, cols.timeSig, cols.notes
         };
-        drawRule(cols.key);
-        drawRule(cols.tempo);
-        drawRule(cols.bars);
-        drawRule(cols.kind);
-        drawRule(cols.complexity);
-        drawRule(cols.difNotes);
-        drawRule(cols.timeSig);
-        drawRule(cols.notes);
+        int last = -1;
+        for (int i = 0; i < 9; ++i)
+            if (!order[i].isEmpty())
+                last = i;
+        for (int i = 0; i < 9; ++i)
+        {
+            if (order[i].isEmpty() || i == last)
+                continue;
+            const bool nameEdge = i == 0;
+            if (nameEdge)
+                paintNameColumnDivider(g, order[i].getRight(), 0, metrics::listHeaderH());
+            else
+            {
+                g.setColour(ds::line());
+                g.fillRect(order[i].getRight(), 0, 1, metrics::listHeaderH());
+            }
+        }
     }
-
-    // Name-column resize rail (content coordinates; transform already applied).
-    const int divX = splitRowColumns({ 0, 0, juce::jmax(getWidth(), totalContentWidth()),
-                                       metrics::listHeaderH() }).name.getRight();
-    paintNameColumnDivider(g, divX, 0, metrics::listHeaderH());
     g.restoreState();
 }
 
@@ -2881,32 +2946,29 @@ void FileListPanel::paintRow(juce::Graphics& g, int displayIdx, juce::Rectangle<
         g.setColour(ds::surface300());
         g.fillRect(r);
     }
-    g.setColour(ds::line());
-    g.fillRect(r.getX(), r.getBottom() - 1, r.getWidth(), 1);
 
     const auto textCol = ds::ink();
     const auto metaCol = isSelected ? ds::ink() : ds::inkMuted();
     const auto mutedCol = ds::inkMuted();
 
     auto cols = splitRowColumns(r);
-    // Vertical rules between columns.
+    // One vertical rule on each column's right edge (same x as the name resize handle).
     {
-        g.setColour(ds::line());
-        auto drawRule = [&](const juce::Rectangle<int>& col)
-        {
-            if (!col.isEmpty())
-                g.fillRect(col.getX() - 1, r.getY(), 1, r.getHeight());
+        const juce::Rectangle<int> order[] = {
+            cols.name, cols.key, cols.tempo, cols.bars, cols.kind,
+            cols.complexity, cols.difNotes, cols.timeSig, cols.notes
         };
-        drawRule(cols.key);
-        drawRule(cols.tempo);
-        drawRule(cols.bars);
-        drawRule(cols.kind);
-        drawRule(cols.complexity);
-        drawRule(cols.difNotes);
-        drawRule(cols.timeSig);
-        drawRule(cols.notes);
+        int last = -1;
+        for (int i = 0; i < 9; ++i)
+            if (!order[i].isEmpty())
+                last = i;
+        g.setColour(ds::line());
+        for (int i = 0; i < 9; ++i)
+            if (!order[i].isEmpty() && i != last)
+                g.fillRect(order[i].getRight(), r.getY(), 1, r.getHeight());
     }
     auto row = cols.name;
+    const int cellPad = metrics::scaled(kColPad);
 
     // Larger star so filled vs outline reads clearly at a glance.
     constexpr float kStarGlyph = 14.0f;
@@ -2934,27 +2996,32 @@ void FileListPanel::paintRow(juce::Graphics& g, int displayIdx, juce::Rectangle<
 
     g.setFont(ds::font(ds::Type::Metadata));
     g.setColour(metaCol);
+    auto padded = [&](juce::Rectangle<int> cell)
+    {
+        cell.removeFromLeft(juce::jmin(cellPad, juce::jmax(0, cell.getWidth() - 2)));
+        return cell;
+    };
     if (columnsVisible.key && e.rootName.isNotEmpty())
-        g.drawText(e.rootName, cols.key, juce::Justification::centredLeft);
+        g.drawText(e.rootName, padded(cols.key), juce::Justification::centredLeft);
     if (columnsVisible.tempo && e.bpm > 0.0)
-        g.drawText(juce::String((int) std::lround(e.bpm)), cols.tempo, juce::Justification::centredLeft);
+        g.drawText(juce::String((int) std::lround(e.bpm)), padded(cols.tempo), juce::Justification::centredLeft);
     if (columnsVisible.bars && e.bars > 0)
-        g.drawText(juce::String(e.bars), cols.bars, juce::Justification::centredLeft);
+        g.drawText(juce::String(e.bars), padded(cols.bars), juce::Justification::centredLeft);
     if (columnsVisible.complexity && e.complexity > 0)
-        g.drawText(juce::String(e.complexity), cols.complexity, juce::Justification::centredLeft);
+        g.drawText(juce::String(e.complexity), padded(cols.complexity), juce::Justification::centredLeft);
     if (columnsVisible.difNotes && e.difNotes > 0)
-        g.drawText(juce::String(e.difNotes), cols.difNotes, juce::Justification::centredLeft);
+        g.drawText(juce::String(e.difNotes), padded(cols.difNotes), juce::Justification::centredLeft);
     if (columnsVisible.timeSig)
         g.drawText(juce::String(e.timeSigNum) + "/" + juce::String(e.timeSigDen),
-                   cols.timeSig, juce::Justification::centredLeft);
+                   padded(cols.timeSig), juce::Justification::centredLeft);
     if (columnsVisible.notes && e.noteCount > 0)
-        g.drawText(juce::String(e.noteCount), cols.notes, juce::Justification::centredLeft);
+        g.drawText(juce::String(e.noteCount), padded(cols.notes), juce::Justification::centredLeft);
     if (columnsVisible.kind)
     {
         // Kind is a plain word in its own column.
         g.setColour(mutedCol);
         g.setFont(uiFontFixed(12.0f, false));
-        g.drawText(clipKindName(e.kind), cols.kind, juce::Justification::centredLeft, true);
+        g.drawText(clipKindName(e.kind), padded(cols.kind), juce::Justification::centredLeft, true);
     }
 
     g.setColour(textCol);
@@ -2977,8 +3044,15 @@ void FileListPanel::ListContent::paint(juce::Graphics& g)
     const int count = (int) owner.sortOrder.size();
     int y = 0;
     for (int i = owner.scrollRow; i < count && y < getHeight(); ++i, y += rowH)
+    {
         owner.paintRow(g, i, { 0, y, getWidth(), rowH }, i == hoverRow,
                        i == hoverRow && hoverStar);
+        if (i == count - 1)
+        {
+            g.setColour(ds::line());
+            g.fillRect(0, y + rowH - 1, getWidth(), 1);
+        }
+    }
 
     if (owner.resizingNameColumn)
         owner.paintNameColumnDivider(g, owner.nameColumnRightContentX(), 0, getHeight());
@@ -3224,11 +3298,11 @@ BrowserToolbar::BrowserToolbar()
 
 int BrowserToolbar::idealHeight() const
 {
-    // Title row fills the bar; optional filter summary strip below.
-    const int titleH = metrics::scaled(ds::region::sidebarRowH);
+    // Path row matches the logo / Browser header (transportH). Filter chips sit under it.
+    const int titleH = metrics::transportH();
     const int stripH = filtersActiveCount > 0 ? metrics::scaled(22) : 0;
     const int pad = metrics::scaled(8);
-    return titleH + (stripH > 0 ? pad + stripH : 0) + pad;
+    return titleH + (stripH > 0 ? pad + stripH : 0);
 }
 
 juce::String BrowserToolbar::filterStripText() const
@@ -3330,14 +3404,14 @@ void BrowserToolbar::resized()
     btnFilters.setBounds({});
     titleBounds = countBounds = filtersBadgeBounds = filterStripBounds = resetBounds = {};
 
-    const int titleH = metrics::scaled(ds::region::sidebarRowH);
-    const int stripH = filtersActiveCount > 0 ? metrics::scaled(22) : 0;
-    const int padBottom = metrics::scaled(8);
-    // Centre the title row in the bar so path/icons are not top-heavy.
-    const int usedH = titleH + (stripH > 0 ? metrics::scaled(8) + stripH : 0) + padBottom;
-    const int topSlack = juce::jmax(0, (area.getHeight() - usedH) / 2);
-    area.removeFromTop(topSlack);
-    auto titleRow = area.removeFromTop(titleH).reduced(pad, 0);
+    juce::Rectangle<int> stripArea;
+    if (filtersActiveCount > 0)
+    {
+        stripArea = area.removeFromBottom(metrics::scaled(22));
+        area.removeFromBottom(metrics::scaled(8));
+    }
+    // The path, star, and Finder share the full bar height so they centre together.
+    auto titleRow = area.reduced(pad, 0);
     const int icon = juce::jmin(titleRow.getHeight(), metrics::chromeIconButton());
     const bool hasFolder = folderPath.isDirectory();
     btnStar.setVisible(hasFolder);
@@ -3368,8 +3442,7 @@ void BrowserToolbar::resized()
 
     if (filtersActiveCount > 0)
     {
-        area.removeFromTop(metrics::scaled(8));
-        auto strip = area.removeFromTop(metrics::scaled(22)).reduced(pad, 0);
+        auto strip = stripArea.reduced(pad, 0);
         const auto resetFont = uiFontFixed(11.0f, false);
         const int resetW = (int) std::ceil(juce::GlyphArrangement::getStringWidth(resetFont, "Reset")) + 4;
         resetBounds = strip.removeFromRight(resetW);
@@ -3415,11 +3488,13 @@ void BrowserToolbar::paint(juce::Graphics& g)
 
     if (!titleBounds.isEmpty() && titleText.isNotEmpty())
     {
-        // Path fills the bar and is vertically centred with the action icons.
+        // Centre the cap-height on the icon centre. centredLeft on the full em box sits high.
         const auto titleFont = uiFontFixed(12.0f, true);
         g.setFont(titleFont);
         g.setColour(ds::ink());
-        g.drawText(titleText, titleBounds, juce::Justification::centredLeft, true);
+        const int cap = juce::jmax(1, juce::roundToInt(titleFont.getAscent()));
+        auto textR = titleBounds.withSizeKeepingCentre(titleBounds.getWidth(), cap);
+        g.drawText(titleText, textR, juce::Justification::centredLeft, true);
     }
     if (!countBounds.isEmpty())
     {

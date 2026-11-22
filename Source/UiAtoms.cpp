@@ -803,38 +803,21 @@ juce::Font SegmentToggle::labelFont(bool selected) const
 
 int SegmentToggle::idealWidth() const
 {
-    // Track = 2 inset + left pad12+label+pad12 + 2 gap + right pad12+label+pad12 + 2 inset.
+    // Two equal halves, wide enough for the longer label. Matches the BPM pill height.
     const auto bold = labelFont(true);
     const float lw = juce::GlyphArrangement::getStringWidth(bold, left);
     const float rw = juce::GlyphArrangement::getStringWidth(bold, right);
-    const float pad = 12.0f * contentScale();
-    const float inset = 2.0f * contentScale();
-    const float gap = 2.0f * contentScale();
-    return (int) std::ceil(inset * 2.0f + gap + (pad * 2.0f + lw) + (pad * 2.0f + rw));
+    const float pad = 10.0f * contentScale();
+    const float half = pad * 2.0f + juce::jmax(lw, rw);
+    return (int) std::ceil(half * 2.0f);
 }
 
 void SegmentToggle::layoutSegs()
 {
     auto bounds = getLocalBounds().toFloat();
-    const float inset = 2.0f * contentScale();
-    const float gap = 2.0f * contentScale();
-    const float pad = 12.0f * contentScale();
-    auto inner = bounds.reduced(inset);
-    const auto bold = labelFont(true);
-    const float lw = juce::GlyphArrangement::getStringWidth(bold, left);
-    const float rw = juce::GlyphArrangement::getStringWidth(bold, right);
-    float leftW = pad * 2.0f + lw;
-    float rightW = pad * 2.0f + rw;
-    // Stretch to fill when the host assigns a wider slot than ideal.
-    const float natural = leftW + gap + rightW;
-    if (inner.getWidth() > natural + 0.5f)
-    {
-        const float extra = inner.getWidth() - natural;
-        leftW += extra * 0.5f;
-        rightW += extra * 0.5f;
-    }
-    leftSeg = { inner.getX(), inner.getY(), leftW, inner.getHeight() };
-    rightSeg = { leftSeg.getRight() + gap, inner.getY(), rightW, inner.getHeight() };
+    const float mid = bounds.getCentreX();
+    leftSeg = { bounds.getX(), bounds.getY(), mid - bounds.getX(), bounds.getHeight() };
+    rightSeg = { mid, bounds.getY(), bounds.getRight() - mid, bounds.getHeight() };
 }
 
 void SegmentToggle::resized()
@@ -874,33 +857,40 @@ void SegmentToggle::mouseExit(const juce::MouseEvent&)
 void SegmentToggle::paint(juce::Graphics& g)
 {
     layoutSegs();
-    // Track: text @ 7 %, radius-md (8).
+    // Same pill as Sync | BPM: radius-md, one divider, equal halves.
     auto bounds = getLocalBounds().toFloat();
-    g.setColour(ds::hoverWash());
-    g.fillRoundedRectangle(bounds, ds::radius::md);
-
-    auto paintSeg = [&](juce::Rectangle<float> seg, bool sel, bool hov, const juce::String& text)
+    const float radius = ds::radius::md;
+    juce::Path clip;
+    clip.addRoundedRectangle(bounds, radius);
     {
-        if (sel)
+        juce::Graphics::ScopedSaveState ss(g);
+        g.reduceClipRegion(clip);
+        g.setColour(juce::Colours::black);
+        g.fillRect(bounds);
+        // Active half keeps the black fill (Fold / Scale change the label colour, not the ground).
+        auto paintHalf = [&](juce::Rectangle<float> seg, bool hov)
         {
-            // Thumb: surface + 18 % border, radius-sm (4).
-            g.setColour(ds::surface200());
-            g.fillRoundedRectangle(seg, ds::radius::sm);
-            g.setColour(ds::edge());
-            g.drawRoundedRectangle(seg.reduced(0.5f), ds::radius::sm, 1.0f);
-        }
-        else if (hov)
-        {
-            // Idle hover: another 7 % wash so the cell reads without colour.
-            g.setColour(ds::hoverWash());
-            g.fillRoundedRectangle(seg, ds::radius::sm);
-        }
+            if (!hov)
+                return;
+            g.setColour(juce::Colours::white.withAlpha(0.06f));
+            g.fillRect(seg);
+        };
+        paintHalf(leftSeg, hover == 0 && index != 0);
+        paintHalf(rightSeg, hover == 1 && index != 1);
+        g.setColour(ds::edge());
+        g.fillRect(bounds.getCentreX() - 0.5f, bounds.getY() + 1.0f, 1.0f, bounds.getHeight() - 2.0f);
+    }
+    g.setColour(ds::edge());
+    g.drawRoundedRectangle(bounds.reduced(0.5f), radius, 1.0f);
+
+    auto paintLabel = [&](juce::Rectangle<float> seg, bool sel, const juce::String& text)
+    {
         g.setFont(labelFont(sel));
-        g.setColour(sel || hov ? ds::ink() : ds::inkMuted());
+        g.setColour(sel ? ds::acc() : ds::inkMuted());
         g.drawText(text, seg.toNearestInt(), juce::Justification::centred, false);
     };
-    paintSeg(leftSeg, index == 0, hover == 0 && index != 0, left);
-    paintSeg(rightSeg, index == 1, hover == 1 && index != 1, right);
+    paintLabel(leftSeg, index == 0, left);
+    paintLabel(rightSeg, index == 1, right);
 }
 
 // ── MiniSwitch ───────────────────────────────────────────────────────────────

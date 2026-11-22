@@ -37,7 +37,7 @@ inline int toolkitDensity(int compact)
     const int v = currentDensity() == Density::Comfortable ? compact + 2 : compact;
     return metrics::scaled(v);
 }
-inline int toolkitRowGap()           { return toolkitDensity(4); }
+inline int toolkitRowGap()           { return 0; }
 inline int toolkitSectionPadT()      { return 0; }
 inline int toolkitSectionPadB()      { return toolkitDensity(12); }
 inline int toolkitSectionPadBFolded(){ return toolkitDensity(12); }
@@ -1054,6 +1054,8 @@ public:
     int neutralIndex = 0;
     /** When true (Kind), summary reads "3 of 4" instead of listing names. */
     bool countSummary = false;
+    /** Empty space under the chips, so the next row isn't flush with the grid. */
+    int contentBottomPad = 0;
     SelectStyle selectStyle = SelectStyle::SolidPrimary;
     juce::String hint;
 
@@ -1144,13 +1146,13 @@ public:
             const int rows = (labels.size() + columns - 1) / juce::jmax(1, columns);
             int h = headerStrip() + 7 + rows * kChipH + juce::jmax(0, rows - 1) * kChipGap;
             if (hint.isNotEmpty()) h += 4 + 14;
-            return h;
+            return h + contentBottomPad;
         }
         const int w = juce::jmax(120, getWidth() > 10 ? getWidth()
                                     : metrics::effectsPaneWidth() - kContentPadX - kContentPadR);
         int h = headerStrip() + 7 + measureWrappedHeight(w);
         if (hint.isNotEmpty()) h += 4 + 14;
-        return h;
+        return h + contentBottomPad;
     }
 
     juce::String title;

@@ -141,7 +141,7 @@ EffectsInspector::EffectsInspector()
     sustainPopup.setTooltip("Generate sustain-pedal automation for preview and export");
     complexitySl.setTooltip("Simplify or enrich the clip relative to its baseline complexity");
     variationsSl.setTooltip("Cycle alternate slight takes of the clip");
-    revoiceSl.setTooltip("Group simultaneous notes into chords and revoice them with voice-leading (Off = original voicing)");
+    revoiceSl.setTooltip("Revoice the notes being played: third in the bass, fifth in the bass, then an open voicing (Off = original)");
     tempoPopup.setTooltip("Halve or double playback tempo vs the clip / host");
     delayTimePopup.setTooltip("Delay tap spacing");
     delayAmountSl.setTooltip("How loud delayed repeats are");
@@ -368,6 +368,8 @@ EffectsInspector::EffectsInspector()
     for (int i = 0; i < 12; ++i) keys.add(kNoteNames[(size_t) i]);
     keyGrid.title = "Key";
     keyGrid.columns = 6;
+    // Match the gap between the "Key" title and the pitch buttons.
+    keyGrid.contentBottomPad = 7;
     keyGrid.multiSelect = false;
     keyGrid.setItems(keys);
     keyGrid.setSelectedIndex(0, juce::dontSendNotification);
@@ -1578,6 +1580,16 @@ void EffectsInspector::timerCallback()
     draggedSection->setTransform(juce::AffineTransform::rotation(angle, c.x, c.y));
 }
 
+int EffectsInspector::generatorColumnHeight() const
+{
+    const int pad = metrics::scaled(8);
+    const int gap = metrics::scaled(4);
+    int y = pad;
+    for (auto* sec : { &arpSec, &melodySec, &chordsSec, &bassSec, &drumSec })
+        y += sec->idealHeight() + gap;
+    return juce::jmax(1, y);
+}
+
 int EffectsInspector::contentHeight() const
 {
     const int pad = metrics::scaled(8);
@@ -1655,8 +1667,8 @@ void EffectsInspector::layoutExternalGenerators()
         sec->resized();
         y += h + gap;
     }
-    // Tight bottom — no empty row between the last section and the preview.
-    host.setSize(juce::jmax(1, host.getWidth()), juce::jmax(y - gap + metrics::scaled(4), 1));
+    // One section-gap under Drums, the same gap that sits between parts.
+    host.setSize(juce::jmax(1, host.getWidth()), juce::jmax(1, y));
 }
 
 void EffectsInspector::setGeneratorsEnabled(bool on)
@@ -1732,7 +1744,8 @@ void EffectsInspector::resized()
     }
     updateToolkitFoldBounds();
 
-    viewport.setBounds(r);
+    // Leave the left column rule visible; the viewport would cover it.
+    viewport.setBounds(r.withTrimmedLeft(1));
     body.setSize(juce::jmax(1, viewport.getMaximumVisibleWidth()), body.getHeight());
 
     // Match octave-range / outside-range width (octave stepper ideal).
@@ -1842,6 +1855,13 @@ void EffectsInspector::paint(juce::Graphics& g)
     };
     drawTab(generatorsTabBounds, "Generators", paneTab == 0, generatorsEnabled);
     // Effects title is replaced by the Hide Unused control.
+}
+
+void EffectsInspector::paintOverChildren(juce::Graphics& g)
+{
+    // Continue the Toolkit title's left rule down the whole column.
+    g.setColour(ds::line());
+    g.fillRect(0, 0, 1, getHeight());
 }
 
 void EffectsInspector::mouseDown(const juce::MouseEvent& e)

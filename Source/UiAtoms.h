@@ -175,7 +175,7 @@ public:
     void setIndex(int i, juce::NotificationType notify = juce::dontSendNotification);
     int getIndex() const { return index; }
     int idealWidth() const;
-    int idealHeight() const { return metrics::scaled(28); }
+    int idealHeight() const { return metrics::chromeIconButton(); }
     std::function<void(int)> onChange;
 
     void paint(juce::Graphics&) override;

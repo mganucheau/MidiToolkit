@@ -1023,114 +1023,88 @@ std::vector<RollNote> applyMusicalVariation(std::vector<RollNote> notes, int var
     return found ? best : notes;
 }
 
-/** Revoice: group simultaneous notes into chords and re-stack each one with
-    voice-leading from the chord before it (smallest total voice movement, register
-    kept near the original). Pitch classes never change — only octave placement,
-    inversion and spread. amount 0 = original voicing; 1..kMaxRevoice = how many chords
-    change and how freely they may invert / open. Run on the source notes, before any
-    timing transform, so humanize/swing cannot split a chord. */
+/** Revoice: each note keeps its pitch class and only moves by octaves.
+    amount 0 = original. Low values put the third in the bass (raise the root).
+    Mid values put the fifth in the bass. High values open the chord by an octave.
+    Run before timing transforms so swing cannot split a chord. */
 std::vector<RollNote> applyRevoice(const std::vector<RollNote>& notes, int amount)
 {
     amount = juce::jlimit(0, kMaxRevoice, amount);
-    if (amount <= 0 || notes.size() < 2)
+    if (amount <= 0 || notes.empty())
         return notes;
 
-    const double t = (double) amount / (double) kMaxRevoice;
-    const auto groups = groupChords(notes);
-    std::vector<RollNote> out = notes;
-    std::vector<int> prev; // sorted pitches of the previous chord as it now sounds
+    // 1 = third in the bass, 2 = fifth in the bass. The top third also opens the voicing.
+    const int inversion = amount <= kMaxRevoice / 3 ? 1
+                         : amount <= (2 * kMaxRevoice) / 3 ? 2
+                         : 1;
+    const bool open = amount > (2 * kMaxRevoice) / 3;
 
-    auto mean = [](const std::vector<int>& v)
+    // Notes that start together, with a slightly wide window so a rolled chord still groups.
+    std::vector<size_t> order(notes.size());
+    for (size_t i = 0; i < notes.size(); ++i) order[i] = i;
+    std::sort(order.begin(), order.end(), [&](size_t a, size_t b)
     {
-        double s = 0.0;
-        for (int p : v) s += (double) p;
-        return v.empty() ? 0.0 : s / (double) v.size();
+        if (notes[a].start < notes[b].start) return true;
+        if (notes[b].start < notes[a].start) return false;
+        return notes[a].pitch < notes[b].pitch;
+    });
+
+    struct Group { double start = 0.0; std::vector<size_t> indices; };
+    std::vector<Group> groups;
+    for (size_t idx : order)
+    {
+        if (!groups.empty() && std::abs(notes[idx].start - groups.back().start) < 0.75)
+            groups.back().indices.push_back(idx);
+        else
+            groups.push_back({ notes[idx].start, { idx } });
+    }
+
+    std::vector<RollNote> out = notes;
+    auto shiftOctave = [](RollNote& note, int octaves)
+    {
+        const int p = juce::jlimit(0, 127, note.pitch + 12 * octaves);
+        if (p == note.pitch)
+            return;
+        note.pitch = p;
+        note.moved = true;
     };
 
-    for (size_t gi = 0; gi < groups.size(); ++gi)
+    for (const auto& g : groups)
     {
-        if (groups[gi].indices.size() < 2)
-            continue;
-
-        std::vector<size_t> idx = groups[gi].indices;
+        std::vector<size_t> idx = g.indices;
         std::sort(idx.begin(), idx.end(), [&](size_t a, size_t b)
         {
             return notes[a].pitch < notes[b].pitch;
         });
-        std::vector<int> orig;
-        orig.reserve(idx.size());
-        for (size_t i : idx) orig.push_back(notes[i].pitch);
 
-        const uint32_t h = knuthHash(amount * 131 + (int) gi * 17);
-        if ((h % 100u) >= (uint32_t) std::lround(35.0 + 65.0 * t))
+        if (idx.size() < 2)
         {
-            prev = orig;
+            // A single line has no chord to invert. Move it an octave so the slider is audible.
+            shiftOctave(out[idx.front()], open ? -1 : 1);
             continue;
         }
 
-        const int n = (int) orig.size();
-        const double origMean = mean(orig);
-        const double target = prev.empty() ? origMean : mean(prev);
-        const int winLo = std::max(0, orig.front() - 12);
-        const int winHi = std::min(127, orig.back() + 12);
+        const int n = (int) idx.size();
+        const int lift = juce::jmin(inversion, n - 1);
+        for (int i = 0; i < lift; ++i)
+            shiftOctave(out[idx[(size_t) i]], 1);
 
-        std::vector<int> best = orig;
-        double bestCost = 1.0e12;
-        for (int inv = 0; inv < n; ++inv)
+        if (open)
         {
-            std::vector<int> v = orig;
-            for (int j = 0; j < inv; ++j) v[(size_t) j] += 12; // inversion: lowest voices up
-            std::sort(v.begin(), v.end());
-            for (int open = 0; open < (n >= 3 ? 2 : 1); ++open)
+            // Drop the new bass and raise the top so the chord opens.
+            size_t bass = idx.front();
+            size_t top = idx.front();
+            for (size_t i : idx)
             {
-                std::vector<int> w = v;
-                if (open == 1) w[1] += 12; // open spread: lift the second voice an octave
-                std::sort(w.begin(), w.end());
-
-                const int shift = (int) std::lround((target - mean(w)) / 12.0) * 12;
-                bool fits = true;
-                for (auto& p : w)
-                {
-                    p += shift;
-                    if (p < winLo || p > winHi) fits = false;
-                }
-                if (!fits)
-                    continue;
-
-                double cost = 0.0;
-                if (!prev.empty())
-                {
-                    const int m = (int) prev.size();
-                    for (int i = 0; i < n; ++i)
-                    {
-                        const int j = n > 1 ? (int) std::lround((double) i * (double) (m - 1)
-                                                                / (double) (n - 1)) : 0;
-                        cost += std::abs(w[(size_t) i] - prev[(size_t) j]);
-                    }
-                }
-                cost += 0.5 * std::abs(mean(w) - origMean);
-                cost += (1.0 - t) * 3.0 * (double) inv + (1.0 - t) * 4.0 * (double) open;
-                cost += (hashSigned(amount * 977 + (int) gi * 13 + inv * 3 + open, 5) + 1.0) * 0.5
-                        * (1.5 + 4.0 * t);
-                if (cost < bestCost)
-                {
-                    bestCost = cost;
-                    best = w;
-                }
+                if (out[i].pitch < out[bass].pitch) bass = i;
+                if (out[i].pitch > out[top].pitch) top = i;
+            }
+            if (bass != top)
+            {
+                shiftOctave(out[bass], -1);
+                shiftOctave(out[top], 1);
             }
         }
-
-        for (size_t r = 0; r < idx.size(); ++r)
-        {
-            auto& note = out[idx[r]];
-            const int p = juce::jlimit(0, 127, best[r]);
-            if (p != note.pitch)
-            {
-                note.pitch = p;
-                note.moved = true;
-            }
-        }
-        prev = best;
     }
     return out;
 }

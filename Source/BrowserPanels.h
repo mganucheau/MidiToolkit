@@ -552,7 +552,13 @@ private:
     static constexpr int kNotesW = 48;
     static constexpr int kSortArrowW = 12;
     static constexpr int kIconW = 22;
+    static constexpr int kColPad = 8;
     static constexpr int kResizeHitSlop = 8;
+
+    int metaColumnPx(SortColumn col) const;
+    void rebuildMetaWidths() const;
+    mutable bool metaWidthsDirty = true;
+    mutable int cachedMetaPx[8] = {};
 
     int nameResizeHandleX() const;
     int nameColumnRightContentX() const;
