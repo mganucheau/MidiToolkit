@@ -1819,13 +1819,13 @@ void EffectsInspector::resized()
 
 void EffectsInspector::paint(juce::Graphics& g)
 {
-    // Levels Toolkit: ground surface000, header matches Browser/Generator (surface300).
+    // Ground surface000. Header matches the logo row (bg), separated by the hairline below.
     g.fillAll(ds::surface000());
     g.setColour(ds::line());
     g.fillRect(getLocalBounds().removeFromLeft(1));
 
     auto header = getLocalBounds().removeFromTop(metrics::paneHeaderH());
-    g.setColour(ds::surface300());
+    g.setColour(ds::bg());
     g.fillRect(header);
     g.setColour(ds::line());
     g.fillRect(header.getX(), header.getBottom() - 1, header.getWidth(), 1);
@@ -1834,14 +1834,7 @@ void EffectsInspector::paint(juce::Graphics& g)
 
     g.setFont(uiFontFixed(12.0f, true));
     if (externalGeneratorHost != nullptr)
-    {
-        // Same type size as Browser / Generator pane titles.
-        g.setFont(uiFontFixed(14.0f, true));
-        g.setColour(ds::ink());
-        auto t = header.withTrimmedLeft(metrics::scaled(12)).withRight(btnChanged.getX() - 4);
-        g.drawText("Toolkit", t, juce::Justification::centredLeft, true);
         return;
-    }
 
     auto drawTab = [&](juce::Rectangle<int> r, const juce::String& label, bool active, bool enabled)
     {

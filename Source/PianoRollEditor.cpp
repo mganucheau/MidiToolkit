@@ -110,18 +110,50 @@ void PianoRollMini::paint(juce::Graphics& g)
         // Levels lanes: black-key rows are a 4% ink wash over the surface.
         g.setColour(black ? ds::surface200().overlaidWith(ds::ink().withAlpha(0.05f)) : ds::surface200());
         g.fillRect(b.getX(), y, b.getWidth(), h);
-        g.setColour(black ? ds::kb() : ds::kw());
-        g.fillRect(gutter.getX(), y, gutter.getWidth() - 1.0f, h);
+        if (!black)
+        {
+            auto key = juce::Rectangle<float>(gutter.getX(), y, gutter.getWidth() - 1.0f, h);
+            g.setColour(colours::kbWhite());
+            g.fillRect(key);
+            if ((noteFilterMask & (uint16_t) (1u << (p % 12))) == 0)
+            {
+                g.setColour(ds::trk().withAlpha(0.55f));
+                g.fillRect(key);
+            }
+            g.setColour(contrastLineOn(colours::kbWhite()));
+            g.fillRect(key.getX(), y + h - 0.5f, key.getWidth(), 0.5f);
+        }
         if ((noteFilterMask & (uint16_t) (1u << (p % 12))) == 0)
         {
             g.setColour(ds::surface000().withAlpha(0.55f));
             g.fillRect(b.getX(), y, b.getWidth(), h);
         }
-        // Octave line under every C (the B|C boundary).
+        // Octave line under every C (the B|C boundary). Stays in the roll, not on the keys.
         if (p % 12 == 0)
         {
             g.setColour(ds::line());
-            g.fillRect(b.getX() - kGutterW, y + h - 1.0f, b.getWidth() + kGutterW, 1.0f);
+            g.fillRect(b.getX(), y + h - 1.0f, b.getWidth(), 1.0f);
+        }
+    }
+
+    // Black keys sit on top of the white keys, shorter, like the piano roll gutter.
+    for (int p = map.minPitch; p <= map.maxPitch; ++p)
+    {
+        if (!isBlackKeyPitch(p))
+            continue;
+        const float y = b.getY() + map.yForPitchTop(p, b.getHeight());
+        const float h = map.rowH;
+        if (y + h < b.getY() || y > b.getBottom())
+            continue;
+        const float keyW = (gutter.getWidth() - 1.0f) * 0.62f;
+        auto key = juce::Rectangle<float>(gutter.getX(), y + 0.5f, keyW, juce::jmax(1.0f, h - 1.0f));
+        const float rad = juce::jmin(2.0f, h * 0.25f);
+        g.setColour(colours::kbBlack());
+        g.fillRoundedRectangle(key, rad);
+        if ((noteFilterMask & (uint16_t) (1u << (p % 12))) == 0)
+        {
+            g.setColour(ds::tx3());
+            g.fillRoundedRectangle(key, rad);
         }
     }
 
@@ -490,14 +522,36 @@ void PianoRollEditor::setScalePlacement(ScalePlacement)
     // Pitch & Scale lives in the Effects inspector (Cupertino).
 }
 
+NoteProcessScope PianoRollEditor::processScope() const
+{
+    NoteProcessScope scope;
+    scope.loopStartStep = loopStartStep;
+    scope.loopEndStep = loopEndStep;
+    if (!selection.empty())
+        scope.selectedIds = &selection;
+    return scope;
+}
+
+void PianoRollEditor::notifySelectionChanged()
+{
+    rebuildResolved();
+    refreshControls();
+    gutter.repaint();
+    velocityLane.repaint();
+    repaint();
+    if (onSelectionChanged)
+        onSelectionChanged();
+}
+
 void PianoRollEditor::rebuildResolved()
 {
     if (!hasClip) return;
-    resolved = resolveClip(clip, edit);
+    const auto scope = processScope();
+    resolved = resolveClip(clip, edit, nullptr, scope);
     grooved = applyGroove(resolved.notes, groove, clip.complexity,
-                          clip.kind, clip.root, edit.mode);
+                          clip.kind, clip.root, edit.mode, scope);
     if (edit.fitScale && edit.root >= 0)
-        refitNotesToScale(grooved, edit.root, edit.mode);
+        refitNotesToScale(grooved, edit.root, edit.mode, scope);
 
     ClipEdit noTrim = edit;
     noTrim.clearTrim();
@@ -719,11 +773,7 @@ void PianoRollEditor::toggleTrim()
 
 void PianoRollEditor::resetLoopToClip()
 {
-    loopStartStep = 0.0;
-    loopEndStep = juce::jmax(minLoopSteps(), clipSteps());
-    notifyLoopChanged();
-    timeRuler.repaint();
-    rollContent.repaint();
+    setLoopSteps(0.0, juce::jmax(minLoopSteps(), clipSteps()), true);
 }
 
 void PianoRollEditor::setLoopSteps(double start, double end, bool notify)
@@ -736,6 +786,7 @@ void PianoRollEditor::setLoopSteps(double start, double end, bool notify)
         return;
     loopStartStep = start;
     loopEndStep = end;
+    rebuildResolved();
     if (notify)
         notifyLoopChanged();
     timeRuler.repaint();
@@ -1396,7 +1447,7 @@ void PianoRollEditor::paint(juce::Graphics& g)
 {
     g.setColour(ds::surface100());
     g.fillRect(getLocalBounds());
-    g.setColour(ds::surface300());
+    g.setColour(ds::bg());
     g.fillRect(0, 0, getWidth(), toolbarHeight());
     g.setColour(ds::line());
     g.fillRect(0, toolbarHeight() - 1, getWidth(), 1);
@@ -1628,11 +1679,9 @@ void PianoRollEditor::RollContent::paint(juce::Graphics& g)
         g.drawRoundedRectangle(nr.reduced(0.5f), rad, 1.0f);
     }
 
-    // Marquee band
+    // Marquee: border only, so notes under the drag stay readable.
     if (drag == Drag::Marquee)
     {
-        g.setColour(colours::accentSoft());
-        g.fillRect(marquee);
         g.setColour(colours::accentLine());
         g.drawRect(marquee, 1.0f);
     }
@@ -1684,6 +1733,7 @@ void PianoRollEditor::RollContent::mouseDown(const juce::MouseEvent& e)
         drag = onEdge ? Drag::NoteResize : Drag::Note;
         if (onEdge)
             setMouseCursor(juce::MouseCursor::LeftRightResizeCursor);
+        const auto before = ed.selection;
         if (e.mods.isShiftDown())
         {
             if (!ed.selection.insert(n->id).second)
@@ -1694,9 +1744,14 @@ void PianoRollEditor::RollContent::mouseDown(const juce::MouseEvent& e)
             ed.selection.clear();
             ed.selection.insert(n->id);
         }
-        ed.refreshControls();
-        repaint();
-        ed.velocityLane.repaint();
+        if (ed.selection != before)
+            ed.notifySelectionChanged();
+        else
+        {
+            ed.refreshControls();
+            repaint();
+            ed.velocityLane.repaint();
+        }
         return;
     }
 
@@ -1805,10 +1860,8 @@ void PianoRollEditor::RollContent::mouseUp(const juce::MouseEvent&)
             for (const auto& n : ed.grooved)
                 if (ed.noteRect(n).intersects(marquee))
                     ed.selection.insert(n.id);
-            ed.refreshControls();
-            ed.gutter.repaint();
-            ed.velocityLane.repaint();
         }
+        ed.notifySelectionChanged();
     }
     drag = Drag::None;
     dragDRows = dragDStep = 0;

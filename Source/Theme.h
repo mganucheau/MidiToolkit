@@ -529,8 +529,8 @@ namespace metrics {
     inline int transportH()       { return scaled(toolbarH); }
     inline int listRowH()         { return scaled(ds::region::listRowH); }
     inline int listHeaderH()      { return scaled(ds::region::listHeaderH); }
-    /** Matches the transport header so Files / Generator / roll / Effects share one band. */
-    inline int paneHeaderH()      { return transportH(); }
+    /** Second band (Browser/Generator, piano tools, toolkit title): 5px shorter than the logo row. */
+    inline int paneHeaderH()      { return juce::jmax(scaled(28), transportH() - 5); }
     inline int toolkitHeaderH()   { return paneHeaderH(); }
     inline int padS()             { return scaled(currentDensity() == Density::Comfortable ? 12 : 8); }
     inline int miniRollH()        { return scaled(ds::region::previewH); }

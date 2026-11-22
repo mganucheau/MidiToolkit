@@ -565,6 +565,8 @@ void FavoritesSidebar::FilterPanel::resized()
 FavoritesSidebar::SearchQueryPanel::SearchQueryPanel()
 {
     styleEditors();
+    setOpaque(false);
+    queryField.setOpaque(false);
     addAndMakeVisible(queryField);
     queryField.onTextChange = [this]
     {
@@ -735,8 +737,10 @@ void FavoritesSidebar::SearchQueryPanel::resized()
         saveChipBounds = querySlot.removeFromRight(chipW + 2).withTrimmedRight(2)
                              .withSizeKeepingCentre(chipW, juce::jmax(10, querySlot.getHeight() - 4));
     }
-    auto field = querySlot.withTrimmedLeft(20).withTrimmedRight(2);
-    // Clip the editor to the rounded well so white corners never bleed.
+    const int corner = juce::jmax(3, (int) std::ceil(ds::radius::md));
+    auto field = querySlot.withTrimmedLeft(20).withTrimmedRight(corner)
+                     .withTrimmedTop(corner).withTrimmedBottom(corner);
+    queryField.setOpaque(false);
     queryField.setBounds(field);
     queryField.setBorder(juce::BorderSize<int>(0));
     // Vertically centre the text inside the field (JUCE TextEditor indents from the top).

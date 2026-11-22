@@ -912,6 +912,13 @@ MidiToolkitEditor::MidiToolkitEditor(MidiToolkitProcessor& p)
             if (beat < startBeat) beat += loopLen;
             processorRef.freerunBeat.store(beat);
         }
+        updateMiniPreview();
+        pushPreviewToProcessor();
+    };
+    rollEditor.onSelectionChanged = [this]
+    {
+        updateMiniPreview();
+        pushPreviewToProcessor();
     };
     rollEditor.onActivated = [this] { claimKeyNav(KeyNavTarget::Editor); };
     applyTimeStretchFromMultiplier();
@@ -3108,10 +3115,18 @@ void MidiToolkitEditor::refreshEntryMeta(int index)
 
 const std::set<int>* MidiToolkitEditor::formSelectionIds() const
 {
-    const auto& e = effectsInspector.getEdit();
-    if (!e.selectedNotesOnly || !rollEditor.hasSelection())
+    if (!rollEditor.hasSelection())
         return nullptr;
     return &rollEditor.selectedNoteIds();
+}
+
+NoteProcessScope MidiToolkitEditor::noteScope() const
+{
+    NoteProcessScope scope;
+    scope.loopStartStep = rollEditor.loopStart();
+    scope.loopEndStep = rollEditor.loopEnd();
+    scope.selectedIds = formSelectionIds();
+    return scope;
 }
 
 MidiClip MidiToolkitEditor::buildRenderedClip() const
@@ -3125,12 +3140,13 @@ MidiClip MidiToolkitEditor::buildRenderedClip() const
 
     const auto edit = hasRecording ? effectsInspector.getEdit() : selectedEdit();
     const auto groove = hasRecording ? effectsInspector.getGroove() : selectedGroove();
-    const auto resolved = resolveClip(*clip, edit, formSelectionIds());
+    const auto scope = noteScope();
+    const auto resolved = resolveClip(*clip, edit, nullptr, scope);
     auto notes = applyGroove(resolved.notes, groove, clip->complexity,
-                             clip->kind, clip->root, edit.mode);
+                             clip->kind, clip->root, edit.mode, scope);
     // Complexity morph can invent ±1/±2 ornaments — keep Fit to Scale honest.
     if (edit.fitScale && edit.root >= 0)
-        refitNotesToScale(notes, edit.root, edit.mode);
+        refitNotesToScale(notes, edit.root, edit.mode, scope);
     const double stretch = 1.0 / juce::jlimit(0.25, 4.0, processorRef.bpmMultiplier.load());
 
     out.name = clip->name;
@@ -3590,12 +3606,13 @@ void MidiToolkitEditor::updateMiniPreview()
     {
         const auto edit = effectsInspector.getEdit();
         const auto groove = effectsInspector.getGroove();
-        const auto resolved = resolveClip(recordedClip, edit, formSelectionIds());
+        const auto scope = noteScope();
+        const auto resolved = resolveClip(recordedClip, edit, nullptr, scope);
         const int rootPc = edit.root >= 0 ? edit.root : 0;
         auto grooved = applyGroove(resolved.notes, groove, recordedClip.complexity,
-                                   recordedClip.kind, recordedClip.root, edit.mode);
+                                   recordedClip.kind, recordedClip.root, edit.mode, scope);
         if (edit.fitScale && edit.root >= 0)
-            refitNotesToScale(grooved, edit.root, edit.mode);
+            refitNotesToScale(grooved, edit.root, edit.mode, scope);
         // Frame on resolved notes so invert / octave / delete refit the strip.
         miniRoll.setNotes(grooved, resolved.bars, groove, rootPc, grooved,
                           edit.mode, 4, edit.noteFilterMask);
@@ -3619,13 +3636,14 @@ void MidiToolkitEditor::updateMiniPreview()
     transport.setClipName(clip->name);
     const auto edit = selectedEdit();
     const auto groove = selectedGroove();
-    const auto resolved = resolveClip(*clip, edit, formSelectionIds());
+    const auto scope = noteScope();
+    const auto resolved = resolveClip(*clip, edit, nullptr, scope);
     const int rootPc = edit.root >= 0 ? edit.root : (clip->root >= 0 ? clip->root : 0);
     miniRoll.setNoteColour(ds::note()); // Theme-aware notes (keys stay black/white)
     auto grooved = applyGroove(resolved.notes, groove, clip->complexity,
-                               clip->kind, clip->root, edit.mode);
+                               clip->kind, clip->root, edit.mode, scope);
     if (edit.fitScale && edit.root >= 0)
-        refitNotesToScale(grooved, edit.root, edit.mode);
+        refitNotesToScale(grooved, edit.root, edit.mode, scope);
     // Fit vertical zoom to the audible notes (±1), not the raw source pitches.
     miniRoll.setNotes(grooved, resolved.bars, groove,
                       rootPc, grooved, edit.mode, 4, edit.noteFilterMask);
@@ -3976,7 +3994,7 @@ void MidiToolkitEditor::LeftPaneTabs::resized()
 
 void MidiToolkitEditor::LeftPaneTabs::paint(juce::Graphics& g)
 {
-    g.fillAll(ds::surface300());
+    g.fillAll(ds::bg());
     g.setColour(ds::line());
     g.fillRect(0, getHeight() - 1, getWidth(), 1);
 }
@@ -4797,6 +4815,7 @@ public:
         addAndMakeVisible(closeBtn);
 
         saveDefaultBtn.caption = "Save default view";
+        saveDefaultBtn.solid = true;
         saveDefaultBtn.setTooltip("Remember this layout, size, and columns as the default view");
         saveDefaultBtn.onClick = [this] { if (onSaveDefault) onSaveDefault(); };
         addAndMakeVisible(saveDefaultBtn);
@@ -4843,6 +4862,7 @@ public:
     void paint(juce::Graphics& g) override
     {
         auto bounds = getLocalBounds().toFloat();
+        g.fillAll(ds::surface100());
         g.setColour(ds::surface100());
         g.fillRoundedRectangle(bounds, 10.0f);
         g.setColour(ds::edge());
@@ -4958,7 +4978,7 @@ public:
         {
             auto row = body.removeFromTop(kRowH);
             const int w = s.idealWidth();
-            s.setBounds(row.removeFromRight(w).withSizeKeepingCentre(w, 18));
+            s.setBounds(row.removeFromRight(w).withSizeKeepingCentre(w, 16));
             body.removeFromTop(kRowGap);
         };
         auto placeSwatch = [&](ColourSwatch& sw)
@@ -4987,7 +5007,7 @@ public:
         {
             auto row = body.removeFromTop(kRowH);
             const int saveW = juce::jmin(saveDefaultBtn.captionWidth(), row.getWidth());
-            saveDefaultBtn.setBounds(row.removeFromLeft(saveW).withSizeKeepingCentre(saveW, ctrlH));
+            saveDefaultBtn.setBounds(row.removeFromRight(saveW).withSizeKeepingCentre(saveW, ctrlH));
         }
     }
 

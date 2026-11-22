@@ -722,7 +722,8 @@ std::vector<RollNote> applyGroove(const std::vector<RollNote>& notes, const Groo
                                   int sourceComplexity = -1,
                                   ClipKind kind = ClipKind::Lead,
                                   int rootPc = -1,
-                                  Mode mode = Mode::Ionian);
+                                  Mode mode = Mode::Ionian,
+                                  NoteProcessScope scope = {});
 
 /** Build CC64 sustain points (beat domain) for export/preview. Empty when Off. */
 std::vector<AutomationPoint> buildSustainPedalAutomation(const std::vector<RollNote>& notes,

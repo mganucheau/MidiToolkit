@@ -716,13 +716,11 @@ void TransportBar::resized()
         return w;
     };
 
-    // Prefer: full wordmark + all labels → shorten wordmark → drop Piano
-    // label → icons only. Keep at least the MIDI logo when possible (single-column).
+    // Prefer full labels, then drop captions. The MIDI Toolkit wordmark always stays.
     applyHeaderCaptionsTier(2);
     int leftW = leftWidth();
     int rightW = rightWidth();
     const int fullW = logoIdealWidth();
-    const int midiW = logoMidiWidth();
     const int avail = getWidth() - lightsZoneW - rightPad;
 
     auto fits = [&](int logo)
@@ -730,32 +728,23 @@ void TransportBar::resized()
         return (logo > 0 ? logo + groupGap : 0) + leftW + groupGap + rightW <= avail;
     };
 
+    // Full "MIDI Toolkit" wordmark in every layout, including a single column.
     int titleW = fullW;
     logoLevel = 2;
-    if (!fits(fullW)) { titleW = midiW; logoLevel = 1; }
-    if (!fits(titleW))
+    if (!fits(fullW))
     {
         applyHeaderCaptionsTier(1); // keep Input + Toolkit
         leftW = leftWidth();
         rightW = rightWidth();
     }
-    if (!fits(titleW))
+    if (!fits(fullW))
     {
         applyHeaderCaptionsTier(0);
         leftW = leftWidth();
         rightW = rightWidth();
     }
-    // Prefer keeping the wordmark over dropping it entirely.
-    if (!fits(midiW))
-    {
-        titleW = 0;
-        logoLevel = 0;
-    }
-    else if (titleW == 0 || logoLevel == 0)
-    {
-        titleW = midiW;
-        logoLevel = 1;
-    }
+    titleW = fullW;
+    logoLevel = 2;
 
     titleBounds = { lightsZoneW, 0, titleW, h };
 

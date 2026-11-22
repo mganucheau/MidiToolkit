@@ -1147,8 +1147,29 @@ std::vector<RollNote> applyGroove(const std::vector<RollNote>& notes, const Groo
                                   int sourceComplexity,
                                   ClipKind kind,
                                   int rootPc,
-                                  Mode mode)
+                                  Mode mode,
+                                  NoteProcessScope scope)
 {
+    // Loop / selection: transform only the notes inside the region, then merge
+    // them back. Delay can add notes, so the subset is replaced as a whole.
+    if (scope.restricts())
+    {
+        std::vector<RollNote> subset, rest;
+        subset.reserve(notes.size());
+        rest.reserve(notes.size());
+        for (const auto& n : notes)
+            (scope.includes(n) ? subset : rest).push_back(n);
+        auto processed = applyGroove(subset, k, sourceComplexity, kind, rootPc, mode);
+        rest.insert(rest.end(), processed.begin(), processed.end());
+        std::stable_sort(rest.begin(), rest.end(), [](const RollNote& a, const RollNote& b)
+        {
+            if (std::abs(a.start - b.start) > 1.0e-9) return a.start < b.start;
+            if (a.pitch != b.pitch) return a.pitch < b.pitch;
+            return a.id < b.id;
+        });
+        return rest;
+    }
+
     const int srcCx = sourceComplexity > 0 ? juce::jlimit(0, 100, sourceComplexity) : -1;
     const bool complexityActive = srcCx >= 0 && k.complexityTarget >= 0
                                && juce::jlimit(0, 100, k.complexityTarget) != srcCx;

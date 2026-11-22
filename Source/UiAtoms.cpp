@@ -857,31 +857,47 @@ void SegmentToggle::mouseExit(const juce::MouseEvent&)
 void SegmentToggle::paint(juce::Graphics& g)
 {
     layoutSegs();
-    // Same pill as Sync | BPM: radius-md, one divider, equal halves.
-    auto bounds = getLocalBounds().toFloat();
+    // Same ground as the other chips. The active half is an accent stroke only:
+    // the outer corners of that half, plus the divider it shares with the other.
+    auto bounds = getLocalBounds().toFloat().reduced(0.5f);
     const float radius = ds::radius::md;
-    juce::Path clip;
-    clip.addRoundedRectangle(bounds, radius);
-    {
-        juce::Graphics::ScopedSaveState ss(g);
-        g.reduceClipRegion(clip);
-        g.setColour(juce::Colours::black);
-        g.fillRect(bounds);
-        // Active half keeps the black fill (Fold / Scale change the label colour, not the ground).
-        auto paintHalf = [&](juce::Rectangle<float> seg, bool hov)
-        {
-            if (!hov)
-                return;
-            g.setColour(juce::Colours::white.withAlpha(0.06f));
-            g.fillRect(seg);
-        };
-        paintHalf(leftSeg, hover == 0 && index != 0);
-        paintHalf(rightSeg, hover == 1 && index != 1);
-        g.setColour(ds::edge());
-        g.fillRect(bounds.getCentreX() - 0.5f, bounds.getY() + 1.0f, 1.0f, bounds.getHeight() - 2.0f);
-    }
+    g.setColour(ds::surface200());
+    g.fillRoundedRectangle(bounds, radius);
     g.setColour(ds::edge());
-    g.drawRoundedRectangle(bounds.reduced(0.5f), radius, 1.0f);
+    g.drawRoundedRectangle(bounds, radius, 1.0f);
+
+    const float mid = bounds.getCentreX();
+    g.setColour(ds::edge());
+    g.drawLine(mid, bounds.getY() + 1.0f, mid, bounds.getBottom() - 1.0f, 1.0f);
+
+    auto paintHover = [&](juce::Rectangle<float> seg, bool hov, bool leftHalf)
+    {
+        if (!hov)
+            return;
+        juce::Path p;
+        p.addRoundedRectangle(seg.getX(), bounds.getY(), seg.getWidth(), bounds.getHeight(),
+                              radius, radius, leftHalf, !leftHalf, leftHalf, !leftHalf);
+        g.setColour(ds::ink().withAlpha(0.06f));
+        g.fillPath(p);
+    };
+    paintHover(leftSeg, hover == 0 && index != 0, true);
+    paintHover(rightSeg, hover == 1 && index != 1, false);
+
+    auto strokeActive = [&](bool leftHalf)
+    {
+        const float x = leftHalf ? bounds.getX() : mid;
+        const float w = leftHalf ? mid - bounds.getX() : bounds.getRight() - mid;
+        juce::Path p;
+        p.addRoundedRectangle(x, bounds.getY(), w, bounds.getHeight(),
+                              radius, radius, leftHalf, !leftHalf, leftHalf, !leftHalf);
+        g.setColour(ds::acc());
+        g.strokePath(p, juce::PathStrokeType(1.5f));
+        g.drawLine(mid, bounds.getY(), mid, bounds.getBottom(), 1.5f);
+    };
+    if (index == 0)
+        strokeActive(true);
+    else if (index == 1)
+        strokeActive(false);
 
     auto paintLabel = [&](juce::Rectangle<float> seg, bool sel, const juce::String& text)
     {

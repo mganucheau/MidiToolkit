@@ -210,16 +210,11 @@ public:
 
 // ── FlatSwitch ───────────────────────────────────────────────────────────────
 
-/** Face of a row switch inside `bounds`: ~28×16 pill, inset so thick theme borders never clip. */
+/** Face of a row switch inside `bounds`: a 16px capsule that fills the control. */
 inline juce::Rectangle<float> switchFace(juce::Rectangle<float> bounds)
 {
-    const float border = themeDepth() == ThemeDepth::Brutal
-                             ? juce::jmax(1.5f, themeBorderPx())
-                             : 1.0f;
-    const float pad = border + 1.0f;
-    const float maxH = juce::jmax(10.0f, bounds.getHeight() - pad * 2.0f);
-    const float h = juce::jmin(16.0f, maxH);
-    const float w = juce::jmin(bounds.getWidth() - pad * 2.0f, h * 1.75f);
+    const float h = juce::jmin(16.0f, juce::jmax(10.0f, bounds.getHeight()));
+    const float w = juce::jmin(bounds.getWidth(), h * 1.75f);
     return bounds.withSizeKeepingCentre(w, h);
 }
 
@@ -236,27 +231,23 @@ inline juce::Rectangle<float> paintSwitchPill(juce::Graphics& g, juce::Rectangle
     const float h = face.getHeight();
     const float rad = h * 0.5f;
 
+    auto track = tipHot ? tooltipAccent() : (on ? ds::acc() : ds::edge());
+    if (!enabled) track = track.withMultipliedAlpha(0.45f);
+    else if (over && !on)
+        track = track.withMultipliedAlpha(0.8f).overlaidWith(ds::inkFaint().withAlpha(0.25f));
     juce::Path trackPath;
     trackPath.addRoundedRectangle(face, rad);
-    {
-        juce::Graphics::ScopedSaveState ss(g);
-        g.reduceClipRegion(trackPath);
-        auto track = tipHot ? tooltipAccent() : (on ? ds::acc() : ds::edge());
-        if (!enabled) track = track.withMultipliedAlpha(0.45f);
-        else if (over && !on)
-            track = track.withMultipliedAlpha(0.8f).overlaidWith(ds::inkFaint().withAlpha(0.25f));
-        g.setColour(track);
-        g.fillRect(face); // clipped to rounded path — no white corner bleed
-        const float knob = juce::jmax(6.0f, h - 4.0f);
-        auto knobR = juce::Rectangle<float>(knob, knob)
-                         .withCentre({ on ? face.getRight() - rad : face.getX() + rad,
-                                       face.getCentreY() });
-        g.setColour(on ? juce::Colours::white : ds::surface100());
-        g.fillEllipse(knobR);
-        if (glyph.isNotEmpty())
-            drawIcon(g, glyph, knobR.reduced(knob * 0.2f),
-                     on ? ds::acc() : ds::inkMuted(), 1.1f);
-    }
+    g.setColour(track);
+    g.fillPath(trackPath);
+    const float knob = juce::jmax(6.0f, h - 4.0f);
+    auto knobR = juce::Rectangle<float>(knob, knob)
+                     .withCentre({ on ? face.getRight() - rad : face.getX() + rad,
+                                   face.getCentreY() });
+    g.setColour(on ? juce::Colours::white : ds::surface100());
+    g.fillEllipse(knobR);
+    if (glyph.isNotEmpty())
+        drawIcon(g, glyph, knobR.reduced(knob * 0.2f),
+                 on ? ds::acc() : ds::inkMuted(), 1.1f);
     if (themeDepth() == ThemeDepth::Brutal)
     {
         g.setColour(ds::ink());
@@ -2590,8 +2581,8 @@ private:
         }
         juce::Colour col = on ? ds::acc() : (over ? ds::ink() : ds::inkMuted());
         if (!enabled) col = ds::inkFaint().withMultipliedAlpha(0.6f);
-        // Smaller glyph (~14 px) to match the tighter hit target.
-        drawIcon(g, glyph, bounds.withSizeKeepingCentre(20.0f, 20.0f), col, 1.45f);
+        const float glyphPx = sectionTitleFont().getHeight();
+        drawIcon(g, glyph, bounds.withSizeKeepingCentre(glyphPx, glyphPx), col, 1.45f);
     }
 
     juce::Rectangle<int> lockBounds() const

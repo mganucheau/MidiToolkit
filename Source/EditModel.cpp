@@ -465,12 +465,14 @@ int noteNameIndex(const juce::String& name)
     return -1;
 }
 
-void refitNotesToScale(std::vector<RollNote>& notes, int rootPc, Mode mode)
+void refitNotesToScale(std::vector<RollNote>& notes, int rootPc, Mode mode,
+                       const NoteProcessScope& scope)
 {
     if (rootPc < 0 || notes.empty())
         return;
     for (auto& n : notes)
-        n.pitch = juce::jlimit(0, 127, fitToScale(n.pitch, rootPc, mode));
+        if (scope.includes(n))
+            n.pitch = juce::jlimit(0, 127, fitToScale(n.pitch, rootPc, mode));
 }
 
 int fitToScale(int midi, int rootPc, Mode mode)
@@ -621,13 +623,28 @@ static std::vector<int> effectiveRemovedBars(const StepClip& clip, const ClipEdi
 }
 
 ResolvedClip resolveClip(const StepClip& clip, const ClipEdit& e,
-                         const std::set<int>* selectedNoteIds)
+                         const std::set<int>* selectedNoteIds,
+                         NoteProcessScope scope)
 {
     ResolvedClip out;
     out.notes.reserve(clip.notes.size());
     const int srcOct = clipReferenceOctave(clip);
     const int tgtOct = e.octave >= 0 ? juce::jlimit(0, 6, e.octave) : srcOct;
     const int octDelta = (tgtOct - srcOct) * 12;
+
+    // Loop brackets live in the post-trim roll. Decide scope with that start,
+    // even while the notes below still carry pre-trim positions.
+    NoteProcessScope effective = scope;
+    if (effective.selectedIds == nullptr && e.selectedNotesOnly)
+        effective.selectedIds = selectedNoteIds;
+    const auto removed = effectiveRemovedBars(clip, e);
+    auto inScope = [&](const RollNote& n, bool alreadyTrimmed)
+    {
+        RollNote probe = n;
+        if (!alreadyTrimmed && !removed.empty())
+            probe.start = remapStepAfterRemovingBars(n.start, removed);
+        return effective.includes(probe);
+    };
 
     for (const auto& n : clip.notes)
     {
@@ -638,24 +655,33 @@ ResolvedClip resolveClip(const StepClip& clip, const ClipEdit& e,
         if (auto it = e.moves.find(n.id); it != e.moves.end())
             mv = it->second;
 
-        // Octave Range owns the register: the window is absolute, so a second
-        // transpose would move notes and then wrap them a second time.
-        int pitch = n.pitch + mv.dPitch + e.pitchShift;
-        if (e.octaveRange <= 0)
-            pitch += octDelta;
+        // Manual drags always apply. Toolkit pitch only touches notes inside
+        // the loop, and inside the selection when one exists.
+        RollNote probe = n;
+        probe.id = n.id;
+        probe.start = n.start + mv.dStep;
+        const bool hit = inScope(probe, false);
 
-        if (e.mapToRoot && e.root >= 0 && clip.root >= 0)
+        int pitch = n.pitch + mv.dPitch;
+        if (hit)
         {
-            // Move the clip's scale root to the target root: a transpose, not
-            // a snap, wrapped into [-6, 6] so it goes the nearest direction.
-            int d = (e.root - clip.root) % 12;
-            if (d > 6)  d -= 12;
-            if (d < -6) d += 12;
-            pitch += d;
-        }
+            pitch += e.pitchShift;
+            // Octave Range owns the register: the window is absolute, so a second
+            // transpose would move notes and then wrap them a second time.
+            if (e.octaveRange <= 0)
+                pitch += octDelta;
 
-        if (e.fitScale && e.root >= 0)
-            pitch = fitToScale(pitch, e.root, e.mode);
+            if (e.mapToRoot && e.root >= 0 && clip.root >= 0)
+            {
+                int d = (e.root - clip.root) % 12;
+                if (d > 6)  d -= 12;
+                if (d < -6) d += 12;
+                pitch += d;
+            }
+
+            if (e.fitScale && e.root >= 0)
+                pitch = fitToScale(pitch, e.root, e.mode);
+        }
 
         pitch = juce::jlimit(0, 127, pitch);
 
@@ -674,7 +700,11 @@ ResolvedClip resolveClip(const StepClip& clip, const ClipEdit& e,
     if (e.octaveRange > 0 && !out.notes.empty())
     {
         for (auto& n : out.notes)
+        {
+            if (!inScope(n, false))
+                continue;
             n.pitch = mapPitchToOctaveWindow(n.pitch, tgtOct, e.octaveRange, e.outsideRange);
+        }
     }
 
     // Pitch Range: wrap notes into [pitchMin, pitchMax] by octave folds.
@@ -686,6 +716,8 @@ ResolvedClip resolveClip(const StepClip& clip, const ClipEdit& e,
         const int window = hi - lo + 1;
         for (auto& n : out.notes)
         {
+            if (!inScope(n, false))
+                continue;
             if (window <= 12)
             {
                 // Narrow window: keep pitch class, snap into range.
@@ -708,7 +740,11 @@ ResolvedClip resolveClip(const StepClip& clip, const ClipEdit& e,
 
     // Octave Range remaps chromatically and can pull notes out of scale — re-snap.
     if (e.fitScale && e.root >= 0)
-        refitNotesToScale(out.notes, e.root, e.mode);
+    {
+        for (auto& n : out.notes)
+            if (inScope(n, false))
+                n.pitch = juce::jlimit(0, 127, fitToScale(n.pitch, e.root, e.mode));
+    }
 
     // Note Filter: Mute drops disabled pitch-classes; Fold remaps to nearest kept.
     if (e.hasNoteFilter() && !out.notes.empty())
@@ -718,7 +754,7 @@ ResolvedClip resolveClip(const StepClip& clip, const ClipEdit& e,
             std::vector<RollNote> kept;
             kept.reserve(out.notes.size());
             for (const auto& n : out.notes)
-                if (e.isNoteFilterEnabled(n.pitch))
+                if (!inScope(n, false) || e.isNoteFilterEnabled(n.pitch))
                     kept.push_back(n);
             out.notes = std::move(kept);
         }
@@ -726,6 +762,8 @@ ResolvedClip resolveClip(const StepClip& clip, const ClipEdit& e,
         {
             for (auto& n : out.notes)
             {
+                if (!inScope(n, false))
+                    continue;
                 const int next = foldToEnabledPitchClasses(n.pitch, e.noteFilterMask, e.root, e.mode);
                 if (next != n.pitch)
                 {
@@ -736,7 +774,6 @@ ResolvedClip resolveClip(const StepClip& clip, const ClipEdit& e,
         }
     }
 
-    const auto removed = effectiveRemovedBars(clip, e);
     int bars = clip.bars;
     if (!removed.empty())
     {
@@ -748,9 +785,7 @@ ResolvedClip resolveClip(const StepClip& clip, const ClipEdit& e,
 
     auto formTargets = [&](const RollNote& n) -> bool
     {
-        if (!e.selectedNotesOnly || selectedNoteIds == nullptr || selectedNoteIds->empty())
-            return true;
-        return selectedNoteIds->count(n.id) > 0;
+        return inScope(n, true);
     };
 
     // Invert: mirror pitches around the midpoint of the (targeted) range.
@@ -781,10 +816,13 @@ ResolvedClip resolveClip(const StepClip& clip, const ClipEdit& e,
     if (e.reverse && !out.notes.empty())
     {
         const double total = (double) out.bars * (double) kStepsPerBar;
+        const bool looped = effective.loopEndStep < 1.0e11;
+        const double spanA = looped ? effective.loopStartStep : 0.0;
+        const double spanB = looped ? effective.loopEndStep : total;
         for (auto& n : out.notes)
         {
             if (!formTargets(n)) continue;
-            n.start = juce::jmax(0.0, total - n.start - n.len);
+            n.start = juce::jmax(0.0, (spanA + spanB) - n.start - n.len);
             n.moved = true;
         }
     }

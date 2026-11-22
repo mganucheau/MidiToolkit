@@ -70,7 +70,7 @@ private:
     double playheadStep = 0.0;
     bool playing = false;
     double timeStretch = 1.0;
-    static constexpr float kGutterW = 0.0f; // Levels preview: no key gutter
+    static constexpr float kGutterW = 36.0f; // Key gutter, same language as the piano roll
 };
 
 // Cupertino editor: clip header · toolbar · roll · velocity lane.
@@ -113,6 +113,8 @@ public:
     void setScalePlacement(ScalePlacement placement);
     bool hasSelection() const { return !selection.empty(); }
     const std::set<int>& selectedNoteIds() const { return selection; }
+    double loopStart() const { return loopStartStep; }
+    double loopEnd() const { return loopEndStep; }
     /** Current px-per-semitone (accounts for folded / scale-filtered rows). */
     float currentRowHeight() const { return effRowH(); }
     void deleteSelectedNotes();   // non-destructive (edit.deleted)
@@ -124,6 +126,8 @@ public:
     std::function<void()> onTrimRequested;
     /** Loop region in unstretched steps [start, end); end exclusive. */
     std::function<void(double startStep, double endStep)> onLoopChanged;
+    /** Fired when the highlighted notes change, so toolkit edits can retarget. */
+    std::function<void()> onSelectionChanged;
     /** Fired when the user clicks into the piano roll (sticky key-nav). */
     std::function<void()> onActivated;
 
@@ -228,6 +232,8 @@ private:
     // ── model → view ──
     void rebuildResolved();
     void applyEdit(std::function<void(ClipEdit&)> mutate);
+    NoteProcessScope processScope() const;
+    void notifySelectionChanged();
     void refreshControls();
     void updateRollSize();
     void scrollToContent();

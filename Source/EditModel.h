@@ -157,8 +157,34 @@ int  noteNameIndex(const juce::String& name);   // "C"..."B" -> 0..11, else -1
     Searches ±6 semitones; on distance ties the lower candidate wins. */
 int fitToScale(int midi, int rootPc, Mode mode);
 
-/** Re-snap every note into scale(root, mode). No-op when rootPc < 0. */
-void refitNotesToScale(std::vector<RollNote>& notes, int rootPc, Mode mode);
+/** Which notes a toolkit edit is allowed to change.
+    Default is the whole clip. A loop is [start, end) on note start, and a
+    non-empty selection further limits the edit to those ids. */
+struct NoteProcessScope
+{
+    double loopStartStep = -1.0e12;
+    double loopEndStep = 1.0e12;
+    const std::set<int>* selectedIds = nullptr;
+
+    bool includes(const RollNote& n) const
+    {
+        if (n.start < loopStartStep - 1.0e-4 || n.start >= loopEndStep - 1.0e-4)
+            return false;
+        if (selectedIds != nullptr && !selectedIds->empty() && selectedIds->count(n.id) == 0)
+            return false;
+        return true;
+    }
+
+    bool restricts() const
+    {
+        return loopStartStep > -1.0e11 || loopEndStep < 1.0e11
+            || (selectedIds != nullptr && !selectedIds->empty());
+    }
+};
+
+/** Re-snap every in-scope note into scale(root, mode). No-op when rootPc < 0. */
+void refitNotesToScale(std::vector<RollNote>& notes, int rootPc, Mode mode,
+                       const NoteProcessScope& scope = {});
 
 /** Note Filter: Mute drops filtered pitch-classes; Fold remaps to nearest kept class. */
 enum class NoteFilterType { Mute = 0, Fold = 1 };
@@ -312,7 +338,8 @@ struct ResolvedClip
     per-note move + octave → map-to-root → fit-to-scale → octave-range
     → pitch-range fold → step move → trim. */
 ResolvedClip resolveClip(const StepClip& clip, const ClipEdit& edit,
-                         const std::set<int>* selectedNoteIds = nullptr);
+                         const std::set<int>* selectedNoteIds = nullptr,
+                         NoteProcessScope scope = {});
 
 struct EdgeBars { int lead = 0; int tail = 0; };
 

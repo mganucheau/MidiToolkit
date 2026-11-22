@@ -224,6 +224,8 @@ private:
     GrooveParams selectedGroove() const;
     /** Note ids for Form → Selected notes only; nullptr when the option is off / empty. */
     const std::set<int>* formSelectionIds() const;
+    /** Loop region, further limited to the current selection when one exists. */
+    NoteProcessScope noteScope() const;
 
     MidiToolkitProcessor& processorRef;
     PatternFlowLookAndFeel lnf;
