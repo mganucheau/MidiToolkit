@@ -205,7 +205,7 @@ private:
     fx::GridAmountBlock delayBlock { "Delay", delayTimePopup, delayAmountSl };
     fx::FlatSliderRow delayFeedbackSl;
 
-    fx::FlatTextButton arpGenerateBtn { "New" };
+    fx::FlatTextButton arpGenerateBtn { "Generate" };
     fx::InlineRow arpGenerateRow;
     fx::FlatPopup arpLengthPopup;
     fx::InlineRow arpLengthRow;
@@ -217,7 +217,7 @@ private:
     fx::InlineRow arpRateRow;
     fx::FlatSliderRow arpDensitySl;
 
-    fx::FlatTextButton melodyGenerateBtn { "New" };
+    fx::FlatTextButton melodyGenerateBtn { "Generate" };
     fx::InlineRow melodyGenerateRow;
     fx::FlatSwitch melodyInputSwitch;
     fx::InlineRow melodyInputRow;
@@ -232,7 +232,7 @@ private:
     fx::FlatPopup melodySpeedPopup;
     fx::InlineRow melodySpeedRow;
 
-    fx::FlatTextButton chordsGenerateBtn { "New" };
+    fx::FlatTextButton chordsGenerateBtn { "Generate" };
     fx::InlineRow chordsGenerateRow;
     fx::FlatSwitch chordsInputSwitch;
     fx::InlineRow chordsInputRow;
@@ -247,7 +247,7 @@ private:
     fx::FlatPopup chordRhythmPopup;
     fx::InlineRow chordRhythmRow;
 
-    fx::FlatTextButton bassGenerateBtn { "New" };
+    fx::FlatTextButton bassGenerateBtn { "Generate" };
     fx::InlineRow bassGenerateRow;
     fx::FlatSwitch bassInputSwitch;
     fx::InlineRow bassInputRow;
@@ -258,7 +258,7 @@ private:
     fx::FlatPopup bassMotionPopup;
     fx::InlineRow bassMotionRow;
 
-    fx::FlatTextButton drumGenerateBtn { "New" };
+    fx::FlatTextButton drumGenerateBtn { "Generate" };
     fx::InlineRow drumGenerateRow;
     fx::FlatPopup drumStylePopup;
     fx::InlineRow drumStyleRow;

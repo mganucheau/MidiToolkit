@@ -763,7 +763,7 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(BrowserToolbar)
 };
 
-/** Floating filter menu (Levels FilterPopover: 320 × radius-md, Reset + Apply footer). */
+/** Floating filter menu (header: Refresh + Apply; footer: Save as default). */
 class FilterPopover : public juce::Component
 {
 public:
@@ -782,17 +782,19 @@ public:
 
     std::function<void()> onDone;   // dismiss without applying
     std::function<void()> onApply;  // commit draft filters
-    std::function<void()> onSaveSearch; // retained for editor wiring; footer no longer hosts Save
-    std::function<void()> onReset;
+    std::function<void()> onSaveSearch; // retained for editor wiring
+    std::function<void()> onReset;  // Refresh — rescan / clear filters
+    std::function<void()> onSaveDefault; // footer: write criteria onto current library folder
 
 private:
     juce::Component* panel = nullptr;
     std::function<int()> panelHeight;
     juce::Viewport bodyViewport;
     juce::String countText;
-    juce::Rectangle<int> resetBounds, applyBounds;
-    bool resetHover = false;
+    juce::Rectangle<int> refreshBounds, applyBounds, saveDefaultBounds;
+    bool refreshHover = false;
     bool applyHover = false;
+    bool saveDefaultHover = false;
     int maxBodyH = 0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(FilterPopover)

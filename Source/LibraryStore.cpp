@@ -139,27 +139,34 @@ SharedUiSession LibraryStore::uiSessionFromXml(const juce::XmlElement& el)
     s.columnVisibility.notes = el.getIntAttribute("colNotes", 0) != 0;
     s.tweakDensity = juce::jlimit(0, 1, el.getIntAttribute("tweakDensity", 1));
     s.tweakSize = juce::jlimit(0, 2, el.getIntAttribute("tweakSize", 1));
-    s.tweakTextScalePct = juce::jlimit(60, 150, el.getIntAttribute("tweakTextScalePct", 100));
+    {
+        // v2: 100% == former 115% size. Remap legacy absolute percents once.
+        const int raw = el.getIntAttribute("tweakTextScalePct", 100);
+        const int pct = el.getIntAttribute("tweakTextScaleV2", 0) != 0
+            ? raw
+            : juce::roundToInt((double) raw * 100.0 / 115.0);
+        s.tweakTextScalePct = juce::jlimit(60, 150, pct);
+    }
     const int themeCatalog = el.getIntAttribute("themeCatalog", 0);
     if (themeCatalog >= 2)
     {
         s.tweakAppearance = juce::jlimit(0, 2, el.getIntAttribute("tweakAppearance", 0));
-        s.tweakLightTheme = juce::jlimit(0, kNumThemesPerFamily - 1, el.getIntAttribute("tweakLightTheme", kClayTheme));
-        s.tweakDarkTheme = juce::jlimit(0, kNumThemesPerFamily - 1, el.getIntAttribute("tweakDarkTheme", kClayTheme));
+        s.tweakLightTheme = juce::jlimit(0, kNumThemesPerFamily - 1, el.getIntAttribute("tweakLightTheme", kCursorTheme));
+        s.tweakDarkTheme = juce::jlimit(0, kNumThemesPerFamily - 1, el.getIntAttribute("tweakDarkTheme", kCursorTheme));
     }
     else if (themeCatalog == 1)
     {
         // Legacy catalog v1: absolute 0–9 light / 10–19 dark.
         const int named = juce::jlimit(0, 19, el.getIntAttribute("tweakAppearance", 5));
         s.tweakAppearance = named >= 10 ? (int) Appearance::Dark : (int) Appearance::Light;
-        s.tweakLightTheme = named < 10 ? named : kClayTheme;
-        s.tweakDarkTheme = named >= 10 ? named - 10 : kClayTheme;
+        s.tweakLightTheme = named < 10 ? named : kCursorTheme;
+        s.tweakDarkTheme = named >= 10 ? named - 10 : kCursorTheme;
     }
     else
     {
         s.tweakAppearance = migrateThemeIndex(el.getIntAttribute("tweakAppearance", 0), false);
-        s.tweakLightTheme = kClayTheme;
-        s.tweakDarkTheme = kClayTheme;
+        s.tweakLightTheme = kCursorTheme;
+        s.tweakDarkTheme = kCursorTheme;
     }
     s.tweakShowTooltips = el.getIntAttribute("tweakShowTooltips", 1) != 0 ? 1 : 0;
     s.tweakFontFamily = juce::jlimit(0, (int) FontFamily::Count - 1, el.getIntAttribute("tweakFontFamily", 0));
@@ -245,6 +252,7 @@ void LibraryStore::uiSessionToXml(juce::XmlElement& el, const SharedUiSession& s
     el.setAttribute("tweakDensity", s.tweakDensity);
     el.setAttribute("tweakSize", s.tweakSize);
     el.setAttribute("tweakTextScalePct", s.tweakTextScalePct);
+    el.setAttribute("tweakTextScaleV2", 1);
     el.setAttribute("themeCatalog", 2); // Appearance mode + light/dark theme pairs
     el.setAttribute("tweakAppearance", s.tweakAppearance);
     el.setAttribute("tweakLightTheme", s.tweakLightTheme);

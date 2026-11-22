@@ -534,7 +534,7 @@ void IconBtn::paintButton(juce::Graphics& g, bool over, bool down)
     // Levels icon button: no chrome at rest (glyph @ 64 %), 7 % fill on hover,
     // active = secondary border + 12 % tint with a secondary glyph.
     juce::ignoreUnused(ghost);
-    const float face = ds::radius::sm;
+    const float face = (chipRadiusMd && hasChipChrome()) ? ds::radius::md : ds::radius::sm;
     const juce::Colour litCol = activeTint.isTransparent() ? ds::acc() : activeTint;
     if (groupLeft || groupRight)
     {

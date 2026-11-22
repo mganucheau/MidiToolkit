@@ -95,7 +95,8 @@ bool clipMatchesFilter(const StepClip& clip, const BrowserSearch& s)
 int visibleWorkspaceWidth(bool sidebarCollapsed, bool editorOpen, bool effectsOpen, int browserW,
                           bool generatorPane = false)
 {
-    const int rollW = editorOpen ? metrics::openRollMaxWidth() : 0;
+    // One editor pane. openRollMaxWidth() is twice that and doubled the default roll.
+    const int rollW = editorOpen ? metrics::editorPaneWidth() : 0;
     if (generatorPane)
     {
         return metrics::effectsPaneWidth()
@@ -706,7 +707,27 @@ MidiToolkitEditor::MidiToolkitEditor(MidiToolkitProcessor& p)
     };
     filterPopover.onReset = [this]
     {
+        // Refresh: clear draft filters and rescan the open folder.
         sidebar.resetFilters();
+        if (sidebar.onRefreshFolder)
+            sidebar.onRefreshFolder();
+        refreshBrowserBar();
+    };
+    filterPopover.onSaveDefault = [this]
+    {
+        // Write the applied criteria onto the current library folder.
+        sidebar.applyFilterDraft();
+        const auto path = rootDir.isDirectory() ? rootDir.getFullPathName()
+                                                : processorRef.lastBrowserDir;
+        if (path.isNotEmpty())
+        {
+            SavedLibraryFolder folder;
+            folder.path = path;
+            folder.scanSubdirs = sidebar.getIncludeSubdirs();
+            folder.filter = sidebar.getCriteria();
+            folder.filter.subdirs = folder.scanSubdirs;
+            processorRef.saveLibraryFolder(folder, true);
+        }
         refreshBrowserBar();
     };
     filterPopover.onSaveSearch = [this] { if (sidebar.onSaveCurrentSearch) sidebar.onSaveCurrentSearch(); };
@@ -3617,65 +3638,28 @@ void MidiToolkitEditor::updateMiniPreview()
 
 MidiToolkitEditor::PreviewHeader::PreviewHeader(MidiToolkitEditor& o) : owner(o)
 {
-    btnVel.setTooltip("Show velocity");
-    btnVel.onClick = [this]
-    {
-        owner.showPreviewVelocity = !owner.showPreviewVelocity;
-        owner.miniRoll.setShowVelocity(owner.showPreviewVelocity);
-        refresh();
-        owner.layoutContent();
-    };
-    addAndMakeVisible(btnVel);
+    btnVel.setVisible(false);
 }
 
 void MidiToolkitEditor::PreviewHeader::refresh()
 {
-    juce::String n, m;
-    if (const auto* e = owner.fileList.entryAt(owner.fileList.getSelectedIndex()); e != nullptr && !e->isDirectory)
+    // Title is always just "Preview" — no clip meta.
+    if (!name.isEmpty() || !meta.isEmpty())
     {
-        n = e->name;
-        if (e->rootName.isNotEmpty()) m = e->rootName;
-        if (e->noteCount > 0)
-            m += (m.isNotEmpty() ? juce::String::fromUTF8(" \xc2\xb7 ") : juce::String())
-                 + juce::String(e->noteCount) + (e->noteCount == 1 ? " note" : " notes");
-        else if (e->bars > 0)
-            m += (m.isNotEmpty() ? juce::String::fromUTF8(" \xc2\xb7 ") : juce::String())
-                 + juce::String(e->bars) + (e->bars == 1 ? " bar" : " bars");
-    }
-    const bool vel = owner.showPreviewVelocity;
-    if (n != name || m != meta || btnVel.active != vel)
-    {
-        name = n;
-        meta = m;
-        btnVel.active = vel;
+        name.clear();
+        meta.clear();
         repaint();
-        for (auto* c : getChildren()) c->repaint();
     }
 }
 
 void MidiToolkitEditor::PreviewHeader::resized()
 {
-    // Velocity chip only when the preview body is open.
-    const bool open = owner.processorRef.previewOpen && !owner.processorRef.editorOpen;
-    auto r = getLocalBounds().reduced(metrics::scaled(8), 0).withTrimmedBottom(1);
-    const int h = metrics::scaled(18);
-    btnVel.setVisible(open);
-    if (open)
-    {
-        const int w = btnVel.idealWidth();
-        btnVel.setBounds(r.removeFromRight(w).withSizeKeepingCentre(w, h));
-    }
-    else
-    {
-        btnVel.setBounds({});
-    }
+    btnVel.setVisible(false);
+    btnVel.setBounds({});
 }
 
-void MidiToolkitEditor::PreviewHeader::mouseDown(const juce::MouseEvent& e)
+void MidiToolkitEditor::PreviewHeader::mouseDown(const juce::MouseEvent&)
 {
-    // Click anywhere on the strip (except chips) folds like Velocity.
-    if (btnVel.isVisible() && btnVel.getBounds().contains(e.getPosition()))
-        return;
     owner.processorRef.previewOpen = !owner.processorRef.previewOpen;
     owner.applyLayoutState();
     owner.syncPassthroughWindowHeight();
@@ -3683,7 +3667,7 @@ void MidiToolkitEditor::PreviewHeader::mouseDown(const juce::MouseEvent& e)
 
 void MidiToolkitEditor::PreviewHeader::paint(juce::Graphics& g)
 {
-    // Velocity-style fold strip: chevron + Preview (+ clip meta when open).
+    // Fold strip: chevron + Preview only.
     g.fillAll(ds::surface100());
     g.setColour(ds::line());
     g.fillRect(getLocalBounds().removeFromTop(1));
@@ -3696,24 +3680,7 @@ void MidiToolkitEditor::PreviewHeader::paint(juce::Graphics& g)
 
     g.setColour(contrastInkOn(ds::surface100()));
     g.setFont(uiFontFixed(11.0f, false));
-    const juce::String title = open && name.isNotEmpty()
-                                   ? ("Preview  ·  " + name)
-                                   : juce::String("Preview");
-    auto titleR = header;
-    if (open && btnVel.isVisible())
-        titleR.setRight(btnVel.getX() - 6);
-    g.drawText(title, titleR, juce::Justification::centredLeft, true);
-
-    if (open && meta.isNotEmpty())
-    {
-        g.setColour(ds::inkMuted());
-        g.setFont(monoFontFixed(11.0f));
-        auto metaR = titleR;
-        const int titleW = (int) std::ceil(
-            juce::GlyphArrangement::getStringWidth(uiFontFixed(11.0f, false), title)) + 8;
-        metaR.removeFromLeft(titleW);
-        g.drawText(meta, metaR, juce::Justification::centredLeft, true);
-    }
+    g.drawText("Preview", header, juce::Justification::centredLeft, true);
 }
 
 // ── layout ───────────────────────────────────────────────────────────────────
@@ -3884,7 +3851,7 @@ int MidiToolkitEditor::passthroughWindowWidth() const
     if (processorRef.passthrough && processorRef.effectsOpen && !recording)
         return metrics::effectsPaneWidth();
 
-    const int rollW = processorRef.editorOpen ? metrics::openRollMaxWidth() : 0;
+    const int rollW = processorRef.editorOpen ? metrics::editorPaneWidth() : 0;
     if (leftPaneTab == 1)
     {
         return metrics::effectsPaneWidth()
@@ -3916,18 +3883,21 @@ MidiToolkitEditor::LeftPaneTabs::LeftPaneTabs()
     addAndMakeVisible(tabToggle);
 
     prep(btnSearch);
+    btnSearch.chipRadiusMd = true;
     btnSearch.setComponentID("btnBrowserSearch");
     btnSearch.setTooltip("Search");
     btnSearch.onClick = [this] { if (onToggleSearch) onToggleSearch(); };
     addAndMakeVisible(btnSearch);
 
     prep(btnFilters);
+    btnFilters.chipRadiusMd = true;
     btnFilters.setComponentID("btnBrowserFilters");
     btnFilters.setTooltip("Filters");
     btnFilters.onClick = [this] { if (onToggleFilters) onToggleFilters(); };
     addAndMakeVisible(btnFilters);
 
     prep(btnGrid);
+    btnGrid.chipRadiusMd = true;
     btnGrid.setComponentID("btnGridView");
     btnGrid.caption = "Grid";
     btnGrid.setTooltip("Grid: files as clips in columns by kind");
@@ -3989,11 +3959,7 @@ void MidiToolkitEditor::LeftPaneTabs::resized()
         row.removeFromRight(gap);
     };
 
-    if (btnGrid.isVisible())
-        placeRight(btnGrid, btnGrid.captionWidth());
-    else
-        btnGrid.setBounds({});
-
+    // Right cluster order (right → left): Filter, Search, Grid.
     if (btnFilters.isVisible())
         placeRight(btnFilters, toggleH);
     else
@@ -4003,6 +3969,11 @@ void MidiToolkitEditor::LeftPaneTabs::resized()
         placeRight(btnSearch, toggleH);
     else
         btnSearch.setBounds({});
+
+    if (btnGrid.isVisible())
+        placeRight(btnGrid, btnGrid.captionWidth());
+    else
+        btnGrid.setBounds({});
 }
 
 void MidiToolkitEditor::LeftPaneTabs::paint(juce::Graphics& g)
@@ -4028,8 +3999,10 @@ void MidiToolkitEditor::syncPassthroughWindowHeight()
     if (getHeight() <= 0)
         return;
 
-    // Only snap height for passthrough / fold chrome — never grow for note content
-    // (generate / Fit zoom the roll inside the current window instead).
+    // Only snap height for passthrough / generator fold chrome. Browser and the
+    // piano roll keep the height the host already gave us. Shrinking the editor
+    // inside a taller window pins the view to the bottom and leaves a gap under
+    // the titlebar.
     const bool pass = processorRef.passthrough;
     const bool generator = leftPaneTab == 1;
     if (!pass && !generator)
@@ -4045,7 +4018,6 @@ void MidiToolkitEditor::syncPassthroughWindowHeight()
         display = displays.getPrimaryDisplay();
     const int screenCap = display != nullptr ? juce::jmax(minH, display->userArea.getHeight() - 48)
                                              : juce::jmax(minH, 1200);
-    // Cap to screen; do not force growth beyond the current height unless folding chrome.
     const int maxH = screenCap;
     const int targetH = juce::jlimit(minH, maxH, contentH);
 
@@ -4060,7 +4032,7 @@ void MidiToolkitEditor::syncPassthroughWindowHeight()
     }
     else if (generator && std::abs(getHeight() - targetH) > 1)
     {
-        // Generator fold chrome only — keep height when the user already stretched taller.
+        // Grow to the fold stack. A window the user already stretched stays tall.
         if (getHeight() < targetH || userPassthroughH <= 0)
             setSize(getWidth(), targetH);
     }
@@ -4071,7 +4043,7 @@ void MidiToolkitEditor::updateWindowLimits()
     const bool pass = processorRef.passthrough;
     const bool rec = recording;
     const int browserW = browserContentWidth();
-    const int recordW = metrics::openRollMaxWidth()
+    const int recordW = metrics::editorPaneWidth()
                       + (processorRef.effectsOpen ? metrics::effectsPaneWidth() : 0);
     int maxW = pass ? passthroughWindowWidth()
                     : rec ? recordW
@@ -4104,7 +4076,8 @@ void MidiToolkitEditor::updateWindowLimits()
         display = displays.getPrimaryDisplay();
     const int screenCap = display != nullptr ? juce::jmax(minH, display->userArea.getHeight() - 48)
                                              : juce::jmax(minH, 1200);
-    // Allow free vertical resize up to the screen — never auto-grow for clip content.
+    // Free vertical resize up to the screen. A content-height cap left the host
+    // window tall and anchored this view to the bottom.
     const int maxH = screenCap;
     setResizeLimits(minW, minH, maxW, maxH);
     if (getWidth() <= 0)
@@ -4471,7 +4444,7 @@ void MidiToolkitEditor::layoutContent()
         generatorBody.setSize(juce::jmax(1, generatorViewport.getMaximumVisibleWidth()),
                               juce::jmax(1, generatorBody.getHeight()));
         effectsInspector.layoutExternalGenerators();
-        // Do not snap window height here — generate/Fit must zoom the roll, not grow the window.
+        syncPassthroughWindowHeight();
     }
     else
     {
@@ -4481,8 +4454,10 @@ void MidiToolkitEditor::layoutContent()
         if (browserSearchOpen)
         {
             const int searchH = metrics::scaled(28);
-            auto searchRow = browserCol.removeFromTop(searchH + metrics::scaled(8));
-            searchComp.setBounds(searchRow.reduced(metrics::scaled(12), metrics::scaled(4)));
+            auto searchRow = browserCol.removeFromTop(searchH + metrics::scaled(8))
+                                 .reduced(metrics::scaled(12), 0);
+            // Vertically centre the field in the row (same pad above and below).
+            searchComp.setBounds(searchRow.withSizeKeepingCentre(searchRow.getWidth(), searchH));
             searchComp.setVisible(true);
             searchComp.toFront(false);
         }
@@ -4603,24 +4578,29 @@ public:
     std::function<void()> onClose;
     std::function<void()> onSaveDefault;
 
-    static constexpr int kTextPctChoices[] = { 70, 85, 100, 115, 130 };
+    // Remapped so 100% == former 115% size (see textIconScale).
+    static constexpr int kTextPctChoices[] = { 60, 75, 85, 100, 115 };
+    static int textPctForUiSize(int sizeIdx)
+    {
+        // Small / Medium / Large → matching text-size step.
+        static constexpr int map[] = { 75, 100, 115 };
+        return map[juce::jlimit(0, 2, sizeIdx)];
+    }
     static constexpr int kPanelW = 250;
     static constexpr int kHeaderH = 44;
     static constexpr int kRowH = ds::region::sidebarRowH;
     static constexpr int kRowGap = 0;
     static constexpr int kPadX = 16;
-    static constexpr int kInfoFoldH = 28;
 
     static bool narrowWidth(int) { return true; } // always single column
 
-    static int contentHeight(bool infoOpen)
+    static int contentHeight(bool aboutTab)
     {
-        // Appearance Theme Primary Secondary Contrast UI Text Font Tooltips Alt NoteLabels + Info fold (+ body)
+        if (aboutTab)
+            return kHeaderH + 8 + 22 + 18 + 8 + 28 + 12; // version + stamp + save default
+        // Appearance Theme Primary Secondary Contrast UI Text Font Tooltips Alt NoteLabels
         const int rows = 11;
-        int h = kHeaderH + 8 + rows * (kRowH + kRowGap) + kInfoFoldH + 12;
-        if (infoOpen)
-            h += 56;
-        return h;
+        return kHeaderH + 8 + rows * (kRowH + kRowGap) + 12;
     }
 
     /** Colour swatch that opens a ColourSelector callout. */
@@ -4727,7 +4707,21 @@ public:
             tweaks().customSecondary.store(0);
             refreshColourSwatches();
         });
-        wire(sizePopup, [](int i) { tweaks().size.store(i); });
+        wire(sizePopup, [this](int i)
+        {
+            tweaks().size.store(juce::jlimit(0, 2, i));
+            // Scaling the app size also updates the Text size dropdown.
+            const int pct = textPctForUiSize(i);
+            tweaks().textScalePct.store(pct);
+            int pctIdx = 3;
+            int best = 1000;
+            for (int j = 0; j < (int) (sizeof(kTextPctChoices) / sizeof(kTextPctChoices[0])); ++j)
+            {
+                const int d = std::abs(kTextPctChoices[j] - pct);
+                if (d < best) { best = d; pctIdx = j; }
+            }
+            textPopup.setItems({ "60%", "75%", "85%", "100%", "115%" }, pctIdx);
+        });
         wire(textPopup, [](int i)
         {
             const int n = (int) (sizeof(kTextPctChoices) / sizeof(kTextPctChoices[0]));
@@ -4789,7 +4783,7 @@ public:
         saveDefaultBtn.onClick = [this] { if (onSaveDefault) onSaveDefault(); };
         addAndMakeVisible(saveDefaultBtn);
 
-        setSize(kPanelW, contentHeight(infoOpen));
+        setSize(kPanelW, contentHeight(aboutTab));
     }
 
     void refreshThemePopup()
@@ -4817,28 +4811,73 @@ public:
         secondarySwatch.setColour(sec);
     }
 
-    static int contentHeightForTab(int, bool = false) { return contentHeight(false); }
-    int currentTab() const { return 0; }
+    void setAboutTab(bool on)
+    {
+        if (aboutTab == on) return;
+        aboutTab = on;
+        setSize(getWidth(), contentHeight(aboutTab));
+        resized();
+        repaint();
+        if (auto* parent = getParentComponent())
+            parent->resized();
+    }
 
     void paint(juce::Graphics& g) override
     {
-        const auto& t = inspectorTokens();
         auto bounds = getLocalBounds().toFloat();
         g.setColour(ds::surface100());
         g.fillRoundedRectangle(bounds, 10.0f);
-        g.setColour(t.controlHairline);
+        g.setColour(ds::edge());
         g.drawRoundedRectangle(bounds.reduced(0.5f), 10.0f, 1.0f);
 
+        // Header tabs: SETTINGS | ABOUT — keep the existing 11pt semibold style.
         auto header = getLocalBounds().removeFromTop(kHeaderH).reduced(kPadX, 0);
         header.removeFromRight(28);
-        g.setFont(uiFont(11.0f, true));
-        g.setColour(t.valueText);
-        g.drawText("SETTINGS", header, juce::Justification::centredLeft, false);
+        const auto tabFont = uiFont(11.0f, true);
+        g.setFont(tabFont);
+        const juce::String settingsWord = "SETTINGS";
+        const juce::String aboutWord = "ABOUT";
+        const int settingsW = (int) std::ceil(juce::GlyphArrangement::getStringWidth(tabFont, settingsWord)) + 2;
+        const int aboutW = (int) std::ceil(juce::GlyphArrangement::getStringWidth(tabFont, aboutWord)) + 2;
+        settingsTabBounds = header.removeFromLeft(settingsW);
+        header.removeFromLeft(14);
+        aboutTabBounds = header.removeFromLeft(aboutW);
 
-        g.setColour(t.divider);
+        g.setColour(aboutTab ? ds::inkMuted() : ds::ink());
+        g.drawText(settingsWord, settingsTabBounds, juce::Justification::centredLeft, false);
+        if (!aboutTab)
+        {
+            g.setColour(ds::edge());
+            g.fillRect(settingsTabBounds.getX(), settingsTabBounds.getBottom() - 4,
+                       settingsTabBounds.getWidth(), 1);
+        }
+        g.setColour(aboutTab ? ds::ink() : ds::inkMuted());
+        g.drawText(aboutWord, aboutTabBounds, juce::Justification::centredLeft, false);
+        if (aboutTab)
+        {
+            g.setColour(ds::edge());
+            g.fillRect(aboutTabBounds.getX(), aboutTabBounds.getBottom() - 4,
+                       aboutTabBounds.getWidth(), 1);
+        }
+
+        g.setColour(ds::line());
         g.fillRect(kPadX, kHeaderH, getWidth() - kPadX * 2, 1);
 
         auto body = getLocalBounds().withTrimmedTop(kHeaderH + 8).reduced(kPadX, 6);
+        if (aboutTab)
+        {
+            g.setFont(uiFontFixed(14.0f, true));
+            g.setColour(ds::ink());
+            g.drawText(build_info::version(), body.removeFromTop(22),
+                       juce::Justification::centredLeft, true);
+            g.setFont(uiFontFixed(11.0f, false));
+            g.setColour(ds::inkMuted());
+            g.drawText(juce::String(build_info::buildTime()) + "  ·  " + build_info::gitHash(),
+                       body.removeFromTop(18), juce::Justification::centredLeft, true);
+            return;
+        }
+
+        // Match filter-window row labels (sidebarLabelStyle / fixed 12pt).
         const char* labels[] = {
             "Appearance", "Theme", "Primary colour", "Secondary colour", "Contrast",
             "UI size", "Text size", "Font", "Show tooltips", "Alternate rows", "Note labels"
@@ -4846,56 +4885,19 @@ public:
         for (auto* label : labels)
         {
             auto row = body.removeFromTop(kRowH);
-            g.setColour(colours::text());
-            g.setFont(uiFont(12.0f, false));
+            g.setColour(ds::ink());
+            g.setFont(uiFontFixed(12.0f, false));
             g.drawText(label, row, juce::Justification::centredLeft, false);
             body.removeFromTop(kRowGap);
-        }
-
-        // Folded About section — keep a stable hit rect (paint must not shrink it).
-        infoFoldBounds = body.removeFromTop(kInfoFoldH);
-        auto foldDraw = infoFoldBounds;
-        auto caret = foldDraw.removeFromLeft(12).toFloat().withSizeKeepingCentre(9.0f, 9.0f);
-        fx::drawStrokedChevron(g, caret, ds::inkMuted(), infoOpen);
-        foldDraw.removeFromLeft(4);
-        g.setColour(colours::text());
-        g.setFont(uiFont(12.0f, false));
-        const juce::String infoWord = "About";
-        const float infoW = juce::GlyphArrangement::getStringWidth(g.getCurrentFont(), infoWord);
-        auto wordR = foldDraw.removeFromLeft((int) std::ceil(infoW) + 2);
-        g.drawText(infoWord, wordR, juce::Justification::centredLeft, false);
-        g.setColour(ds::edge());
-        g.fillRect(wordR.getX(), wordR.getBottom() - 2, wordR.getWidth(), 1);
-
-        if (infoOpen)
-        {
-            body.removeFromTop(6);
-            g.setFont(uiFont(14.0f, true));
-            g.setColour(colours::text());
-            g.drawText(build_info::version(), body.removeFromTop(22),
-                       juce::Justification::centredLeft, true);
-            g.setFont(uiFont(11.0f, false));
-            g.setColour(colours::text2());
-            g.drawText(juce::String(build_info::buildTime()) + "  ·  " + build_info::gitHash(),
-                       body.removeFromTop(18), juce::Justification::centredLeft, true);
-            body.removeFromTop(8);
-            const int saveW = saveDefaultBtn.captionWidth();
-            // save button laid out in resized()
-            juce::ignoreUnused(saveW);
         }
     }
 
     void mouseDown(const juce::MouseEvent& e) override
     {
-        if (infoFoldBounds.expanded(0, 4).contains(e.getPosition()))
-        {
-            infoOpen = !infoOpen;
-            setSize(getWidth(), contentHeight(infoOpen));
-            resized();
-            repaint();
-            if (auto* parent = getParentComponent())
-                parent->resized();
-        }
+        if (settingsTabBounds.expanded(4, 6).contains(e.getPosition()))
+            setAboutTab(false);
+        else if (aboutTabBounds.expanded(4, 6).contains(e.getPosition()))
+            setAboutTab(true);
     }
 
     void resized() override
@@ -4905,11 +4907,37 @@ public:
                                .withSizeKeepingCentre(iconBtn, iconBtn));
 
         auto body = getLocalBounds().withTrimmedTop(kHeaderH + 8).reduced(kPadX, 6);
-        const int ctrlH = metrics::scaled(26);
+        const int ctrlH = metrics::scaled(22);
+        const bool showSettings = !aboutTab;
+
+        appearancePopup.setVisible(showSettings);
+        themePopup.setVisible(showSettings);
+        sizePopup.setVisible(showSettings);
+        textPopup.setVisible(showSettings);
+        fontPopup.setVisible(showSettings);
+        tooltipsSwitch.setVisible(showSettings);
+        alternateRowsSwitch.setVisible(showSettings);
+        noteLabelsSwitch.setVisible(showSettings);
+        contrastSlider.setVisible(showSettings);
+        primarySwatch.setVisible(showSettings);
+        secondarySwatch.setVisible(showSettings);
+
+        if (aboutTab)
+        {
+            body.removeFromTop(22 + 18 + 8);
+            const int saveW = saveDefaultBtn.captionWidth();
+            saveDefaultBtn.setVisible(true);
+            saveDefaultBtn.setBounds(body.removeFromTop(ctrlH).removeFromLeft(saveW));
+            return;
+        }
+
+        saveDefaultBtn.setVisible(false);
+        saveDefaultBtn.setBounds({});
+
         auto placePopup = [&](fx::FlatPopup& p)
         {
             auto row = body.removeFromTop(kRowH);
-            const int w = juce::jmin(juce::jmax(p.idealWidth(), 120), row.getWidth() / 2);
+            const int w = juce::jmin(juce::jmax(p.idealWidth(), 110), row.getWidth() / 2);
             p.setBounds(row.removeFromRight(w).withSizeKeepingCentre(w, ctrlH));
             body.removeFromTop(kRowGap);
         };
@@ -4933,7 +4961,7 @@ public:
         placeSwatch(secondarySwatch);
         {
             auto row = body.removeFromTop(kRowH);
-            const int w = juce::jmin(180, row.getWidth() / 2);
+            const int w = juce::jmin(160, row.getWidth() / 2);
             contrastSlider.setBounds(row.removeFromRight(w).withSizeKeepingCentre(w, ctrlH + 4));
             body.removeFromTop(kRowGap);
         }
@@ -4943,25 +4971,11 @@ public:
         placeSwitch(tooltipsSwitch);
         placeSwitch(alternateRowsSwitch);
         placeSwitch(noteLabelsSwitch);
-
-        body.removeFromTop(kInfoFoldH); // painted fold header
-        if (infoOpen)
-        {
-            body.removeFromTop(6 + 22 + 18 + 8);
-            const int saveW = saveDefaultBtn.captionWidth();
-            saveDefaultBtn.setVisible(true);
-            saveDefaultBtn.setBounds(body.removeFromTop(ctrlH).removeFromLeft(saveW));
-        }
-        else
-        {
-            saveDefaultBtn.setVisible(false);
-            saveDefaultBtn.setBounds({});
-        }
     }
 
 private:
-    bool infoOpen = false;
-    juce::Rectangle<int> infoFoldBounds;
+    bool aboutTab = false;
+    juce::Rectangle<int> settingsTabBounds, aboutTabBounds;
     fx::FlatPopup appearancePopup, themePopup, sizePopup, textPopup, fontPopup;
     fx::FlatSwitch tooltipsSwitch;
     fx::FlatSwitch alternateRowsSwitch;

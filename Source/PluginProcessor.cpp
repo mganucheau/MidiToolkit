@@ -1257,22 +1257,22 @@ void MidiToolkitProcessor::setStateInformation(const void* data, int sizeInBytes
                 if (catalog >= 2)
                 {
                     tweaks().appearance.store(juce::jlimit(0, 2, xml->getIntAttribute("tweakAppearance", 0)));
-                    tweaks().lightTheme.store(juce::jlimit(0, kNumThemesPerFamily - 1, xml->getIntAttribute("tweakLightTheme", kClayTheme)));
-                    tweaks().darkTheme.store(juce::jlimit(0, kNumThemesPerFamily - 1, xml->getIntAttribute("tweakDarkTheme", kClayTheme)));
+                    tweaks().lightTheme.store(juce::jlimit(0, kNumThemesPerFamily - 1, xml->getIntAttribute("tweakLightTheme", kCursorTheme)));
+                    tweaks().darkTheme.store(juce::jlimit(0, kNumThemesPerFamily - 1, xml->getIntAttribute("tweakDarkTheme", kCursorTheme)));
                 }
                 else if (catalog == 1)
                 {
                     // Legacy catalog v1: absolute 0–9 light / 10–19 dark.
                     const int named = juce::jlimit(0, 19, xml->getIntAttribute("tweakAppearance", 5));
                     tweaks().appearance.store(named >= 10 ? (int) Appearance::Dark : (int) Appearance::Light);
-                    tweaks().lightTheme.store(named < 10 ? named : kClayTheme);
-                    tweaks().darkTheme.store(named >= 10 ? named - 10 : kClayTheme);
+                    tweaks().lightTheme.store(named < 10 ? named : kCursorTheme);
+                    tweaks().darkTheme.store(named >= 10 ? named - 10 : kCursorTheme);
                 }
                 else
                 {
                     tweaks().appearance.store(migrateThemeIndex(xml->getIntAttribute("tweakAppearance", 0), false));
-                    tweaks().lightTheme.store(kClayTheme);
-                    tweaks().darkTheme.store(kClayTheme);
+                    tweaks().lightTheme.store(kCursorTheme);
+                    tweaks().darkTheme.store(kCursorTheme);
                 }
             }
             tweaks().showTooltips.store(xml->getIntAttribute("tweakShowTooltips", 1) != 0 ? 1 : 0);

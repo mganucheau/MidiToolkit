@@ -231,6 +231,19 @@ const Palette& palette()
             cached.logoNoteHi = cached.acc;
         }
 
+        // Contrast slider: push layered surfaces / ink away from the theme ground.
+        // Skill packs overwrite neutrals after the classic tint path, so re-apply here.
+        if (spec.surface != 0 || spec.text != 0)
+        {
+            const auto ground = cached.bg;
+#define SEP_SKILL(field) cached.field = separate(cached.field, ground)
+            SEP_SKILL(side); SEP_SKILL(rollchrome); SEP_SKILL(hl); SEP_SKILL(selsoft);
+            SEP_SKILL(ctlb); SEP_SKILL(trk); SEP_SKILL(rowalt); SEP_SKILL(laneb);
+            SEP_SKILL(beat); SEP_SKILL(winbrd); SEP_SKILL(hoverWash); SEP_SKILL(well);
+            SEP_SKILL(tx); SEP_SKILL(tx2); SEP_SKILL(tx3); SEP_SKILL(lensFill);
+#undef SEP_SKILL
+        }
+
         cachedTheme = theme;
         cachedContrast = contrast;
         cachedPrimary = customPrim;

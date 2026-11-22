@@ -1121,9 +1121,11 @@ public:
             }
         if (countSummary)
         {
-            if (n <= 0 || n >= labels.size())
+            if (n <= 0)
                 return "Any";
-            return juce::String(n) + " of " + juce::String(labels.size());
+            if (n >= labels.size())
+                return "All";
+            return parts.joinIntoString(", ");
         }
         if (!parts.isEmpty())
             return parts.joinIntoString(", ");
@@ -1788,10 +1790,16 @@ public:
     void resized() override
     {
         auto r = getLocalBounds();
-        // Caps B2: always fixed select width, right-aligned.
-        // Fit control height to the row so switches/pills never clip.
-        const int useW = controlW > 0 ? controlW : kSelectW;
         const int useH = juce::jmin(kControlH, juce::jmax(12, r.getHeight()));
+        if (fillWidth)
+        {
+            // Full-width CTA (Generate) — no row title.
+            control.setBounds(r.withSizeKeepingCentre(r.getWidth(), useH));
+            labelBounds = {};
+            return;
+        }
+        // Caps B2: always fixed select width, right-aligned.
+        const int useW = controlW > 0 ? controlW : kSelectW;
         auto ctrl = r.removeFromRight(useW);
         control.setBounds(ctrl.withSizeKeepingCentre(useW, useH));
         labelBounds = r.withTrimmedRight(8);
@@ -1803,8 +1811,16 @@ public:
         resized();
     }
 
+    void setFillWidth(bool on)
+    {
+        fillWidth = on;
+        resized();
+    }
+
     void paint(juce::Graphics& g) override
     {
+        if (fillWidth || label.isEmpty() || labelBounds.isEmpty())
+            return;
         g.setFont(inspectorFont());
         g.setColour(inspectorTokens().rowLabel);
         g.drawText(label, labelBounds, juce::Justification::centredLeft, true);
@@ -1812,6 +1828,7 @@ public:
 
     juce::Component& control;
     int controlW = 0;
+    bool fillWidth = false;
 
 private:
     juce::String label;
@@ -2235,6 +2252,7 @@ private:
 // ── Section (fold chevron + large title + refresh + lock) ────────────────────
 
 class Section : public juce::Component,
+                public juce::SettableTooltipClient,
                 private juce::Timer
 {
 public:
@@ -2443,6 +2461,12 @@ public:
             headerHover = over;
             lockHover = overLock;
             resetHover = overReset;
+            if (overReset)
+                setTooltip("Reset section");
+            else if (overLock)
+                setTooltip(locked ? "Unlock section" : "Lock section");
+            else
+                setTooltip({});
             repaint();
         }
         setMouseCursor(over ? juce::MouseCursor::PointingHandCursor
@@ -2454,6 +2478,7 @@ public:
         if (headerHover || lockHover || resetHover)
         {
             headerHover = lockHover = resetHover = false;
+            setTooltip({});
             repaint();
         }
         setMouseCursor(juce::MouseCursor::NormalCursor);
@@ -2501,8 +2526,11 @@ public:
                             locked, true, lockHover);
         }
 
-        g.setColour(dragging ? ds::acc() : ds::line());
+        g.setColour(dragging ? ds::acc() : ds::edge());
         g.fillRect(0, getHeight() - 1, getWidth(), 1);
+        // Stronger card outline so section borders read on flat Cursor gray.
+        g.setColour(ds::edge().withAlpha(dragging ? 0.9f : 0.55f));
+        g.drawRect(getLocalBounds().toFloat().reduced(0.5f), 1.0f);
     }
 
     juce::String title;
@@ -2543,8 +2571,8 @@ private:
         dragArmed = true;
     }
 
-    static constexpr int kChromeW = 24;   // icon-button hit target
-    static constexpr int kChromeH = 24;
+    static constexpr int kChromeW = 20;   // icon-button hit target (slightly smaller)
+    static constexpr int kChromeH = 20;
     static constexpr int kChromePadR = 10;
     static constexpr int kChromeGap = 4;
 
@@ -2560,8 +2588,8 @@ private:
         }
         juce::Colour col = on ? ds::acc() : (over ? ds::ink() : ds::inkMuted());
         if (!enabled) col = ds::inkFaint().withMultipliedAlpha(0.6f);
-        // drawIcon spans ~0.72 of its bounds, so 26 px bounds give a ~19 px glyph.
-        drawIcon(g, glyph, bounds.withSizeKeepingCentre(26.0f, 26.0f), col, 1.6f);
+        // Smaller glyph (~14 px) to match the tighter hit target.
+        drawIcon(g, glyph, bounds.withSizeKeepingCentre(20.0f, 20.0f), col, 1.45f);
     }
 
     juce::Rectangle<int> lockBounds() const

@@ -134,7 +134,11 @@ private:
     {
     public:
         std::function<void()> onDismiss;
-        void paint(juce::Graphics&) override {}
+        void paint(juce::Graphics& g) override
+        {
+            g.setColour(juce::Colours::black.withAlpha(0.18f));
+            g.fillAll();
+        }
         void mouseDown(const juce::MouseEvent&) override
         {
             if (onDismiss) onDismiss();

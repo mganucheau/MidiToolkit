@@ -122,6 +122,8 @@ public:
     bool groupRight = false;
     /** Toggle chip: always draws surface fill + edge border (even icon-only); `active` swaps in the accent tint. */
     bool chipChrome = false;
+    /** When true with chipChrome, use radius-md instead of radius-sm. */
+    bool chipRadiusMd = false;
     float iconScale = 1.0f;
     /** When set, the button draws this label beside the icon and grows to fit. */
     juce::String caption;

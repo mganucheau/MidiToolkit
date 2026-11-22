@@ -47,8 +47,8 @@ struct SharedUiSession
     int tweakSize = 1;          // ContentSize::Medium
     int tweakTextScalePct = 100;
     int tweakAppearance = 0;    // Appearance::System (Auto) / Light / Dark
-    int tweakLightTheme = 29;   // Clay (skill pack)
-    int tweakDarkTheme = 29;    // Clay (skill pack, dark twin)
+    int tweakLightTheme = 30;   // Cursor (skill pack)
+    int tweakDarkTheme = 30;    // Cursor (skill pack, dark twin)
     int tweakShowTooltips = 1;
     int tweakFontFamily = 0;    // FontFamily::Inter
     int tweakSurfaceStyle = 0;  // SurfaceStyle::Flat

@@ -1,5 +1,5 @@
 #!/bin/zsh
-# Release build. Always replaces the user-folder VST3 and AU when it finishes.
+# Release build. Replaces the user-folder VST3 when it finishes.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"

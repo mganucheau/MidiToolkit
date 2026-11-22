@@ -25,32 +25,32 @@ EffectsInspector::EffectsInspector()
     , revoiceSl("Revoice", 0, kMaxRevoice, 0, false)
     , delayAmountSl("Amount", 0, 100, 0, false)
     , delayFeedbackSl("Feedback", 0, 100, 40, false)
-    , arpGenerateRow("Generate", arpGenerateBtn)
+    , arpGenerateRow({}, arpGenerateBtn)
     , arpLengthRow("Length", arpLengthPopup)
     , arpFormRow("Form", arpFormPopup)
     , arpShapeRow("Type", arpShapePopup)
     , arpRateRow("Rate", arpRatePopup)
     , arpDensitySl("Density", 0, 100, 55, false)
-    , melodyGenerateRow("Generate", melodyGenerateBtn)
+    , melodyGenerateRow({}, melodyGenerateBtn)
     , melodyInputRow("Input", melodyInputSwitch)
     , melodyLengthRow("Length", melodyLengthPopup)
     , melodyFormRow("Form", melodyFormPopup)
     , melodyStyleRow("Style", melodyStylePopup)
     , melodyContourRow("Contour", melodyContourPopup)
     , melodySpeedRow("Speed", melodySpeedPopup)
-    , chordsGenerateRow("Generate", chordsGenerateBtn)
+    , chordsGenerateRow({}, chordsGenerateBtn)
     , chordsInputRow("Input", chordsInputSwitch)
     , chordLengthRow("Length", chordLengthPopup)
     , chordFormRow("Form", chordFormPopup)
     , chordVoicingRow("Voicing", chordVoicingPopup)
     , chordColorRow("Color", chordColorPopup)
     , chordRhythmRow("Rhythm", chordRhythmPopup)
-    , bassGenerateRow("Generate", bassGenerateBtn)
+    , bassGenerateRow({}, bassGenerateBtn)
     , bassInputRow("Input", bassInputSwitch)
     , bassLengthRow("Length", bassLengthPopup)
     , bassFormRow("Form", bassFormPopup)
     , bassMotionRow("Motion", bassMotionPopup)
-    , drumGenerateRow("Generate", drumGenerateBtn)
+    , drumGenerateRow({}, drumGenerateBtn)
     , drumStyleRow("Style", drumStylePopup)
     , drumLengthRow("Length", drumLengthPopup)
     , drumFormRow("Form", drumFormPopup)
@@ -96,10 +96,13 @@ EffectsInspector::EffectsInspector()
     };
     addAndMakeVisible(btnEffectsLock);
 
-    // Generate → New is always a solid primary CTA so it reads in every theme.
+    // Full-width Generate CTA at the foot of each generator section.
     for (auto* b : { &arpGenerateBtn, &melodyGenerateBtn, &chordsGenerateBtn,
                      &bassGenerateBtn, &drumGenerateBtn })
         b->primaryStyle = true;
+    for (auto* row : { &arpGenerateRow, &melodyGenerateRow, &chordsGenerateRow,
+                       &bassGenerateRow, &drumGenerateRow })
+        row->setFillWidth(true);
 
     trimSwitch.setComponentID("btnTrim");
     trimSwitch.setTooltip("Remove empty bars from the clip");
@@ -565,7 +568,6 @@ EffectsInspector::EffectsInspector()
             notifyGroove();
             if (onGeneratorGenerated) onGeneratorGenerated(0);
         };
-        arpSec.addRow(&arpGenerateRow, kRowMinH, [this] { return groove.arpEnabled; });
         arpSec.addRow(&arpLengthRow, kRowMinH, [this] { return groove.arpEnabled; });
         arpSec.addRow(&arpFormRow, kRowMinH, [this] {
             // Visible when folded if Form is non-Auto or length is long enough for tiling.
@@ -578,6 +580,7 @@ EffectsInspector::EffectsInspector()
         arpSec.addRow(&arpDensitySl, kSliderRowH, [this] {
             return groove.arpEnabled && groove.arpDensity != 55;
         });
+        arpSec.addRow(&arpGenerateRow, kRowMinH, [this] { return groove.arpEnabled; });
 
         juce::StringArray styles;
         for (int i = 0; i < (int) MelodyStyle::Count; ++i)
@@ -633,7 +636,6 @@ EffectsInspector::EffectsInspector()
             notifyGroove();
             if (onGeneratorGenerated) onGeneratorGenerated(1);
         };
-        melodySec.addRow(&melodyGenerateRow, kRowMinH, [this] { return groove.melodyEnabled; });
         melodySec.addRow(&melodyInputRow, kRowMinH, [this] { return groove.melodyInput; });
         melodySec.addRow(&melodyLengthRow, kRowMinH, [this] { return groove.melodyEnabled; });
         melodySec.addRow(&melodyFormRow, kRowMinH, [this] {
@@ -644,6 +646,7 @@ EffectsInspector::EffectsInspector()
         melodySec.addRow(&melodyStyleRow, kRowMinH, [this] { return groove.melodyEnabled; });
         melodySec.addRow(&melodyContourRow, kRowMinH, [this] { return groove.melodyEnabled; });
         melodySec.addRow(&melodySpeedRow, kRowMinH, [this] { return groove.melodyEnabled; });
+        melodySec.addRow(&melodyGenerateRow, kRowMinH, [this] { return groove.melodyEnabled; });
 
         juce::StringArray voicings;
         for (int i = 0; i < (int) ChordVoicing::Count; ++i)
@@ -699,7 +702,6 @@ EffectsInspector::EffectsInspector()
             notifyGroove();
             if (onGeneratorGenerated) onGeneratorGenerated(2);
         };
-        chordsSec.addRow(&chordsGenerateRow, kRowMinH, [this] { return groove.chordsEnabled; });
         chordsSec.addRow(&chordsInputRow, kRowMinH, [this] { return groove.chordsInput; });
         chordsSec.addRow(&chordLengthRow, kRowMinH, [this] { return groove.chordsEnabled; });
         chordsSec.addRow(&chordFormRow, kRowMinH, [this] {
@@ -710,6 +712,7 @@ EffectsInspector::EffectsInspector()
         chordsSec.addRow(&chordVoicingRow, kRowMinH, [this] { return groove.chordsEnabled; });
         chordsSec.addRow(&chordColorRow, kRowMinH, [this] { return groove.chordsEnabled; });
         chordsSec.addRow(&chordRhythmRow, kRowMinH, [this] { return groove.chordsEnabled; });
+        chordsSec.addRow(&chordsGenerateRow, kRowMinH, [this] { return groove.chordsEnabled; });
 
         juce::StringArray motions;
         for (int i = 0; i < (int) BassMotion::Count; ++i)
@@ -747,7 +750,6 @@ EffectsInspector::EffectsInspector()
             notifyGroove();
             if (onGeneratorGenerated) onGeneratorGenerated(3);
         };
-        bassSec.addRow(&bassGenerateRow, kRowMinH, [this] { return groove.bassEnabled; });
         bassSec.addRow(&bassInputRow, kRowMinH, [this] { return groove.bassInput; });
         bassSec.addRow(&bassLengthRow, kRowMinH, [this] { return groove.bassEnabled; });
         bassSec.addRow(&bassFormRow, kRowMinH, [this] {
@@ -756,6 +758,7 @@ EffectsInspector::EffectsInspector()
                     || groove.bassLengthIndex >= (int) GeneratorLength::FourBars);
         });
         bassSec.addRow(&bassMotionRow, kRowMinH, [this] { return groove.bassEnabled; });
+        bassSec.addRow(&bassGenerateRow, kRowMinH, [this] { return groove.bassEnabled; });
 
         juce::StringArray drumStyles;
         for (int i = 0; i < (int) DrumStyle::Count; ++i)
@@ -800,7 +803,6 @@ EffectsInspector::EffectsInspector()
             drumFillSl.valueText = juce::String(v) + "%";
             notifyGroove();
         };
-        drumSec.addRow(&drumGenerateRow, kRowMinH, [this] { return groove.drumsEnabled; });
         drumSec.addRow(&drumStyleRow, kRowMinH, [this] { return groove.drumsEnabled; });
         drumSec.addRow(&drumLengthRow, kRowMinH, [this] { return groove.drumsEnabled; });
         drumSec.addRow(&drumFormRow, kRowMinH, [this] {
@@ -814,6 +816,7 @@ EffectsInspector::EffectsInspector()
         drumSec.addRow(&drumFillSl, kSliderRowH, [this] {
             return groove.drumsEnabled && groove.drumFill != 35;
         });
+        drumSec.addRow(&drumGenerateRow, kRowMinH, [this] { return groove.drumsEnabled; });
     }
 
     playback.onToggle = formSec.onToggle = timing.onToggle = performance.onToggle
@@ -1780,14 +1783,14 @@ void EffectsInspector::resized()
     quantizeBlock.setControlWidth(stepW);
     swingBlock.setControlWidth(stepW);
     delayBlock.setControlWidth(stepW);
-    arpGenerateRow.setControlWidth(arpGenerateBtn.idealWidth());
-    melodyGenerateRow.setControlWidth(melodyGenerateBtn.idealWidth());
+    arpGenerateRow.setFillWidth(true);
+    melodyGenerateRow.setFillWidth(true);
     melodyInputRow.setControlWidth(melodyInputSwitch.idealWidth());
-    chordsGenerateRow.setControlWidth(chordsGenerateBtn.idealWidth());
+    chordsGenerateRow.setFillWidth(true);
     chordsInputRow.setControlWidth(chordsInputSwitch.idealWidth());
-    bassGenerateRow.setControlWidth(bassGenerateBtn.idealWidth());
+    bassGenerateRow.setFillWidth(true);
     bassInputRow.setControlWidth(bassInputSwitch.idealWidth());
-    drumGenerateRow.setControlWidth(drumGenerateBtn.idealWidth());
+    drumGenerateRow.setFillWidth(true);
     pitchInputRow.setControlWidth(pitchInputSwitch.idealWidth());
     arpDensitySl.setSize(arpDensitySl.getWidth(), kControlH);
     drumDensitySl.setSize(drumDensitySl.getWidth(), kControlH);

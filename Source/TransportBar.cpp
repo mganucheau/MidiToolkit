@@ -692,7 +692,7 @@ void TransportBar::resized()
     btnDragToDaw.iconOnly = compactChrome;   // applyHeaderCaptionsTier(0) also forces icon-only
     // Drag Me width follows its icon-only state, which the caption tiers below change.
     auto chipWidth = [&] { return btnDragToDaw.isVisible() ? btnDragToDaw.idealWidth() : 0; };
-    // Generator-only column: Input / Piano / Toolkit / Drag Me hug the gear.
+    // Single-column (compact): keep Toolkit next to Settings so the logo still fits.
     const int gearGap = compactChrome ? tight : juce::roundToInt(18.0f * sc); // gap before gear
     const int clusterGap = compactChrome ? tight : groupGap;                 // after Input / Drag Me
 
@@ -712,7 +712,7 @@ void TransportBar::resized()
     };
 
     // Prefer: full wordmark + all labels → shorten wordmark → drop Piano
-    // label → drop wordmark → icons only (Input, Piano, Toolkit, Drag Me).
+    // label → icons only. Keep at least the MIDI logo when possible (single-column).
     applyHeaderCaptionsTier(2);
     int leftW = leftWidth();
     int rightW = rightWidth();
@@ -734,12 +734,22 @@ void TransportBar::resized()
         leftW = leftWidth();
         rightW = rightWidth();
     }
-    if (!fits(midiW)) { titleW = 0; logoLevel = 0; }
     if (!fits(titleW))
     {
         applyHeaderCaptionsTier(0);
         leftW = leftWidth();
         rightW = rightWidth();
+    }
+    // Prefer keeping the wordmark over dropping it entirely.
+    if (!fits(midiW))
+    {
+        titleW = 0;
+        logoLevel = 0;
+    }
+    else if (titleW == 0 || logoLevel == 0)
+    {
+        titleW = midiW;
+        logoLevel = 1;
     }
 
     titleBounds = { lightsZoneW, 0, titleW, h };

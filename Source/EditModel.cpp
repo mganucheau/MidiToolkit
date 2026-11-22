@@ -1034,12 +1034,25 @@ void applyKind(StepClip& s, int meanPitch, int drumHits, int totalHits, const Po
 
     const juce::String nameSrc = s.filePath.isNotEmpty() ? s.filePath : s.name;
     const bool gmKit = fitsGmDrumStructure(notes);
+    // Arpeggios never stack voices — overlapping notes disqualify Arp.
+    const bool mono = poly.maxPoly <= 1 && poly.meanPoly < 1.35;
 
     // Pass 1: non-drum keywords win. Drum keywords only stick when the notes
     // look like a GM kit starting on kick at C1 (or there are no notes yet).
+    // Arp keywords only stick when the clip is monophonic.
     if (auto tagged = kindKeywordFromFileName(nameSrc))
     {
-        if (*tagged != ClipKind::Drums || notes.empty() || gmKit)
+        if (*tagged == ClipKind::Arp)
+        {
+            if (notes.empty() || mono)
+            {
+                s.kind = ClipKind::Arp;
+                s.kindConfidence = mono ? 95 : 80;
+                return;
+            }
+            // Overlapping voices — fall through to content analysis.
+        }
+        else if (*tagged != ClipKind::Drums || notes.empty() || gmKit)
         {
             s.kind = *tagged;
             s.kindConfidence = (*tagged == ClipKind::Drums && gmKit) ? 98 : 95;
@@ -1052,7 +1065,6 @@ void applyKind(StepClip& s, int meanPitch, int drumHits, int totalHits, const Po
 
     // Pass 2: note analysis for untagged (or false-positive drum-tagged) files.
     const bool chords = poly.frequentChords || poly.meanPoly >= 2.2 || poly.maxPoly >= 3;
-    const bool mono = poly.maxPoly <= 1 && poly.meanPoly < 1.35;
     const bool bassRegister = meanPitch >= 24 && meanPitch <= 52;
     const double ch10Frac = totalHits > 0 ? (double) channel10Hits / (double) totalHits : 0.0;
 
@@ -1087,9 +1099,22 @@ void applyKind(StepClip& s, int meanPitch, int drumHits, int totalHits, const Po
         return;
     }
 
-    // Rapid mono mid/high lines without an arp keyword still read as Lead.
+    // Monophonic mid/high lines that outline several pitch classes read as Arp.
     if (mono && meanPitch > 52)
     {
+        int pcs = 0;
+        bool seen[12] = {};
+        for (const auto& n : notes)
+        {
+            const int pc = ((n.pitch % 12) + 12) % 12;
+            if (!seen[pc]) { seen[pc] = true; ++pcs; }
+        }
+        if (pcs >= 3)
+        {
+            s.kind = ClipKind::Arp;
+            s.kindConfidence = pcs >= 4 ? 82 : 72;
+            return;
+        }
         s.kind = ClipKind::Lead;
         s.kindConfidence = 75;
         return;

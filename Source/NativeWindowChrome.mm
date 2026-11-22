@@ -76,6 +76,21 @@ bool editorFillsWindow(NSView* editor, NSWindow* window)
     return contentArea > 1.0 && editorArea >= contentArea * 0.85;
 }
 
+/** True when this view is the plugin window's content across the width, even if
+    a taller host window has left it short and sitting on the bottom. */
+bool editorSpansContentWidth(NSView* editor, NSWindow* window)
+{
+    if (editor == nil || window == nil || window.contentView == nil)
+        return false;
+    NSView* content = window.contentView;
+    if (editor == content)
+        return true;
+    const NSRect editorInContent = [editor convertRect:editor.bounds toView:content];
+    const CGFloat contentW = std::abs(NSWidth(content.bounds));
+    const CGFloat editorW = std::abs(NSWidth(editorInContent));
+    return contentW > 1.0 && editorW >= contentW * 0.92;
+}
+
 void stretchEditorToContent(NSView* editor, NSView* content)
 {
     if (editor == nil || content == nil || editor == content)
@@ -163,13 +178,27 @@ void applyCupertinoTitlebar(juce::Component& anyComponentInWindow, int headerHei
     if ((window.styleMask & NSWindowStyleMaskFullScreen) != 0)
         return;
     // Never restyle a host document window that merely contains this view.
-    if (! editorFillsWindow(editorView, window))
+    // A plugin window the user stretched taller still spans the width; the view
+    // is just short and AppKit leaves it on the bottom.
+    const bool spansWidth = editorSpansContentWidth(editorView, window);
+    if (! editorFillsWindow(editorView, window) && ! spansWidth)
         return;
 
     static bool folding = false;
     if (folding)
         return;
     folding = true;
+
+    // Fill a top gap before measuring the window. Otherwise frameRectForContentRect
+    // wraps the short view and the empty band stays above the header.
+    if (spansWidth)
+        if (NSView* content = window.contentView)
+        {
+            const NSRect editorInContent = [editorView convertRect:editorView.bounds toView:content];
+            const CGFloat topGap = NSHeight(content.bounds) - NSMaxY(editorInContent);
+            if (topGap >= 2.0)
+                stretchEditorToContent(editorView, content);
+        }
 
     // Editor area on screen, before the titlebar is folded into the content.
     const NSRect editorOnScreen = [window convertRectToScreen:[editorView convertRect:editorView.bounds toView:nil]];

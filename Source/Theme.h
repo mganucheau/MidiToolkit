@@ -129,8 +129,10 @@ inline constexpr int kNumThemesPerFamily = 32; // 10 classic + 22 skill
 inline constexpr int kPearlTheme = 5;
 /** Default skill pack (family index): Neobrutal — light 20 / dark 52. */
 inline constexpr int kNeobrutalTheme = 20;
-/** Default theme for new installs — Clay light/dark twins. */
+/** Clay light/dark twins (family index). */
 inline constexpr int kClayTheme = 29;
+/** Default theme — Cursor light/dark twins. */
+inline constexpr int kCursorTheme = 30;
 inline constexpr int kInkTheme = 32; // first classic dark
 
 inline const ThemeSpec& themeAt(int index)
@@ -240,10 +242,10 @@ struct Tweaks
     /** Type + icon glyph scale as percent; 100% matches the former 115% size. */
     std::atomic<int> textScalePct { 100 };
     std::atomic<int> appearance { (int) Appearance::System };
-    /** Light-family theme index 0–29 (classic + skill packs). */
-    std::atomic<int> lightTheme { kClayTheme };
-    /** Dark-family theme index 0–29 → absolute 30–59. */
-    std::atomic<int> darkTheme { kClayTheme };
+    /** Light-family theme index (classic + skill packs). */
+    std::atomic<int> lightTheme { kCursorTheme };
+    /** Dark-family theme index. */
+    std::atomic<int> darkTheme { kCursorTheme };
     std::atomic<int> showTooltips { 1 }; // 1 = on
     std::atomic<int> fontFamily { (int) FontFamily::Inter };
     std::atomic<int> surfaceStyle { (int) SurfaceStyle::Flat };
