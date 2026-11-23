@@ -307,14 +307,15 @@ public:
 
     /** Settings switches: on-state uses the primary colour, and corners match the panel. */
     bool primaryWhenOn = false;
+    /** When true, corner wash matches surface000 (filter popover) instead of surface100. */
+    bool washSurface000 = false;
 
     void paint(juce::Graphics& g) override
     {
-        // Button::paint draws a square look-and-feel face first. That face, clipped
-        // to this control, leaves black squares in the capsule corners.
+        // Wash the rectangular hit target so capsule corners never show a square face.
         if (primaryWhenOn)
         {
-            g.setColour(ds::surface100());
+            g.setColour(washSurface000 ? ds::surface000() : ds::surface100());
             g.fillRect(getLocalBounds());
         }
         paintButton(g, isOver(), isDown());
@@ -1158,21 +1159,33 @@ public:
         return parts.isEmpty() ? "Any" : parts.joinIntoString(", ");
     }
 
+    int filterContentPad() const
+    {
+        return sidebarLabelStyle ? metrics::scaled(12) : 0;
+    }
+
+    int filterContentTopGap() const
+    {
+        return sidebarLabelStyle ? metrics::scaled(10) : 7;
+    }
+
     int idealHeight() const
     {
         if (labels.isEmpty() || (collapsible && collapsed)) return headerStrip();
+        const int pad = filterContentPad();
+        const int top = filterContentTopGap();
         if (!fitContent)
         {
             const int rows = (labels.size() + columns - 1) / juce::jmax(1, columns);
-            int h = headerStrip() + 7 + rows * kChipH + juce::jmax(0, rows - 1) * kChipGap;
+            int h = headerStrip() + top + rows * kChipH + juce::jmax(0, rows - 1) * kChipGap;
             if (hint.isNotEmpty()) h += 4 + 14;
-            return h + contentBottomPad;
+            return h + juce::jmax(contentBottomPad, pad);
         }
-        const int w = juce::jmax(120, getWidth() > 10 ? getWidth()
+        const int w = juce::jmax(120, getWidth() > 10 ? getWidth() - pad * 2
                                     : metrics::effectsPaneWidth() - kContentPadX - kContentPadR);
-        int h = headerStrip() + 7 + measureWrappedHeight(w);
+        int h = headerStrip() + top + measureWrappedHeight(w);
         if (hint.isNotEmpty()) h += 4 + 14;
-        return h + contentBottomPad;
+        return h + juce::jmax(contentBottomPad, pad);
     }
 
     juce::String title;
@@ -1187,16 +1200,16 @@ public:
     {
         rebuildChipBounds();
         const auto& t = inspectorTokens();
-        auto header = getLocalBounds().removeFromTop(headerStrip());
-        const juce::String titleDraw = sidebarLabelStyle ? title.toUpperCase() : title;
-        // Filter sections: FORM-style header strip (chevron + caps title + hairlines).
+        // Filter sections: toolkit card — full surface100 face + edge outline.
         if (sidebarLabelStyle && collapsible)
         {
             g.setColour(ds::surface100());
-            g.fillRect(header);
-            g.setColour(ds::line());
-            g.fillRect(header.getX(), header.getY(), header.getWidth(), 1);
+            g.fillRect(getLocalBounds());
+            g.setColour(ds::edge().withAlpha(0.55f));
+            g.drawRect(getLocalBounds().toFloat().reduced(0.5f), 1.0f);
         }
+        auto header = getLocalBounds().removeFromTop(headerStrip());
+        const juce::String titleDraw = sidebarLabelStyle ? title.toUpperCase() : title;
         if (sidebarLabelStyle)
         {
             g.setFont(sectionTitleFont());
@@ -1403,7 +1416,10 @@ private:
         chipBounds.assign((size_t) labels.size(), {});
         if (collapsible && collapsed)
             return;
-        auto body = getLocalBounds().withTrimmedTop(headerStrip() + 7);
+        const int pad = filterContentPad();
+        auto body = getLocalBounds().withTrimmedTop(headerStrip() + filterContentTopGap())
+                                    .reduced(pad, 0);
+        body.removeFromBottom(juce::jmax(contentBottomPad, pad));
         if (hint.isNotEmpty())
             body.removeFromBottom(4 + 14);
         if (body.getWidth() <= 0 || labels.isEmpty())
@@ -1618,11 +1634,18 @@ public:
     int getHi() const { return hi; }
     bool isFullRange() const { return lo <= minV && hi >= maxV; }
 
+    int contentPad() const
+    {
+        return sidebarLabelStyle ? metrics::scaled(12) : 0;
+    }
+
     int idealHeight() const
     {
         if (collapsible && collapsed)
             return headerStrip();
-        return headerStrip() + toolkitRowGap() + kHistH + 4 + kTrackH + 8;
+        const int pad = contentPad();
+        return headerStrip() + juce::jmax(toolkitRowGap(), pad)
+             + kHistH + 4 + kTrackH + juce::jmax(8, pad);
     }
 
     void mouseDown(const juce::MouseEvent& e) override
@@ -1654,15 +1677,15 @@ public:
     {
         const auto& t = inspectorTokens();
         auto r = getLocalBounds();
-        auto header = r.removeFromTop(headerStrip());
-        const juce::String labelDraw = sidebarLabelStyle ? label.toUpperCase() : label;
         if (sidebarLabelStyle && collapsible)
         {
             g.setColour(ds::surface100());
-            g.fillRect(header);
-            g.setColour(ds::line());
-            g.fillRect(header.getX(), header.getY(), header.getWidth(), 1);
+            g.fillRect(r);
+            g.setColour(ds::edge().withAlpha(0.55f));
+            g.drawRect(r.toFloat().reduced(0.5f), 1.0f);
         }
+        auto header = r.removeFromTop(headerStrip());
+        const juce::String labelDraw = sidebarLabelStyle ? label.toUpperCase() : label;
         if (sidebarLabelStyle)
         {
             g.setFont(sectionTitleFont());
@@ -1706,7 +1729,10 @@ public:
         if (collapsible && collapsed)
             return;
 
-        r.removeFromTop(toolkitRowGap());
+        const int pad = contentPad();
+        r.removeFromTop(juce::jmax(toolkitRowGap(), pad));
+        r = r.reduced(pad, 0);
+        r.removeFromBottom(pad);
         // Fixed hist + track so the 14px thumbs stay inside the component.
         auto hist = r.removeFromTop(kHistH).toFloat();
         const int n = juce::jmax(1, (int) bins.size());
@@ -1777,21 +1803,25 @@ private:
 
     Thumb hitThumb(float x) const
     {
-        constexpr float kInset = 7.0f;
+        const float pad = (float) contentPad();
+        constexpr float kThumbInset = 6.0f;
+        const float inset = pad + kThumbInset;
         const float span = (float) juce::jmax(1, maxV - minV);
-        const float trackW = juce::jmax(1.0f, (float) getWidth() - kInset * 2.0f);
-        const float xLo = kInset + trackW * ((float) (lo - minV) / span);
-        const float xHi = kInset + trackW * ((float) (hi - minV) / span);
+        const float trackW = juce::jmax(1.0f, (float) getWidth() - inset * 2.0f);
+        const float xLo = inset + trackW * ((float) (lo - minV) / span);
+        const float xHi = inset + trackW * ((float) (hi - minV) / span);
         return std::abs(x - xLo) <= std::abs(x - xHi) ? Thumb::Lo : Thumb::Hi;
     }
 
     void setFromX(float x)
     {
-        constexpr float kInset = 7.0f;
-        const float trackW = juce::jmax(1.0f, (float) getWidth() - kInset * 2.0f);
+        const float pad = (float) contentPad();
+        constexpr float kThumbInset = 6.0f;
+        const float inset = pad + kThumbInset;
+        const float trackW = juce::jmax(1.0f, (float) getWidth() - inset * 2.0f);
         if (dragThumb == Thumb::None)
             return;
-        const float t = juce::jlimit(0.0f, 1.0f, (x - kInset) / trackW);
+        const float t = juce::jlimit(0.0f, 1.0f, (x - inset) / trackW);
         const int v = minV + (int) std::lround(t * (float) (maxV - minV));
         if (dragThumb == Thumb::Lo) setRange(juce::jmin(v, hi), hi);
         else setRange(lo, juce::jmax(v, lo));

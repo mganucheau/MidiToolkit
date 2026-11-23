@@ -535,14 +535,13 @@ void LibraryStore::mergeStarsFromDisk()
 void LibraryStore::toggleStarred(const juce::String& path)
 {
     if (path.isEmpty()) return;
-    // Accrue against disk so other plugin instances / prior sessions stick.
-    mergeStarsFromDisk();
+    // Optimistic in-memory toggle first so the UI star flips immediately.
+    // Disk merge / write used to run synchronously here and stalled the click.
     if (!starredFiles.contains(path))
         starredFiles.add(path);
     else
         starredFiles.removeString(path);
-    // Sync write — favorites must survive host quit / crash.
-    save();
+    saveAsync();
 }
 
 void LibraryStore::setStarredFiles(const juce::StringArray& paths)
@@ -561,7 +560,7 @@ void LibraryStore::toggleStarredFolder(const juce::String& path)
         starredFolders.add(path);
     else
         starredFolders.removeString(path);
-    save();
+    saveAsync();
 }
 
 void LibraryStore::setStarredFolders(const juce::StringArray& paths)

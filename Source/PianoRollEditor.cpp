@@ -199,8 +199,8 @@ void PianoRollMini::paint(juce::Graphics& g)
                 juce::jmax(2.0f, (float) (n.len * timeStretch) * pps - 1.0f),
                 juce::jmax(2.0f, map.rowH - 1.0f));
             const float rad = juce::jmin(2.5f, r.getHeight() * 0.3f);
-            // High-contrast violet blocks (pre-Levels redesign legibility).
-            const auto fill = noteColour.withAlpha((float) (0.82 + 0.18 * v));
+            auto fillCol = noteColour.interpolatedWith(ds::surface000(), (float) (1.0 - v) * 0.72f);
+            const auto fill = fillCol.withAlpha((float) (0.78 + 0.22 * v));
             {
                 juce::Path path;
                 path.addRoundedRectangle(r, rad);
@@ -208,11 +208,10 @@ void PianoRollMini::paint(juce::Graphics& g)
                 g.reduceClipRegion(path);
                 g.setColour(fill);
                 g.fillRect(r);
-                // Soft inner lift so notes read as lit blocks on the dark roll.
                 g.setColour(fill.brighter(0.22f).withAlpha(0.35f));
                 g.fillRect(r.withTrimmedBottom(r.getHeight() * 0.45f));
             }
-            g.setColour(noteColour.darker(0.45f).withAlpha(0.85f));
+            g.setColour(fillCol.darker(0.45f).withAlpha(0.85f));
             g.drawRoundedRectangle(r.reduced(0.5f), rad, 1.0f);
         }
     }
@@ -1737,14 +1736,14 @@ void PianoRollEditor::RollContent::paint(juce::Graphics& g)
         if (!r.intersects(clipB)) continue;
 
         const double v = effectiveVelocity(n, ed.groove);
-        // High-contrast violet notes (reference preview + pre-redesign roll).
-        // Velocity only gently dims; selected notes take the distinct selection colour.
-        // Dark edge separates neighbours.
+        // Low velocity → lighter fill; full velocity keeps the theme note colour.
         const auto base = isSelected ? ed.selectionColour() : ed.noteColour;
         juce::Colour fill = (n.moved || inDrag || inResize) ? base.brighter(0.12f) : base;
+        if (!isSelected)
+            fill = fill.interpolatedWith(ds::surface000(), (float) (1.0 - v) * 0.72f);
         auto nr = r.reduced(0.5f, 0.5f);
         const float rad = juce::jmin(3.0f, nr.getHeight() * 0.3f);
-        const float a = isSelected ? 1.0f : (float) (0.82 + 0.18 * v);
+        const float a = isSelected ? 1.0f : (float) (0.78 + 0.22 * v);
         {
             juce::Path path;
             path.addRoundedRectangle(nr, rad);
@@ -2269,8 +2268,11 @@ void PianoRollEditor::VelocityLane::paint(juce::Graphics& g)
         const float bh = juce::jmax(2.0f, (float) lane.getBottom() - top);
         const bool sel = ed.selection.count(n.id) > 0;
         const float bw = juce::jlimit(3.0f, 7.0f, noteW - 2.0f);
-        const float a = juce::jmax(0.70f, (float) vel / 127.0f);
-        const auto stemCol = sel ? ed.selectionColour() : ed.noteColour;
+        const float vn = (float) vel / 127.0f;
+        const float a = juce::jmax(0.55f, 0.45f + 0.55f * vn);
+        auto stemCol = sel ? ed.selectionColour() : ed.noteColour;
+        if (!sel)
+            stemCol = stemCol.interpolatedWith(ds::surface000(), (1.0f - vn) * 0.72f);
         const auto col = stemCol.withAlpha(a);
         {
             juce::Path path;

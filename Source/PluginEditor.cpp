@@ -721,6 +721,8 @@ MidiToolkitEditor::MidiToolkitEditor(MidiToolkitProcessor& p)
     filterPopover.onReset = [this]
     {
         sidebar.resetFilters();
+        filterPopover.setShowChanged(false);
+        sidebar.setFilterShowChangedOnly(false);
         refreshBrowserBar();
     };
     filterPopover.onSaveDefault = [this]
@@ -737,6 +739,11 @@ MidiToolkitEditor::MidiToolkitEditor(MidiToolkitProcessor& p)
             processorRef.saveLibraryFolder(folder, true);
         }
         refreshBrowserBar();
+    };
+    filterPopover.onShowChanged = [this](bool on)
+    {
+        sidebar.setFilterShowChangedOnly(on);
+        layoutContent();
     };
     filterPopover.onSaveSearch = [this] { if (sidebar.onSaveCurrentSearch) sidebar.onSaveCurrentSearch(); };
     filterDismissShield.onDismiss = [this] { sidebar.setFilterOpen(false); };
@@ -806,21 +813,25 @@ MidiToolkitEditor::MidiToolkitEditor(MidiToolkitProcessor& p)
                               ? clips[(size_t) row.clipIndex].filePath
                               : row.file.getFullPathName();
         if (path.isEmpty()) return;
-        if (row.isDirectory || juce::File(path).isDirectory())
-        {
+        const bool isDir = row.isDirectory || juce::File(path).isDirectory();
+        if (isDir)
             processorRef.toggleStarredFolder(path);
-            if (browseMode == 3)
-                loadStarredFolders();
-            else
-                rebuildEntries();
-        }
         else
-        {
             processorRef.toggleStarred(path);
-            if (browseMode == 1)
-                loadStarredClips();
-            else
-                rebuildEntries();
+
+        // Flip the star in-place so the click feels instant; only rebuild when
+        // the starred lists themselves need to change membership.
+        if (browseMode == 1 && !isDir)
+            loadStarredClips();
+        else if (browseMode == 3 && isDir)
+            loadStarredFolders();
+        else if (const auto* cur = fileList.entryAt(entryIdx))
+        {
+            auto e = *cur;
+            e.starred = isDir ? processorRef.isStarredFolder(path)
+                              : processorRef.isStarred(path);
+            fileList.updateEntry(entryIdx, e);
+            kindGrid.refresh();
         }
         refreshSidebar();
         if (const int d = displayForClip(selectedIdx); d >= 0)
@@ -4185,10 +4196,14 @@ void MidiToolkitEditor::LeftPaneTabs::setSearchOpen(bool on)
 
 void MidiToolkitEditor::LeftPaneTabs::setFiltersActive(bool open, int activeCount, const juce::String& summary)
 {
-    btnFilters.active = open || activeCount > 0;
-    if (!open && activeCount > 0 && summary.isNotEmpty())
+    const bool applied = activeCount > 0;
+    btnFilters.active = open || applied;
+    // Applied filters → solid filled chip (no summary strip under the path).
+    btnFilters.solid = applied;
+    btnFilters.accentSolid = applied;
+    if (!open && applied && summary.isNotEmpty())
         btnFilters.setTooltip(summary);
-    else if (activeCount > 0)
+    else if (applied)
         btnFilters.setTooltip("Filters (" + juce::String(activeCount) + " active)");
     else
         btnFilters.setTooltip("Filters");
@@ -4557,12 +4572,11 @@ void MidiToolkitEditor::layoutContent()
 
     if (showFiles && sidebar.isFilterOpen())
     {
-        // Toolkit-width popover, centered in the app.
-        const int w = metrics::effectsPaneWidth();
+        // Slightly wider than the toolkit column so section padding has room.
+        const int w = metrics::effectsPaneWidth() + metrics::scaled(24);
         const int room = juce::jmax(120, content.getHeight() - metrics::scaled(16));
-        const int headerFooter = metrics::scaled(40) + metrics::scaled(8) * 2
-                               + metrics::scaled(40) + metrics::scaled(8) * 2;
-        filterPopover.setMaxBodyHeight(juce::jmax(80, room - headerFooter));
+        const int chrome = metrics::scaled(40) + metrics::scaled(8) * 2 + metrics::scaled(24);
+        filterPopover.setMaxBodyHeight(juce::jmax(80, room - chrome));
         const int h = juce::jmin(filterPopover.idealHeight(), room);
         const int x = juce::jlimit(metrics::scaled(4),
                                    juce::jmax(metrics::scaled(4), content.getWidth() - w - metrics::scaled(4)),
@@ -4629,7 +4643,7 @@ public:
         static constexpr int map[] = { 75, 100, 115 };
         return map[juce::jlimit(0, 2, sizeIdx)];
     }
-    static constexpr int kPanelW = 250;
+    static constexpr int kPanelW = 290;
     static constexpr int kHeaderH = 44;
     static constexpr int kRowH = ds::region::sidebarRowH;
     static constexpr int kRowGap = 0;

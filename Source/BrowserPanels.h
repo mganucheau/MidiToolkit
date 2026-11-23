@@ -168,6 +168,7 @@ public:
     int activeFilterCount() const;
     juce::String describeActiveFilters() const;
     void resetFilters();
+    void setFilterShowChangedOnly(bool on);
     bool getHideDuplicates() const;
     void toggleHideDuplicates();
     bool isCurrentFolderSaved() const { return isCurrentFolderFavorited(); }
@@ -326,10 +327,16 @@ private:
         std::function<void()> onLayoutChanged;
         std::function<void(BrowserSortColumn)> onSortChanged;
         std::function<void(bool)> onSortDirectionChanged;
+        void setShowChangedOnly(bool on);
+        bool getShowChangedOnly() const { return showChangedOnly; }
     private:
+        void applyShowChangedVisibility();
+        bool sectionIsChanged(const fx::ChipGrid& g) const;
+        bool sectionIsChanged(const fx::HistRangeSlider& s) const;
         bool hideDuplicates = true;
         bool includeSubdirs = false;
         bool scanning = false;
+        bool showChangedOnly = false;
         juce::Rectangle<int> searchLabelBounds;
         juce::Rectangle<int> sortRowBounds;
         juce::Rectangle<int> subdirRowBounds;
@@ -482,6 +489,10 @@ public:
     void setSelectedIndex(int index, juce::NotificationType notify = juce::sendNotification);
     int getSelectedIndex() const { return selected; }
     int getNumEntries() const { return (int) entries.size(); }
+    /** Display-order length (after current sort). */
+    int getNumDisplayEntries() const { return (int) sortOrder.size(); }
+    /** Map a display row to an entry index; -1 if out of range. */
+    int entryIndexForDisplay(int displayIdx) const { return displayToEntry(displayIdx); }
     void setPlaying(bool isPlaying);
     void setSearching(bool searching);
     /** Shown on the scanning overlay. `total <= 0` hides the bar. */
@@ -790,7 +801,7 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(BrowserToolbar)
 };
 
-/** Floating filter menu (header: X close; footer: Reset + Save as default). */
+/** Floating filter menu. Header: show-changed · reset · Make default · X. */
 class FilterPopover : public juce::Component,
                       public juce::SettableTooltipClient
 {
@@ -801,6 +812,8 @@ public:
     int idealHeight() const;
     /** Cap body height so the popover never paints past the host window. */
     void setMaxBodyHeight(int h);
+    void setShowChanged(bool on);
+    bool getShowChanged() const { return showChanged; }
     void resized() override;
     void paint(juce::Graphics&) override;
     void mouseDown(const juce::MouseEvent&) override;
@@ -811,17 +824,20 @@ public:
     std::function<void()> onDone;   // close the popover
     std::function<void()> onSaveSearch; // retained for editor wiring
     std::function<void()> onReset;  // clear filters
-    std::function<void()> onSaveDefault; // footer: write criteria onto current library folder
+    std::function<void()> onSaveDefault; // write criteria onto current library folder
+    std::function<void(bool)> onShowChanged; // hide unchanged filter sections
 
 private:
     juce::Component* panel = nullptr;
     std::function<int()> panelHeight;
     juce::Viewport bodyViewport;
     juce::String countText;
-    juce::Rectangle<int> closeBounds, resetBounds, saveDefaultBounds;
+    juce::Rectangle<int> closeBounds, resetBounds, saveDefaultBounds, changedBounds;
     bool closeHover = false;
     bool resetHover = false;
     bool saveDefaultHover = false;
+    bool changedHover = false;
+    bool showChanged = false;
     int maxBodyH = 0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(FilterPopover)
