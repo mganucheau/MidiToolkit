@@ -115,6 +115,13 @@ public:
     const std::set<int>& selectedNoteIds() const { return selection; }
     double loopStart() const { return loopStartStep; }
     double loopEnd() const { return loopEndStep; }
+    const GrooveParams& currentGroove() const { return groove; }
+    const ClipEdit& currentEdit() const { return edit; }
+    /** Note ids the next toolkit edit should stamp: the selection when one
+        exists, otherwise every note in the clip. */
+    std::vector<int> noteIdsInScope() const;
+    /** Select every note whose start falls in [loopStart, loopEnd). */
+    void selectNotesInLoop();
     /** Current px-per-semitone (accounts for folded / scale-filtered rows). */
     float currentRowHeight() const { return effRowH(); }
     void deleteSelectedNotes();   // non-destructive (edit.deleted)
@@ -130,6 +137,13 @@ public:
     std::function<void()> onSelectionChanged;
     /** Fired when the user clicks into the piano roll (sticky key-nav). */
     std::function<void()> onActivated;
+    /** Velocity fold changed. The window height tracks the lane. */
+    std::function<void()> onVelocityFold;
+    int velocityChromeHeight() const
+    {
+        return velocityOpen ? VelocityLane::headerH + VelocityLane::laneH
+                            : VelocityLane::headerH;
+    }
 
 private:
     // ── inner surfaces ──
@@ -139,6 +153,7 @@ private:
         explicit RollContent(PianoRollEditor& o) : owner(o) {}
         void paint(juce::Graphics&) override;
         void mouseDown(const juce::MouseEvent&) override;
+        void mouseDoubleClick(const juce::MouseEvent&) override;
         void mouseDrag(const juce::MouseEvent&) override;
         void mouseUp(const juce::MouseEvent&) override;
         void mouseMove(const juce::MouseEvent&) override;
@@ -165,6 +180,7 @@ private:
         explicit TimeRuler(PianoRollEditor& o) : owner(o) {}
         void paint(juce::Graphics&) override;
         void mouseDown(const juce::MouseEvent&) override;
+        void mouseDoubleClick(const juce::MouseEvent&) override;
         void mouseDrag(const juce::MouseEvent&) override;
         void mouseUp(const juce::MouseEvent&) override;
         PianoRollEditor& owner;

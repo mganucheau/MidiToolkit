@@ -26,32 +26,43 @@ EffectsInspector::EffectsInspector()
     , delayAmountSl("Amount", 0, 100, 0, false)
     , delayFeedbackSl("Feedback", 0, 100, 40, false)
     , arpGenerateRow({}, arpGenerateBtn)
+    , arpInputRow("Input", arpInputSwitch)
     , arpLengthRow("Length", arpLengthPopup)
     , arpFormRow("Form", arpFormPopup)
     , arpShapeRow("Type", arpShapePopup)
-    , arpRateRow("Rate", arpRatePopup)
+    , arpStyleRow("Style", arpStylePopup)
+    , arpRateRow("Speed", arpRatePopup)
+    , arpMotionRow("Motion", arpMotionPopup)
     , arpDensitySl("Density", 0, 100, 55, false)
     , melodyGenerateRow({}, melodyGenerateBtn)
     , melodyInputRow("Input", melodyInputSwitch)
+    , melodyTypeRow("Type", melodyTypePopup)
     , melodyLengthRow("Length", melodyLengthPopup)
     , melodyFormRow("Form", melodyFormPopup)
     , melodyStyleRow("Style", melodyStylePopup)
-    , melodyContourRow("Contour", melodyContourPopup)
+    , melodyContourRow("Motion", melodyContourPopup)
     , melodySpeedRow("Speed", melodySpeedPopup)
     , chordsGenerateRow({}, chordsGenerateBtn)
     , chordsInputRow("Input", chordsInputSwitch)
+    , chordTypeRow("Type", chordTypePopup)
+    , chordSpeedRow("Speed", chordSpeedPopup)
+    , chordMotionRow("Motion", chordMotionPopup)
     , chordLengthRow("Length", chordLengthPopup)
     , chordFormRow("Form", chordFormPopup)
     , chordVoicingRow("Voicing", chordVoicingPopup)
-    , chordColorRow("Color", chordColorPopup)
+    , chordColorRow("Style", chordColorPopup)
     , chordRhythmRow("Rhythm", chordRhythmPopup)
     , bassGenerateRow({}, bassGenerateBtn)
     , bassInputRow("Input", bassInputSwitch)
+    , bassTypeRow("Type", bassTypePopup)
+    , bassStyleRow("Style", bassStylePopup)
+    , bassSpeedRow("Speed", bassSpeedPopup)
     , bassLengthRow("Length", bassLengthPopup)
     , bassFormRow("Form", bassFormPopup)
     , bassMotionRow("Motion", bassMotionPopup)
     , drumGenerateRow({}, drumGenerateBtn)
     , drumStyleRow("Style", drumStylePopup)
+    , drumSpeedRow("Speed", drumSpeedPopup)
     , drumLengthRow("Length", drumLengthPopup)
     , drumFormRow("Form", drumFormPopup)
     , drumDensitySl("Density", 0, 100, 50, false)
@@ -80,7 +91,7 @@ EffectsInspector::EffectsInspector()
     btnReset.setWantsKeyboardFocus(false);
     btnReset.ghost = false;
     btnReset.iconScale = 1.0f;
-    btnReset.setTooltip("Reset unlocked Toolkit sections");
+    btnReset.setTooltip("Reset to default");
     btnReset.onClick = [this] { resetUnlockedSections(); };
     addAndMakeVisible(btnReset);
 
@@ -88,7 +99,7 @@ EffectsInspector::EffectsInspector()
     btnEffectsLock.setWantsKeyboardFocus(false);
     btnEffectsLock.ghost = false;
     btnEffectsLock.iconScale = 1.0f;
-    btnEffectsLock.setTooltip("Lock all Toolkit parameters while browsing");
+    btnEffectsLock.setTooltip("Lock all sections");
     btnEffectsLock.onClick = [this]
     {
         const bool allOn = (sectionLocks & toolkitLock::All) == toolkitLock::All;
@@ -370,6 +381,7 @@ EffectsInspector::EffectsInspector()
     keyGrid.columns = 6;
     // Match the gap between the "Key" title and the pitch buttons.
     keyGrid.contentBottomPad = 7;
+    keyGrid.outlineChips = true;
     keyGrid.multiSelect = false;
     keyGrid.setItems(keys);
     keyGrid.setSelectedIndex(0, juce::dontSendNotification);
@@ -447,7 +459,6 @@ EffectsInspector::EffectsInspector()
     timing.addRow(&swingBlock, [this] { return swingBlock.idealHeight(); }, [this] {
         return groove.swing != 0 || groove.swingGridIndex != 1;
     });
-    timing.addRow(&timingDivider, [this] { return timingDivider.idealHeight(); });
     timing.addRow(&lengthSl, kSliderRowH, [this] { return groove.length != 100; });
     timing.addRow(&pocket, kSliderRowH, [this] { return groove.pocket != 0; });
     timing.addRow(&humanize, kSliderRowH, [this] { return groove.humanize != 0; });
@@ -457,7 +468,6 @@ EffectsInspector::EffectsInspector()
     performance.addRow(&articulationStrengthSl, kSliderRowH, [this] {
         return groove.articulationIndex != (int) Articulation::Off && groove.articulationStrength > 0;
     });
-    performance.addRow(&performanceDivider, [this] { return performanceDivider.idealHeight(); });
     // Intensity / Dynamics removed from the inspector (still driven by Articulation + host params).
     dynamicsSl.setVisible(false);
     intensitySl.setVisible(false);
@@ -541,6 +551,47 @@ EffectsInspector::EffectsInspector()
             groove.arpRateIndex = idx;
             notifyGroove();
         };
+        juce::StringArray phraseTypes;
+        for (int i = 0; i < (int) PhraseType::Count; ++i)
+            phraseTypes.add(phraseTypeLabel((PhraseType) i));
+        auto fillStyles = [](fx::FlatPopup& popup)
+        {
+            juce::StringArray items;
+            for (int i = 0; i < (int) MelodyStyle::Count; ++i)
+                items.add(melodyStyleLabel((MelodyStyle) i));
+            popup.setItems(items, 0);
+        };
+        auto fillMotions = [](fx::FlatPopup& popup)
+        {
+            juce::StringArray items;
+            for (int i = 0; i < (int) MelodyContour::Count; ++i)
+                items.add(melodyContourLabel((MelodyContour) i));
+            popup.setItems(items, 0);
+        };
+        auto fillSpeeds = [](fx::FlatPopup& popup, int selected)
+        {
+            juce::StringArray items;
+            for (int i = 0; i < (int) MelodySpeed::Count; ++i)
+                items.add(melodySpeedLabel((MelodySpeed) i));
+            popup.setItems(items, selected);
+        };
+        fillStyles(arpStylePopup);
+        arpStylePopup.onChange = [this](int idx)
+        {
+            groove.arpStyleIndex = juce::jlimit(0, (int) MelodyStyle::Count - 1, idx);
+            notifyGroove();
+        };
+        fillMotions(arpMotionPopup);
+        arpMotionPopup.onChange = [this](int idx)
+        {
+            groove.arpMotionIndex = juce::jlimit(0, (int) MelodyContour::Count - 1, idx);
+            notifyGroove();
+        };
+        arpInputSwitch.onClick = [this]
+        {
+            groove.arpInput = arpInputSwitch.getToggleState();
+            notifyGroove();
+        };
         fillLengthItems(arpLengthPopup, (int) GeneratorLength::FourBars);
         arpLengthPopup.onChange = [this](int idx)
         {
@@ -570,6 +621,11 @@ EffectsInspector::EffectsInspector()
             notifyGroove();
             if (onGeneratorGenerated) onGeneratorGenerated(0);
         };
+        arpSec.addRow(&arpInputRow, kRowMinH, [this] { return groove.arpInput; });
+        arpSec.addRow(&arpShapeRow, kRowMinH, [this] { return groove.arpEnabled; });
+        arpSec.addRow(&arpStyleRow, kRowMinH, [this] { return groove.arpEnabled; });
+        arpSec.addRow(&arpRateRow, kRowMinH, [this] { return groove.arpEnabled; });
+        arpSec.addRow(&arpMotionRow, kRowMinH, [this] { return groove.arpEnabled; });
         arpSec.addRow(&arpLengthRow, kRowMinH, [this] { return groove.arpEnabled; });
         arpSec.addRow(&arpFormRow, kRowMinH, [this] {
             // Visible when folded if Form is non-Auto or length is long enough for tiling.
@@ -577,8 +633,6 @@ EffectsInspector::EffectsInspector()
                 && (groove.arpFormIndex != (int) GeneratorForm::Auto
                     || groove.arpLengthIndex >= (int) GeneratorLength::FourBars);
         });
-        arpSec.addRow(&arpShapeRow, kRowMinH, [this] { return groove.arpEnabled; });
-        arpSec.addRow(&arpRateRow, kRowMinH, [this] { return groove.arpEnabled; });
         arpSec.addRow(&arpDensitySl, kSliderRowH, [this] {
             return groove.arpEnabled && groove.arpDensity != 55;
         });
@@ -587,6 +641,12 @@ EffectsInspector::EffectsInspector()
         juce::StringArray styles;
         for (int i = 0; i < (int) MelodyStyle::Count; ++i)
             styles.add(melodyStyleLabel((MelodyStyle) i));
+        melodyTypePopup.setItems(phraseTypes, 0);
+        melodyTypePopup.onChange = [this](int idx)
+        {
+            groove.melodyTypeIndex = juce::jlimit(0, (int) PhraseType::Count - 1, idx);
+            notifyGroove();
+        };
         melodyStylePopup.setItems(styles, 0);
         melodyStylePopup.onChange = [this](int idx)
         {
@@ -639,15 +699,16 @@ EffectsInspector::EffectsInspector()
             if (onGeneratorGenerated) onGeneratorGenerated(1);
         };
         melodySec.addRow(&melodyInputRow, kRowMinH, [this] { return groove.melodyInput; });
+        melodySec.addRow(&melodyTypeRow, kRowMinH, [this] { return groove.melodyEnabled; });
+        melodySec.addRow(&melodyStyleRow, kRowMinH, [this] { return groove.melodyEnabled; });
+        melodySec.addRow(&melodySpeedRow, kRowMinH, [this] { return groove.melodyEnabled; });
+        melodySec.addRow(&melodyContourRow, kRowMinH, [this] { return groove.melodyEnabled; });
         melodySec.addRow(&melodyLengthRow, kRowMinH, [this] { return groove.melodyEnabled; });
         melodySec.addRow(&melodyFormRow, kRowMinH, [this] {
             return groove.melodyEnabled
                 && (groove.melodyFormIndex != (int) GeneratorForm::Auto
                     || groove.melodyLengthIndex >= (int) GeneratorLength::FourBars);
         });
-        melodySec.addRow(&melodyStyleRow, kRowMinH, [this] { return groove.melodyEnabled; });
-        melodySec.addRow(&melodyContourRow, kRowMinH, [this] { return groove.melodyEnabled; });
-        melodySec.addRow(&melodySpeedRow, kRowMinH, [this] { return groove.melodyEnabled; });
         melodySec.addRow(&melodyGenerateRow, kRowMinH, [this] { return groove.melodyEnabled; });
 
         juce::StringArray voicings;
@@ -689,6 +750,24 @@ EffectsInspector::EffectsInspector()
             groove.chordFormIndex = juce::jlimit(0, (int) GeneratorForm::Count - 1, idx);
             notifyGroove();
         };
+        chordTypePopup.setItems(phraseTypes, (int) PhraseType::Chord);
+        chordTypePopup.onChange = [this](int idx)
+        {
+            groove.chordTypeIndex = juce::jlimit(0, (int) PhraseType::Count - 1, idx);
+            notifyGroove();
+        };
+        fillSpeeds(chordSpeedPopup, (int) MelodySpeed::Medium);
+        chordSpeedPopup.onChange = [this](int idx)
+        {
+            groove.chordSpeedIndex = juce::jlimit(0, (int) MelodySpeed::Count - 1, idx);
+            notifyGroove();
+        };
+        fillMotions(chordMotionPopup);
+        chordMotionPopup.onChange = [this](int idx)
+        {
+            groove.chordMotionIndex = juce::jlimit(0, (int) MelodyContour::Count - 1, idx);
+            notifyGroove();
+        };
         chordsInputSwitch.onClick = [this]
         {
             groove.chordsInput = chordsInputSwitch.getToggleState();
@@ -705,6 +784,10 @@ EffectsInspector::EffectsInspector()
             if (onGeneratorGenerated) onGeneratorGenerated(2);
         };
         chordsSec.addRow(&chordsInputRow, kRowMinH, [this] { return groove.chordsInput; });
+        chordsSec.addRow(&chordTypeRow, kRowMinH, [this] { return groove.chordsEnabled; });
+        chordsSec.addRow(&chordColorRow, kRowMinH, [this] { return groove.chordsEnabled; });
+        chordsSec.addRow(&chordSpeedRow, kRowMinH, [this] { return groove.chordsEnabled; });
+        chordsSec.addRow(&chordMotionRow, kRowMinH, [this] { return groove.chordsEnabled; });
         chordsSec.addRow(&chordLengthRow, kRowMinH, [this] { return groove.chordsEnabled; });
         chordsSec.addRow(&chordFormRow, kRowMinH, [this] {
             return groove.chordsEnabled
@@ -712,7 +795,6 @@ EffectsInspector::EffectsInspector()
                     || groove.chordLengthIndex >= (int) GeneratorLength::FourBars);
         });
         chordsSec.addRow(&chordVoicingRow, kRowMinH, [this] { return groove.chordsEnabled; });
-        chordsSec.addRow(&chordColorRow, kRowMinH, [this] { return groove.chordsEnabled; });
         chordsSec.addRow(&chordRhythmRow, kRowMinH, [this] { return groove.chordsEnabled; });
         chordsSec.addRow(&chordsGenerateRow, kRowMinH, [this] { return groove.chordsEnabled; });
 
@@ -737,6 +819,24 @@ EffectsInspector::EffectsInspector()
             groove.bassFormIndex = juce::jlimit(0, (int) GeneratorForm::Count - 1, idx);
             notifyGroove();
         };
+        bassTypePopup.setItems(phraseTypes, 0);
+        bassTypePopup.onChange = [this](int idx)
+        {
+            groove.bassTypeIndex = juce::jlimit(0, (int) PhraseType::Count - 1, idx);
+            notifyGroove();
+        };
+        fillStyles(bassStylePopup);
+        bassStylePopup.onChange = [this](int idx)
+        {
+            groove.bassStyleIndex = juce::jlimit(0, (int) MelodyStyle::Count - 1, idx);
+            notifyGroove();
+        };
+        fillSpeeds(bassSpeedPopup, (int) MelodySpeed::Medium);
+        bassSpeedPopup.onChange = [this](int idx)
+        {
+            groove.bassSpeedIndex = juce::jlimit(0, (int) MelodySpeed::Count - 1, idx);
+            notifyGroove();
+        };
         bassInputSwitch.onClick = [this]
         {
             groove.bassInput = bassInputSwitch.getToggleState();
@@ -753,13 +853,16 @@ EffectsInspector::EffectsInspector()
             if (onGeneratorGenerated) onGeneratorGenerated(3);
         };
         bassSec.addRow(&bassInputRow, kRowMinH, [this] { return groove.bassInput; });
+        bassSec.addRow(&bassTypeRow, kRowMinH, [this] { return groove.bassEnabled; });
+        bassSec.addRow(&bassStyleRow, kRowMinH, [this] { return groove.bassEnabled; });
+        bassSec.addRow(&bassSpeedRow, kRowMinH, [this] { return groove.bassEnabled; });
+        bassSec.addRow(&bassMotionRow, kRowMinH, [this] { return groove.bassEnabled; });
         bassSec.addRow(&bassLengthRow, kRowMinH, [this] { return groove.bassEnabled; });
         bassSec.addRow(&bassFormRow, kRowMinH, [this] {
             return groove.bassEnabled
                 && (groove.bassFormIndex != (int) GeneratorForm::Auto
                     || groove.bassLengthIndex >= (int) GeneratorLength::FourBars);
         });
-        bassSec.addRow(&bassMotionRow, kRowMinH, [this] { return groove.bassEnabled; });
         bassSec.addRow(&bassGenerateRow, kRowMinH, [this] { return groove.bassEnabled; });
 
         juce::StringArray drumStyles;
@@ -769,6 +872,12 @@ EffectsInspector::EffectsInspector()
         drumStylePopup.onChange = [this](int idx)
         {
             groove.drumStyleIndex = idx;
+            notifyGroove();
+        };
+        fillSpeeds(drumSpeedPopup, (int) MelodySpeed::Medium);
+        drumSpeedPopup.onChange = [this](int idx)
+        {
+            groove.drumSpeedIndex = juce::jlimit(0, (int) MelodySpeed::Count - 1, idx);
             notifyGroove();
         };
         fillLengthItems(drumLengthPopup, (int) GeneratorLength::FourBars);
@@ -806,6 +915,7 @@ EffectsInspector::EffectsInspector()
             notifyGroove();
         };
         drumSec.addRow(&drumStyleRow, kRowMinH, [this] { return groove.drumsEnabled; });
+        drumSec.addRow(&drumSpeedRow, kRowMinH, [this] { return groove.drumsEnabled; });
         drumSec.addRow(&drumLengthRow, kRowMinH, [this] { return groove.drumsEnabled; });
         drumSec.addRow(&drumFormRow, kRowMinH, [this] {
             return groove.drumsEnabled
@@ -919,7 +1029,7 @@ EffectsInspector::EffectsInspector()
     btnChanged.setWantsKeyboardFocus(false);
     btnChanged.ghost = false;
     btnChanged.iconScale = 1.0f;
-    btnChanged.setTooltip("Hide unused controls — show only what you have changed");
+    btnChanged.setTooltip("Show changes only");
     btnChanged.onClick = [this]
     {
         if (externalGeneratorHost == nullptr && paneTab != 1)
@@ -1018,8 +1128,8 @@ void EffectsInspector::refreshHeaderLockButton()
     const bool allOn = (sectionLocks & toolkitLock::All) == toolkitLock::All;
     btnEffectsLock.icon = allOn ? icons::lockClosed : icons::lockOpen;
     btnEffectsLock.active = allOn;
-    btnEffectsLock.setTooltip(allOn ? "Unlock all Toolkit parameters"
-                                    : "Lock all Toolkit parameters while browsing");
+    btnEffectsLock.setTooltip(allOn ? "Unlock all sections"
+                                    : "Lock all sections");
     btnEffectsLock.repaint();
 }
 
@@ -1300,11 +1410,18 @@ void EffectsInspector::setGroove(const GrooveParams& g, juce::NotificationType)
                           juce::dontSendNotification);
     arpShapePopup.setIndex(juce::jlimit(0, (int) ArpShape::Count - 1, g.arpShapeIndex),
                            juce::dontSendNotification);
+    arpStylePopup.setIndex(juce::jlimit(0, (int) MelodyStyle::Count - 1, g.arpStyleIndex),
+                           juce::dontSendNotification);
+    arpMotionPopup.setIndex(juce::jlimit(0, (int) MelodyContour::Count - 1, g.arpMotionIndex),
+                            juce::dontSendNotification);
+    arpInputSwitch.setToggleState(g.arpInput, juce::dontSendNotification);
     arpRatePopup.setIndex(juce::jlimit(0, (int) DelayTime::Count - 1, g.arpRateIndex),
                           juce::dontSendNotification);
     arpDensitySl.setValue(g.arpDensity, juce::dontSendNotification);
     arpDensitySl.valueText = g.arpDensity >= 100 ? "Every" : (juce::String(g.arpDensity) + "%");
     melodyInputSwitch.setToggleState(g.melodyInput, juce::dontSendNotification);
+    melodyTypePopup.setIndex(juce::jlimit(0, (int) PhraseType::Count - 1, g.melodyTypeIndex),
+                             juce::dontSendNotification);
     melodyStylePopup.setIndex(juce::jlimit(0, (int) MelodyStyle::Count - 1, g.melodyStyleIndex),
                               juce::dontSendNotification);
     melodyLengthPopup.setIndex(juce::jlimit(0, (int) GeneratorLength::Count - 1, g.melodyLengthIndex),
@@ -1316,6 +1433,12 @@ void EffectsInspector::setGroove(const GrooveParams& g, juce::NotificationType)
     melodySpeedPopup.setIndex(juce::jlimit(0, (int) MelodySpeed::Count - 1, g.melodySpeedIndex),
                               juce::dontSendNotification);
     chordsInputSwitch.setToggleState(g.chordsInput, juce::dontSendNotification);
+    chordTypePopup.setIndex(juce::jlimit(0, (int) PhraseType::Count - 1, g.chordTypeIndex),
+                            juce::dontSendNotification);
+    chordSpeedPopup.setIndex(juce::jlimit(0, (int) MelodySpeed::Count - 1, g.chordSpeedIndex),
+                             juce::dontSendNotification);
+    chordMotionPopup.setIndex(juce::jlimit(0, (int) MelodyContour::Count - 1, g.chordMotionIndex),
+                              juce::dontSendNotification);
     chordLengthPopup.setIndex(juce::jlimit(0, (int) GeneratorLength::Count - 1, g.chordLengthIndex),
                               juce::dontSendNotification);
     chordFormPopup.setIndex(juce::jlimit(0, (int) GeneratorForm::Count - 1, g.chordFormIndex),
@@ -1327,6 +1450,12 @@ void EffectsInspector::setGroove(const GrooveParams& g, juce::NotificationType)
     chordRhythmPopup.setIndex(juce::jlimit(0, (int) ChordRhythm::Count - 1, g.chordRhythmIndex),
                               juce::dontSendNotification);
     bassInputSwitch.setToggleState(g.bassInput, juce::dontSendNotification);
+    bassTypePopup.setIndex(juce::jlimit(0, (int) PhraseType::Count - 1, g.bassTypeIndex),
+                           juce::dontSendNotification);
+    bassStylePopup.setIndex(juce::jlimit(0, (int) MelodyStyle::Count - 1, g.bassStyleIndex),
+                            juce::dontSendNotification);
+    bassSpeedPopup.setIndex(juce::jlimit(0, (int) MelodySpeed::Count - 1, g.bassSpeedIndex),
+                            juce::dontSendNotification);
     bassLengthPopup.setIndex(juce::jlimit(0, (int) GeneratorLength::Count - 1, g.bassLengthIndex),
                              juce::dontSendNotification);
     bassFormPopup.setIndex(juce::jlimit(0, (int) GeneratorForm::Count - 1, g.bassFormIndex),
@@ -1334,6 +1463,8 @@ void EffectsInspector::setGroove(const GrooveParams& g, juce::NotificationType)
     bassMotionPopup.setIndex(juce::jlimit(0, (int) BassMotion::Count - 1, g.bassMotionIndex),
                              juce::dontSendNotification);
     drumStylePopup.setIndex(juce::jlimit(0, (int) DrumStyle::Count - 1, g.drumStyleIndex),
+                            juce::dontSendNotification);
+    drumSpeedPopup.setIndex(juce::jlimit(0, (int) MelodySpeed::Count - 1, g.drumSpeedIndex),
                             juce::dontSendNotification);
     drumLengthPopup.setIndex(juce::jlimit(0, (int) GeneratorLength::Count - 1, g.drumLengthIndex),
                              juce::dontSendNotification);
@@ -1776,21 +1907,31 @@ void EffectsInspector::resized()
     fitSelect(arpLengthPopup, arpLengthRow);
     fitSelect(arpFormPopup, arpFormRow);
     fitSelect(arpShapePopup, arpShapeRow);
+    fitSelect(arpStylePopup, arpStyleRow);
     fitSelect(arpRatePopup, arpRateRow);
+    fitSelect(arpMotionPopup, arpMotionRow);
     fitSelect(melodyLengthPopup, melodyLengthRow);
     fitSelect(melodyFormPopup, melodyFormRow);
+    fitSelect(melodyTypePopup, melodyTypeRow);
     fitSelect(melodyStylePopup, melodyStyleRow);
     fitSelect(melodyContourPopup, melodyContourRow);
     fitSelect(melodySpeedPopup, melodySpeedRow);
     fitSelect(chordLengthPopup, chordLengthRow);
     fitSelect(chordFormPopup, chordFormRow);
+    fitSelect(chordTypePopup, chordTypeRow);
+    fitSelect(chordSpeedPopup, chordSpeedRow);
+    fitSelect(chordMotionPopup, chordMotionRow);
     fitSelect(chordVoicingPopup, chordVoicingRow);
     fitSelect(chordColorPopup, chordColorRow);
     fitSelect(chordRhythmPopup, chordRhythmRow);
     fitSelect(bassLengthPopup, bassLengthRow);
     fitSelect(bassFormPopup, bassFormRow);
+    fitSelect(bassTypePopup, bassTypeRow);
+    fitSelect(bassStylePopup, bassStyleRow);
+    fitSelect(bassSpeedPopup, bassSpeedRow);
     fitSelect(bassMotionPopup, bassMotionRow);
     fitSelect(drumStylePopup, drumStyleRow);
+    fitSelect(drumSpeedPopup, drumSpeedRow);
     fitSelect(drumLengthPopup, drumLengthRow);
     fitSelect(drumFormPopup, drumFormRow);
     quantizeBlock.setControlWidth(stepW);
@@ -1798,6 +1939,7 @@ void EffectsInspector::resized()
     delayBlock.setControlWidth(stepW);
     arpGenerateRow.setFillWidth(true);
     melodyGenerateRow.setFillWidth(true);
+    arpInputRow.setControlWidth(arpInputSwitch.idealWidth());
     melodyInputRow.setControlWidth(melodyInputSwitch.idealWidth());
     chordsGenerateRow.setFillWidth(true);
     chordsInputRow.setControlWidth(chordsInputSwitch.idealWidth());
@@ -1832,10 +1974,16 @@ void EffectsInspector::paint(juce::Graphics& g)
     // Column rule on the left edge of the Effects header.
     g.fillRect(0, header.getY(), 1, header.getHeight());
 
-    g.setFont(uiFontFixed(12.0f, true));
     if (externalGeneratorHost != nullptr)
+    {
+        g.setFont(ds::font(ds::Type::Logo));
+        g.setColour(ds::ink());
+        g.drawText("Toolkit", header.reduced(metrics::scaled(8), 0),
+                   juce::Justification::centredLeft, false);
         return;
+    }
 
+    g.setFont(uiFontFixed(12.0f, true));
     auto drawTab = [&](juce::Rectangle<int> r, const juce::String& label, bool active, bool enabled)
     {
         g.setColour(active ? ds::ink() : (enabled ? ds::inkMuted() : ds::inkFaint()));
@@ -1894,7 +2042,7 @@ void EffectsInspector::mouseMove(const juce::MouseEvent& e)
     const bool overFold = local.y < metrics::paneHeaderH()
                        && toolkitFoldBounds.expanded(8, 6).contains(local);
     if (overFold)
-        setTooltip("Fold all, keeping changed controls");
+        setTooltip("Show changes only");
     setMouseCursor(overFold ? juce::MouseCursor::PointingHandCursor
                             : juce::MouseCursor::NormalCursor);
 }

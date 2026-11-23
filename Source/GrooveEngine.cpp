@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <map>
 #include <set>
 
 namespace pflow {
@@ -1143,6 +1144,56 @@ std::vector<RollNote> applyDelay(std::vector<RollNote> notes, const GrooveParams
 
 } // namespace
 
+namespace {
+
+/** Copy notes in `ids` from `varied` onto `base`. Match by id first; if an id
+    is missing (rewritten), match by the original note's start+pitch. */
+std::vector<RollNote> mergeVariedSelection(const std::vector<RollNote>& base,
+                                           const std::vector<RollNote>& varied,
+                                           const std::set<int>& ids,
+                                           const std::vector<RollNote>& originals)
+{
+    if (ids.empty())
+        return varied;
+
+    std::map<int, const RollNote*> byId;
+    for (const auto& n : varied)
+        byId[n.id] = &n;
+
+    struct Key { double start; int pitch; };
+    auto keyLess = [](const Key& a, const Key& b)
+    {
+        if (std::abs(a.start - b.start) > 1.0e-6) return a.start < b.start;
+        return a.pitch < b.pitch;
+    };
+    std::map<Key, const RollNote*, decltype(keyLess)> byStartPitch(keyLess);
+    for (const auto& n : varied)
+        byStartPitch[{ n.start, n.pitch }] = &n;
+
+    std::map<int, Key> originalKey;
+    for (const auto& n : originals)
+        if (ids.count(n.id) > 0)
+            originalKey[n.id] = { n.start, n.pitch };
+
+    std::vector<RollNote> out = base;
+    for (auto& n : out)
+    {
+        if (ids.count(n.id) == 0)
+            continue;
+        if (const auto it = byId.find(n.id); it != byId.end())
+        {
+            n = *it->second;
+            continue;
+        }
+        if (const auto ok = originalKey.find(n.id); ok != originalKey.end())
+            if (const auto it = byStartPitch.find(ok->second); it != byStartPitch.end())
+                n = *it->second;
+    }
+    return out;
+}
+
+} // namespace
+
 std::vector<RollNote> applyGroove(const std::vector<RollNote>& notes, const GrooveParams& k,
                                   int sourceComplexity,
                                   ClipKind kind,
@@ -1150,10 +1201,24 @@ std::vector<RollNote> applyGroove(const std::vector<RollNote>& notes, const Groo
                                   Mode mode,
                                   NoteProcessScope scope)
 {
-    // Loop / selection: transform only the notes inside the region, then merge
-    // them back. Delay can add notes, so the subset is replaced as a whole.
+    // Selection: transform only the notes inside the region, then merge them
+    // back. Delay can add notes, so the subset is replaced as a whole.
+    // Variations need the full clip for musical context — build on everything,
+    // then copy only the selected notes onto the scoped result.
     if (scope.restricts())
     {
+        if (k.variationIndex > 0
+            && scope.selectedIds != nullptr
+            && !scope.selectedIds->empty())
+        {
+            GrooveParams noVar = k;
+            noVar.variationIndex = 0;
+            auto scoped = applyGroove(notes, noVar, sourceComplexity, kind, rootPc, mode, scope);
+            auto fullFx = applyGroove(notes, noVar, sourceComplexity, kind, rootPc, mode);
+            auto varied = applyMusicalVariation(std::move(fullFx), k.variationIndex, kind, rootPc, mode);
+            return mergeVariedSelection(scoped, varied, *scope.selectedIds, notes);
+        }
+
         std::vector<RollNote> subset, rest;
         subset.reserve(notes.size());
         rest.reserve(notes.size());
@@ -1408,6 +1473,140 @@ double noteVelocityWithBase(double base, const RollNote& n, const GrooveParams& 
     }
 
     return std::clamp(v, 0.04, 1.0);
+}
+
+NoteGroove noteGrooveFrom(const GrooveParams& g)
+{
+    NoteGroove n;
+    n.swing = g.swing;
+    n.pocket = g.pocket;
+    n.humanize = g.humanize;
+    n.dynamics = g.dynamics;
+    n.length = g.length;
+    n.intensity = g.intensity;
+    n.swingGridIndex = g.swingGridIndex;
+    n.quantizeGridIndex = g.quantizeGridIndex;
+    n.quantizeStrength = g.quantizeStrength;
+    n.articulationIndex = g.articulationIndex;
+    n.articulationStrength = g.articulationStrength;
+    n.sustainPedalMode = g.sustainPedalMode;
+    n.complexityTarget = g.complexityTarget;
+    n.delayTimeIndex = g.delayTimeIndex;
+    n.delayAmount = g.delayAmount;
+    n.delayFeedback = g.delayFeedback;
+    n.velocityRangeLo = g.velocityRangeLo;
+    n.velocityRangeHi = g.velocityRangeHi;
+    n.variationIndex = g.variationIndex;
+    n.revoice = g.revoice;
+    n.strumDirectionIndex = g.strumDirectionIndex;
+    n.strumSpeed = g.strumSpeed;
+    n.strumAmount = g.strumAmount;
+    return n;
+}
+
+void applyNoteGroove(GrooveParams& g, const NoteGroove& stored)
+{
+    g.swing = stored.swing;
+    g.pocket = stored.pocket;
+    g.humanize = stored.humanize;
+    g.dynamics = stored.dynamics;
+    g.length = stored.length;
+    g.intensity = stored.intensity;
+    g.swingGridIndex = stored.swingGridIndex;
+    g.quantizeGridIndex = stored.quantizeGridIndex;
+    g.quantizeStrength = stored.quantizeStrength;
+    g.articulationIndex = stored.articulationIndex;
+    g.articulationStrength = stored.articulationStrength;
+    g.sustainPedalMode = stored.sustainPedalMode;
+    g.complexityTarget = stored.complexityTarget;
+    g.delayTimeIndex = stored.delayTimeIndex;
+    g.delayAmount = stored.delayAmount;
+    g.delayFeedback = stored.delayFeedback;
+    g.velocityRangeLo = stored.velocityRangeLo;
+    g.velocityRangeHi = stored.velocityRangeHi;
+    g.variationIndex = stored.variationIndex;
+    g.revoice = stored.revoice;
+    g.strumDirectionIndex = stored.strumDirectionIndex;
+    g.strumSpeed = stored.strumSpeed;
+    g.strumAmount = stored.strumAmount;
+}
+
+bool clipFxIsDefault(const GrooveParams& g)
+{
+    return noteGrooveFrom(g) == NoteGroove{};
+}
+
+std::vector<RollNote> applyStoredGrooves(const std::vector<RollNote>& notes,
+                                         const std::map<int, NoteGroove>& stored,
+                                         const GrooveParams& base,
+                                         int sourceComplexity,
+                                         ClipKind kind,
+                                         int rootPc,
+                                         Mode mode)
+{
+    std::set<int> variationIndices;
+    for (const auto& [id, fx] : stored)
+        if (fx.variationIndex > 0)
+            variationIndices.insert(fx.variationIndex);
+
+    struct Group
+    {
+        NoteGroove fx;
+        std::vector<RollNote> notes;
+    };
+    std::vector<Group> groups;
+    for (const auto& n : notes)
+    {
+        NoteGroove fx{};
+        if (const auto it = stored.find(n.id); it != stored.end())
+            fx = it->second;
+        // Defer variation so it can run on the full clip, then merge.
+        fx.variationIndex = 0;
+        bool found = false;
+        for (auto& gr : groups)
+        {
+            if (gr.fx == fx)
+            {
+                gr.notes.push_back(n);
+                found = true;
+                break;
+            }
+        }
+        if (!found)
+            groups.push_back(Group{ fx, { n } });
+    }
+
+    std::vector<RollNote> out;
+    out.reserve(notes.size());
+    for (auto& gr : groups)
+    {
+        GrooveParams k = base;
+        applyNoteGroove(k, gr.fx);
+        k.variationIndex = 0;
+        auto part = applyGroove(gr.notes, k, sourceComplexity, kind, rootPc, mode);
+        out.insert(out.end(), part.begin(), part.end());
+    }
+    std::stable_sort(out.begin(), out.end(), [](const RollNote& a, const RollNote& b)
+    {
+        if (std::abs(a.start - b.start) > 1.0e-9) return a.start < b.start;
+        if (a.pitch != b.pitch) return a.pitch < b.pitch;
+        return a.id < b.id;
+    });
+
+    if (variationIndices.empty())
+        return out;
+
+    const auto baseOut = out;
+    for (int var : variationIndices)
+    {
+        auto varied = applyMusicalVariation(baseOut, var, kind, rootPc, mode);
+        std::set<int> ids;
+        for (const auto& [id, fx] : stored)
+            if (fx.variationIndex == var)
+                ids.insert(id);
+        out = mergeVariedSelection(out, varied, ids, notes);
+    }
+    return out;
 }
 
 } // namespace pflow

@@ -219,10 +219,12 @@ inline juce::Rectangle<float> switchFace(juce::Rectangle<float> bounds)
 }
 
 /** Row switch / section lock toggle. Returns the face for focus rings.
-    `glyph` (optional icon name) is stroked inside the knob. */
+    `glyph` (optional icon name) is stroked inside the knob.
+    `primaryOn` paints the on-track in the app primary colour. */
 inline juce::Rectangle<float> paintSwitchPill(juce::Graphics& g, juce::Rectangle<float> bounds,
                                               bool on, bool enabled, bool over, bool tipHot,
-                                              const juce::String& glyph = {})
+                                              const juce::String& glyph = {},
+                                              bool primaryOn = false)
 {
     const float border = themeDepth() == ThemeDepth::Brutal
                              ? juce::jmax(1.5f, themeBorderPx())
@@ -231,7 +233,7 @@ inline juce::Rectangle<float> paintSwitchPill(juce::Graphics& g, juce::Rectangle
     const float h = face.getHeight();
     const float rad = h * 0.5f;
 
-    auto track = tipHot ? tooltipAccent() : (on ? ds::acc() : ds::edge());
+    auto track = tipHot ? tooltipAccent() : (on ? (primaryOn ? ds::primary() : ds::acc()) : ds::edge());
     if (!enabled) track = track.withMultipliedAlpha(0.45f);
     else if (over && !on)
         track = track.withMultipliedAlpha(0.8f).overlaidWith(ds::inkFaint().withAlpha(0.25f));
@@ -293,6 +295,7 @@ class FlatSwitch : public juce::Button
 public:
     FlatSwitch() : juce::Button({})
     {
+        setComponentID("FlatSwitch");
         setClickingTogglesState(true);
         setWantsKeyboardFocus(true);
         setOpaque(false);
@@ -302,12 +305,26 @@ public:
         setColour(juce::ComboBox::outlineColourId, juce::Colours::transparentBlack);
     }
 
+    /** Settings switches: on-state uses the primary colour, and corners match the panel. */
+    bool primaryWhenOn = false;
+
+    void paint(juce::Graphics& g) override
+    {
+        // Button::paint draws a square look-and-feel face first. That face, clipped
+        // to this control, leaves black squares in the capsule corners.
+        if (primaryWhenOn)
+        {
+            g.setColour(ds::surface100());
+            g.fillRect(getLocalBounds());
+        }
+        paintButton(g, isOver(), isDown());
+    }
+
     void paintButton(juce::Graphics& g, bool, bool) override
     {
-        const auto face = paintSwitchPill(g, getLocalBounds().toFloat(), getToggleState(),
-                                          isEnabled(), isMouseOver(), hasTooltipHighlight(this));
-        if (hasKeyboardFocus(true))
-            drawFocusRing(g, face, face.getHeight() * 0.5f);
+        paintSwitchPill(g, getLocalBounds().toFloat(), getToggleState(),
+                        isEnabled(), isMouseOver(), hasTooltipHighlight(this),
+                        {}, primaryWhenOn && getToggleState());
     }
 
     int idealWidth() const { return 28; }
@@ -321,6 +338,15 @@ public:
     FlatPopup() { setWantsKeyboardFocus(true); }
     std::function<void(int)> onChange;
 
+    /** Last popup the user opened. Arrow keys step it while it stays armed. */
+    static FlatPopup*& armedSlot()
+    {
+        static FlatPopup* popup = nullptr;
+        return popup;
+    }
+    static FlatPopup* armed() { return armedSlot(); }
+    static void clearArmed() { armedSlot() = nullptr; }
+
     void setItems(const juce::StringArray& items, int selected)
     {
         labels = items;
@@ -333,6 +359,7 @@ public:
     void mouseDown(const juce::MouseEvent&) override
     {
         if (labels.isEmpty()) return;
+        armedSlot() = this;
         if (!hasKeyboardFocus(true))
             grabKeyboardFocus();
         showMenu();
@@ -376,20 +403,20 @@ public:
         for (const auto& s : labels)
             maxW = juce::jmax(maxW, font.getStringWidthFloat(s));
         // pad + caret column; never narrower than the Caps select.
-        return juce::jmax(kSelectW, (int) std::ceil((double) maxW) + 28);
+        return juce::jmax(kSelectW, (int) std::ceil((double) maxW) + 40);
     }
 
     void paint(juce::Graphics& g) override
     {
         // Groove field with a chevron: surface-300, edge border, accent outline on hover.
         auto r = getLocalBounds().toFloat().withSizeKeepingCentre((float) getWidth(), juce::jmin((float) getHeight(), 20.0f));
-        fillTallWell(g, r, isMouseOver(), this);
+        fillTallWell(g, r, isMouseOver(), nullptr);
 
         auto caret = r.removeFromRight(16.0f).withSizeKeepingCentre(10.0f, 10.0f);
         drawStrokedChevron(g, caret, ds::inkMuted(), true);
 
         auto textArea = r.reduced(6.0f, 0.0f);
-        g.setColour(hasTooltipHighlight(this) ? juce::Colour(0xff1a1200) : ds::ink());
+        g.setColour(ds::ink());
         g.setFont(monoFontFixed(11.0f));
         const juce::String val = labels.size() > index ? labels[index] : juce::String();
         g.drawText(val, textArea.toNearestInt(), juce::Justification::centredLeft, false);
@@ -1047,6 +1074,8 @@ public:
     bool countSummary = false;
     /** Empty space under the chips, so the next row isn't flush with the grid. */
     int contentBottomPad = 0;
+    /** 1 px edge on every chip, matching toolkit dropdowns. */
+    bool outlineChips = false;
     SelectStyle selectStyle = SelectStyle::SolidPrimary;
     juce::String hint;
 
@@ -1167,7 +1196,6 @@ public:
             g.fillRect(header);
             g.setColour(ds::line());
             g.fillRect(header.getX(), header.getY(), header.getWidth(), 1);
-            g.fillRect(header.getX(), header.getBottom() - 1, header.getWidth(), 1);
         }
         if (sidebarLabelStyle)
         {
@@ -1249,6 +1277,11 @@ public:
                     g.setColour(ds::line());
                     g.drawRoundedRectangle(cell.reduced(0.5f), ds::radius::sm, 1.0f);
                 }
+            }
+            if (outlineChips)
+            {
+                g.setColour(ds::edge());
+                g.drawRoundedRectangle(cell.reduced(0.5f), ds::radius::sm, 1.0f);
             }
             if (cand)
             {
@@ -1629,7 +1662,6 @@ public:
             g.fillRect(header);
             g.setColour(ds::line());
             g.fillRect(header.getX(), header.getY(), header.getWidth(), 1);
-            g.fillRect(header.getX(), header.getBottom() - 1, header.getWidth(), 1);
         }
         if (sidebarLabelStyle)
         {
@@ -2455,7 +2487,7 @@ public:
             lockHover = overLock;
             resetHover = overReset;
             if (overReset)
-                setTooltip("Reset section");
+                setTooltip("Reset to default");
             else if (overLock)
                 setTooltip(locked ? "Unlock section" : "Lock section");
             else

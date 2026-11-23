@@ -165,10 +165,6 @@ public:
     int filterIdealHeight() const;
     bool isFilterOpen() const { return filterOpen; }
     void setFilterOpen(bool open);
-    /** Commit the draft filter panel into the live browser criteria. */
-    void applyFilterDraft();
-    /** Revert the filter panel to the snapshot taken when the popover opened. */
-    void cancelFilterDraft();
     int activeFilterCount() const;
     juce::String describeActiveFilters() const;
     void resetFilters();
@@ -178,7 +174,11 @@ public:
     std::function<void(bool)> onFilterOpenChanged;
     std::function<void()> onFilterLayoutChanged;
     std::function<void(BrowserSortColumn)> onSortChanged;
+    std::function<void(bool)> onSortDirectionChanged;
     void setSortColumn(BrowserSortColumn col);
+    BrowserSortColumn getSortColumn() const;
+    bool sortIsAscending() const;
+    void hideKindColumn(ClipKind kind);
 
     /** Open/focus the SEARCH field (legacy name kept for editor wiring). */
     void setSearchFormOpen(bool open);
@@ -282,8 +282,6 @@ private:
     int scanProgressTotal = 0;
     bool filterOpen = false;
     bool filterApplyPending = false;
-    bool filterEditing = false; // popover open: edits are draft until Apply
-    BrowserSearch filterDraftSnapshot;
     float scanAngle = 0.0f;
     int currentClipCount = 0;
     int starredCount = 0;
@@ -318,20 +316,34 @@ private:
         void toggleHideDuplicates();
         void setSortColumn(BrowserSortColumn col);
         BrowserSortColumn getSortColumn() const { return sortColumn; }
+        bool sortIsAscending() const { return sortAscending; }
+        void hideKind(ClipKind kind);
+        juce::String getQuery() const { return queryField.getText().trim(); }
+        void setQuery(const juce::String& q);
+        std::function<void()> onSearchReturn;
         std::function<void()> onCriteriaChanged;
         std::function<void(bool)> onSubdirsChanged;
         std::function<void()> onLayoutChanged;
         std::function<void(BrowserSortColumn)> onSortChanged;
+        std::function<void(bool)> onSortDirectionChanged;
     private:
-        void mouseDown(const juce::MouseEvent&) override;
         bool hideDuplicates = true;
         bool includeSubdirs = false;
         bool scanning = false;
-        juce::Rectangle<int> hideDupesBounds, resetBounds;
-        juce::Rectangle<int> subdirRowBounds, subdirSwitchBounds;
+        juce::Rectangle<int> searchLabelBounds;
         juce::Rectangle<int> sortRowBounds;
+        juce::Rectangle<int> subdirRowBounds;
+        juce::Rectangle<int> hideDupesBounds;
         BrowserSortColumn sortColumn = BrowserSortColumn::Name;
+        bool sortAscending = true;
+        juce::TextEditor queryField;
+        ChipBtn searchBtn { "Search" };
+        fx::FlatSwitch subdirSwitch;
+        fx::FlatSwitch hideDupesSwitch;
+        fx::InlineRow subdirRow;
+        fx::InlineRow hideDupesRow;
         fx::FlatPopup sortPopup;
+        IconBtn sortDirBtn { icons::caretUp, "Sort order" };
         fx::ChipGrid keyGrid;
         fx::ChipGrid kindGrid;
         fx::ChipGrid tagGrid;
@@ -455,6 +467,7 @@ public:
     void resized() override;
     void paint(juce::Graphics&) override;
     void mouseDown(const juce::MouseEvent&) override;
+    void mouseDoubleClick(const juce::MouseEvent&) override;
     void mouseDrag(const juce::MouseEvent&) override;
     void mouseUp(const juce::MouseEvent&) override;
     void mouseMove(const juce::MouseEvent&) override;
@@ -486,6 +499,7 @@ public:
     void fitNameColumnToContents();
     /** Pixel width needed to show every visible column without horizontal scroll. */
     int idealContentWidth() const { return totalContentWidth(); }
+    void repaintRows() { content.repaint(); repaint(); }
     std::function<void(const BrowserColumnVisibility&)> onColumnVisibilityChanged;
     std::function<void(int logicalWidth)> onNameColumnWidthChanged;
 
@@ -516,7 +530,8 @@ public:
     }
 
 private:
-    class ListContent : public juce::Component
+    class ListContent : public juce::Component,
+                        public juce::SettableTooltipClient
     {
     public:
         explicit ListContent(FileListPanel& p) : owner(p) {}
@@ -586,6 +601,7 @@ private:
     juce::Rectangle<int> headerColumnBounds(SortColumn col) const;
     ColumnRects splitRowColumns(juce::Rectangle<int> row) const;
     int totalContentWidth() const;
+    bool foldersOnly() const;
     bool isColumnVisible(SortColumn col) const;
     void showColumnVisibilityMenu();
 
@@ -639,6 +655,7 @@ inline juce::Colour kindClipColour(ClipKind k)
 
 /** Grid browser: files as clip slots in one column per kind (Groove ClipSlot look). */
 class KindGridView : public juce::Component,
+                     public juce::SettableTooltipClient,
                      private juce::ScrollBar::Listener
 {
 public:
@@ -651,6 +668,8 @@ public:
     void setPlayhead(bool isPlaying, float loopPhase);
     /** Scroll so the current selection stays in view (keyboard / selection changes). */
     void ensureSelectedVisible();
+    /** Pin the selected clip to the first row. Used only when entering grid view. */
+    void scrollSelectionToTop();
 
     void paint(juce::Graphics&) override;
     void resized() override;
@@ -669,6 +688,8 @@ public:
     std::function<void(const juce::File&)> onDragFile;
     std::function<void(int)> onStep;                    // -1 / +1 with arrow keys (legacy vertical)
     std::function<void()> onActivated;                  // sticky browser key-nav
+    std::function<void(BrowserSortColumn)> onSortBy;
+    std::function<void(ClipKind)> onHideColumn;
 
 private:
     struct Column { ClipKind kind; std::vector<int> entries; };
@@ -749,7 +770,7 @@ private:
     juce::String countLabel() const;
 
     IconBtn btnSubfolders { icons::subfolders, "Include files in subfolders" };
-    IconBtn btnGrid { icons::grid, "Grid view: files as clips in columns by kind" };
+    IconBtn btnGrid { icons::grid, "Switch to Grid View" };
     IconBtn btnFilters { icons::funnel, "Filters" };
     IconBtn btnStar { icons::starOutline, "Star folder" };
     IconBtn btnReveal { icons::finder, "Show in Finder" };
@@ -769,8 +790,9 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(BrowserToolbar)
 };
 
-/** Floating filter menu (header: Refresh + Apply; footer: Save as default). */
-class FilterPopover : public juce::Component
+/** Floating filter menu (header: X close; footer: Reset + Save as default). */
+class FilterPopover : public juce::Component,
+                      public juce::SettableTooltipClient
 {
 public:
     FilterPopover();
@@ -786,10 +808,9 @@ public:
     void mouseExit(const juce::MouseEvent&) override;
     bool keyPressed(const juce::KeyPress&) override;
 
-    std::function<void()> onDone;   // dismiss without applying
-    std::function<void()> onApply;  // commit draft filters
+    std::function<void()> onDone;   // close the popover
     std::function<void()> onSaveSearch; // retained for editor wiring
-    std::function<void()> onReset;  // Refresh — rescan / clear filters
+    std::function<void()> onReset;  // clear filters
     std::function<void()> onSaveDefault; // footer: write criteria onto current library folder
 
 private:
@@ -797,9 +818,9 @@ private:
     std::function<int()> panelHeight;
     juce::Viewport bodyViewport;
     juce::String countText;
-    juce::Rectangle<int> refreshBounds, applyBounds, saveDefaultBounds;
-    bool refreshHover = false;
-    bool applyHover = false;
+    juce::Rectangle<int> closeBounds, resetBounds, saveDefaultBounds;
+    bool closeHover = false;
+    bool resetHover = false;
     bool saveDefaultHover = false;
     int maxBodyH = 0;
 

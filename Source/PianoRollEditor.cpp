@@ -97,7 +97,9 @@ void PianoRollMini::paint(juce::Graphics& g)
     g.fillRect(gutter.getRight() - 1.0f, 0.0f, 1.0f, (float) getHeight());
 
     PitchRowMap map;
-    map.fit(frameNotes.empty() ? notes : frameNotes, b.getHeight(), rootPc, 0);
+    // At least one octave. A short or empty clip must not stretch two keys
+    // across the whole preview.
+    map.fit(frameNotes.empty() ? notes : frameNotes, b.getHeight(), rootPc, 12);
     const double totalSteps = (double) bars * kStepsPerBar * timeStretch;
     const float pps = b.getWidth() / (float) juce::jmax(1.0, totalSteps);
 
@@ -366,7 +368,7 @@ PianoRollEditor::PianoRollEditor()
     addAndMakeVisible(gutter);
     addAndMakeVisible(timeRuler);
     rollViewport.setViewedComponent(&rollContent, false);
-    rollViewport.setScrollBarsShown(true, true, true, true);
+    rollViewport.setScrollBarsShown(false, true, false, true);
     rollViewport.setScrollBarThickness(10);
     rollViewport.onScrolled = [this]
     {
@@ -524,12 +526,38 @@ void PianoRollEditor::setScalePlacement(ScalePlacement)
 
 NoteProcessScope PianoRollEditor::processScope() const
 {
+    // Toolkit scope is selection-only (or whole clip). The loop region is for
+    // playback / chrome — it no longer gates groove processing.
     NoteProcessScope scope;
-    scope.loopStartStep = loopStartStep;
-    scope.loopEndStep = loopEndStep;
     if (!selection.empty())
         scope.selectedIds = &selection;
     return scope;
+}
+
+std::vector<int> PianoRollEditor::noteIdsInScope() const
+{
+    std::vector<int> ids;
+    if (!hasClip)
+        return ids;
+    const bool selected = !selection.empty();
+    for (const auto& n : resolved.notes)
+    {
+        if (selected && selection.count(n.id) == 0)
+            continue;
+        ids.push_back(n.id);
+    }
+    return ids;
+}
+
+void PianoRollEditor::selectNotesInLoop()
+{
+    if (!hasClip)
+        return;
+    selection.clear();
+    for (const auto& n : grooved)
+        if (n.start >= loopStartStep - 1.0e-4 && n.start < loopEndStep - 1.0e-4)
+            selection.insert(n.id);
+    notifySelectionChanged();
 }
 
 void PianoRollEditor::notifySelectionChanged()
@@ -548,10 +576,9 @@ void PianoRollEditor::rebuildResolved()
     if (!hasClip) return;
     const auto scope = processScope();
     resolved = resolveClip(clip, edit, nullptr, scope);
-    grooved = applyGroove(resolved.notes, groove, clip.complexity,
-                          clip.kind, clip.root, edit.mode, scope);
-    if (edit.fitScale && edit.root >= 0)
-        refitNotesToScale(grooved, edit.root, edit.mode, scope);
+    grooved = applyClipGroove(resolved.notes, edit, groove, clip.complexity,
+                              clip.kind, clip.root, edit.mode, scope);
+    refitClipGroove(grooved, edit, scope);
 
     ClipEdit noTrim = edit;
     noTrim.clearTrim();
@@ -679,11 +706,48 @@ void PianoRollEditor::deleteSelectedNotes()
     if (!hasClip || selection.empty())
         return;
     const auto ids = selection;
+
+    // When deleting in-loop notes (e.g. after double-clicking the loop bar),
+    // also trim notes that start before the loop but hang into it.
+    bool anyInLoop = false;
+    for (const auto& n : grooved)
+        if (ids.count(n.id) > 0
+            && n.start >= loopStartStep - 1.0e-4
+            && n.start < loopEndStep - 1.0e-4)
+        {
+            anyInLoop = true;
+            break;
+        }
+
+    const double loopStart = loopStartStep;
+    const auto clipNotes = clip.notes;
     selection.clear();
-    applyEdit([&ids](ClipEdit& e)
+    applyEdit([ids, anyInLoop, loopStart, clipNotes](ClipEdit& e)
     {
         for (int id : ids)
             e.deleted.insert(id);
+
+        if (!anyInLoop)
+            return;
+
+        for (const auto& n : clipNotes)
+        {
+            if (ids.count(n.id) > 0 || e.deleted.count(n.id) > 0)
+                continue;
+            double start = n.start;
+            double len = n.len;
+            if (const auto it = e.moves.find(n.id); it != e.moves.end())
+            {
+                start += (double) it->second.dStep;
+                len = std::max(0.25, n.len + it->second.dLen);
+            }
+            if (start >= loopStart - 1.0e-4)
+                continue;
+            if (start + len <= loopStart + 1.0e-4)
+                continue;
+            const double desiredLen = std::max(0.25, loopStart - start);
+            e.moves[n.id].dLen = desiredLen - n.len;
+        }
     });
 }
 
@@ -838,6 +902,13 @@ void PianoRollEditor::paintLoopOverlay(juce::Graphics& g, juce::Rectangle<float>
         g.fillRect(clipB.getX(), top, xs - clipB.getX(), h);
     if (xe < clipB.getRight())
         g.fillRect(xe, top, clipB.getRight() - xe, h);
+
+    // Fill between the handles so the loop reads as a bar, not two lines.
+    if (xe > xs)
+    {
+        g.setColour(colours::accent().withAlpha(0.14f));
+        g.fillRect(xs, top, xe - xs, h);
+    }
 
     g.setColour(colours::accent().withAlpha(0.85f));
     g.fillRect(xs - 1.0f, top, 2.0f, h);
@@ -1249,9 +1320,18 @@ void PianoRollEditor::zoomToClip()
     }
     else
     {
-        // One lane below the lowest note and one above the highest — no excess space.
-        const int viewLo = juce::jlimit(0, 126, loN - 1);
-        const int viewHi = juce::jlimit(viewLo + 1, 127, hiN + 1);
+        // One row above the top note and one below the lowest. A span under
+        // one octave expands to twelve semitones, centered on the notes.
+        int viewLo = juce::jmax(0, loN - 1);
+        int viewHi = juce::jmin(127, hiN + 1);
+        if (viewHi - viewLo < 12)
+        {
+            const int center = (loN + hiN) / 2;
+            viewLo = juce::jlimit(0, 115, center - 6);
+            viewHi = juce::jmin(127, viewLo + 12);
+            if (viewHi - viewLo < 12)
+                viewLo = juce::jmax(0, viewHi - 12);
+        }
         const int lanes = juce::jmax(1, viewHi - viewLo + 1);
         rowH = juce::jmax(kMinRowH, (float) visH / (float) lanes);
         pitchWindowLo = viewLo;
@@ -1508,12 +1588,12 @@ void PianoRollEditor::layoutHeaderTools()
     placeLeft(btnFit, btnFit.idealWidth());
     bar.removeFromLeft(8);
 
-    const int divW = juce::jmax(52, divisionPopup.idealWidth() - 8);
+    const int divW = juce::jmax(72, divisionPopup.idealWidth());
     placeRight(divisionPopup, divW);
     gridLabelBounds = bar.removeFromRight(28);
     bar.removeFromRight(8);
 
-    const int zoomW = juce::jmax(56, barsZoomPopup.idealWidth() - 8);
+    const int zoomW = juce::jmax(84, barsZoomPopup.idealWidth());
     const int labelW = 32;
     auto tools = bar.removeFromRight(labelW + 4 + zoomW);
     zoomLabelBounds = tools.removeFromLeft(labelW);
@@ -1764,6 +1844,23 @@ void PianoRollEditor::RollContent::mouseDown(const juce::MouseEvent& e)
     repaint();
 }
 
+void PianoRollEditor::RollContent::mouseDoubleClick(const juce::MouseEvent& e)
+{
+    auto& ed = owner;
+    if (!ed.hasClip || ed.recordingVisual)
+        return;
+    // Double-click the loop fill (between the handles) to select in-loop notes.
+    if (ed.hitLoopHandle(e.position.x) >= 0)
+        return;
+    const float xs = ed.contentXFromStep(ed.loopStartStep);
+    const float xe = ed.contentXFromStep(ed.loopEndStep);
+    if (e.position.x < xs || e.position.x > xe)
+        return;
+    if (ed.noteAt(e.position) != nullptr)
+        return;
+    ed.selectNotesInLoop();
+}
+
 void PianoRollEditor::RollContent::mouseDrag(const juce::MouseEvent& e)
 {
     auto& ed = owner;
@@ -1933,6 +2030,21 @@ void PianoRollEditor::TimeRuler::mouseDown(const juce::MouseEvent& e)
         drag = handle == 0 ? Drag::LoopStart : Drag::LoopEnd;
         setMouseCursor(juce::MouseCursor::LeftRightResizeCursor);
     }
+}
+
+void PianoRollEditor::TimeRuler::mouseDoubleClick(const juce::MouseEvent& e)
+{
+    auto& ed = owner;
+    if (!ed.hasClip || ed.recordingVisual)
+        return;
+    const float contentX = e.position.x + (float) ed.rollViewport.getViewPositionX();
+    if (ed.hitLoopHandle(contentX, 8.0f) >= 0)
+        return;
+    const float xs = ed.contentXFromStep(ed.loopStartStep);
+    const float xe = ed.contentXFromStep(ed.loopEndStep);
+    if (contentX < xs || contentX > xe)
+        return;
+    ed.selectNotesInLoop();
 }
 
 void PianoRollEditor::TimeRuler::mouseDrag(const juce::MouseEvent& e)
@@ -2194,6 +2306,8 @@ void PianoRollEditor::VelocityLane::mouseDown(const juce::MouseEvent& e)
     {
         owner.velocityOpen = !owner.velocityOpen;
         owner.resized();
+        if (owner.onVelocityFold)
+            owner.onVelocityFold();
         return;
     }
     if (!owner.hasClip || !owner.velocityOpen) return;

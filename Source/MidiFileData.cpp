@@ -166,8 +166,26 @@ MidiClip parseMidiFile(const juce::File& file)
         clip.lengthBeats = maxBeat;
     else
         clip.lengthBeats = 4.0;
+    trimTrailingEmptyMeasures(clip);
     clip.notesAtFileLoad = clip.notes;
     return clip;
+}
+
+void trimTrailingEmptyMeasures(MidiClip& clip)
+{
+    if (clip.notes.empty())
+        return;
+    double last = 0.0;
+    for (const auto& n : clip.notes)
+        last = std::max(last, n.startBeat + n.lengthBeats);
+    const double den = clip.timeSigDen > 0 ? (double) clip.timeSigDen : 4.0;
+    const double beatsPerBar = (double) juce::jmax(1, clip.timeSigNum) * (4.0 / den);
+    if (beatsPerBar <= 0.0)
+        return;
+    const int usedBars = juce::jmax(1, (int) std::ceil(last / beatsPerBar - 1.0e-6));
+    const double fitted = (double) usedBars * beatsPerBar;
+    if (clip.lengthBeats > fitted + 1.0e-4)
+        clip.lengthBeats = fitted;
 }
 
 void trimEmptyMeasuresInClip(MidiClip& clip, double beatsPerBar)

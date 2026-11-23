@@ -539,6 +539,8 @@ void PatternFlowLookAndFeel::drawButtonBackground(juce::Graphics& g, juce::Butto
 {
     auto bounds = btn.getLocalBounds().toFloat().reduced(0.5f);
     const juce::String id = btn.getComponentID();
+    if (id == "FlatSwitch")
+        return;
     const bool focused = btn.hasKeyboardFocus(true);
     const bool toggled = btn.getToggleState();
     const float pressA = higPressAlpha(highlighted, down, focused);
@@ -865,7 +867,7 @@ void PatternFlowLookAndFeel::drawScrollbar(juce::Graphics& g, juce::ScrollBar&, 
     if (thumb.isEmpty())
         return;
 
-    g.setColour(isMouseDown ? ds::acc() : ds::surface300());
+    g.setColour(isMouseDown || isMouseOver ? ds::acc() : ds::surface300());
     g.fillRect(thumb);
     g.setColour(isMouseDown || isMouseOver ? ds::acc() : ds::edge());
     g.drawRect(thumb, 1.0f);

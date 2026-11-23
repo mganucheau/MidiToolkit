@@ -630,7 +630,6 @@ ResolvedClip resolveClip(const StepClip& clip, const ClipEdit& e,
     out.notes.reserve(clip.notes.size());
     const int srcOct = clipReferenceOctave(clip);
     const int tgtOct = e.octave >= 0 ? juce::jlimit(0, 6, e.octave) : srcOct;
-    const int octDelta = (tgtOct - srcOct) * 12;
 
     // Loop brackets live in the post-trim roll. Decide scope with that start,
     // even while the notes below still carry pre-trim positions.
@@ -655,32 +654,48 @@ ResolvedClip resolveClip(const StepClip& clip, const ClipEdit& e,
         if (auto it = e.moves.find(n.id); it != e.moves.end())
             mv = it->second;
 
-        // Manual drags always apply. Toolkit pitch only touches notes inside
-        // the loop, and inside the selection when one exists.
+        // Manual drags always apply. Toolkit pitch touches the loop (and the
+        // selection, when there is one) until a note has its own settings.
+        // After that, only notes that were stamped are affected.
         RollNote probe = n;
         probe.id = n.id;
         probe.start = n.start + mv.dStep;
-        const bool hit = inScope(probe, false);
+        const NotePitchSettings* per = nullptr;
+        if (!e.notePitch.empty())
+        {
+            if (const auto it = e.notePitch.find(n.id); it != e.notePitch.end())
+                per = &it->second;
+        }
+        const bool hit = e.notePitch.empty() ? inScope(probe, false) : (per != nullptr);
+        const int useShift = per != nullptr ? per->pitchShift : e.pitchShift;
+        const int useOct = per != nullptr ? per->octave : e.octave;
+        const int useOctRange = per != nullptr ? per->octaveRange : e.octaveRange;
+        const bool useMap = per != nullptr ? per->mapToRoot : e.mapToRoot;
+        const int useRoot = per != nullptr ? per->root : e.root;
+        const bool useFit = per != nullptr ? per->fitScale : e.fitScale;
+        const Mode useMode = per != nullptr ? per->mode : e.mode;
+        const int useTgt = useOct >= 0 ? juce::jlimit(0, 6, useOct) : srcOct;
+        const int useDelta = (useTgt - srcOct) * 12;
 
         int pitch = n.pitch + mv.dPitch;
         if (hit)
         {
-            pitch += e.pitchShift;
+            pitch += useShift;
             // Octave Range owns the register: the window is absolute, so a second
             // transpose would move notes and then wrap them a second time.
-            if (e.octaveRange <= 0)
-                pitch += octDelta;
+            if (useOctRange <= 0)
+                pitch += useDelta;
 
-            if (e.mapToRoot && e.root >= 0 && clip.root >= 0)
+            if (useMap && useRoot >= 0 && clip.root >= 0)
             {
-                int d = (e.root - clip.root) % 12;
+                int d = (useRoot - clip.root) % 12;
                 if (d > 6)  d -= 12;
                 if (d < -6) d += 12;
                 pitch += d;
             }
 
-            if (e.fitScale && e.root >= 0)
-                pitch = fitToScale(pitch, e.root, e.mode);
+            if (useFit && useRoot >= 0)
+                pitch = fitToScale(pitch, useRoot, useMode);
         }
 
         pitch = juce::jlimit(0, 127, pitch);
@@ -697,7 +712,18 @@ ResolvedClip resolveClip(const StepClip& clip, const ClipEdit& e,
     }
 
     // Octave Range: wrap or clamp every note into N octaves starting at the target C.
-    if (e.octaveRange > 0 && !out.notes.empty())
+    if (!e.notePitch.empty())
+    {
+        for (auto& n : out.notes)
+        {
+            const auto it = e.notePitch.find(n.id);
+            if (it == e.notePitch.end() || it->second.octaveRange <= 0)
+                continue;
+            const int tgt = it->second.octave >= 0 ? juce::jlimit(0, 6, it->second.octave) : srcOct;
+            n.pitch = mapPitchToOctaveWindow(n.pitch, tgt, it->second.octaveRange, it->second.outsideRange);
+        }
+    }
+    else if (e.octaveRange > 0 && !out.notes.empty())
     {
         for (auto& n : out.notes)
         {
@@ -708,7 +734,27 @@ ResolvedClip resolveClip(const StepClip& clip, const ClipEdit& e,
     }
 
     // Pitch Range: wrap notes into [pitchMin, pitchMax] by octave folds.
-    if (e.hasPitchRange() && !out.notes.empty())
+    if (!e.notePitch.empty())
+    {
+        for (auto& n : out.notes)
+        {
+            const auto it = e.notePitch.find(n.id);
+            if (it == e.notePitch.end())
+                continue;
+            int lo = juce::jlimit(0, 127, it->second.pitchMin);
+            int hi = juce::jlimit(0, 127, it->second.pitchMax);
+            if (lo <= 0 && hi >= 127)
+                continue;
+            if (hi < lo) std::swap(lo, hi);
+            const int window = hi - lo + 1;
+            int p = n.pitch;
+            while (p > hi) p -= 12;
+            while (p < lo) p += 12;
+            n.pitch = window <= 12 ? juce::jlimit(lo, hi, p)
+                                   : (p < lo || p > hi ? juce::jlimit(lo, hi, n.pitch) : p);
+        }
+    }
+    else if (e.hasPitchRange() && !out.notes.empty())
     {
         int lo = juce::jlimit(0, 127, e.pitchMin);
         int hi = juce::jlimit(0, 127, e.pitchMax);
@@ -739,7 +785,17 @@ ResolvedClip resolveClip(const StepClip& clip, const ClipEdit& e,
     }
 
     // Octave Range remaps chromatically and can pull notes out of scale — re-snap.
-    if (e.fitScale && e.root >= 0)
+    if (!e.notePitch.empty())
+    {
+        for (auto& n : out.notes)
+        {
+            const auto it = e.notePitch.find(n.id);
+            if (it == e.notePitch.end() || !it->second.fitScale || it->second.root < 0)
+                continue;
+            n.pitch = juce::jlimit(0, 127, fitToScale(n.pitch, it->second.root, it->second.mode));
+        }
+    }
+    else if (e.fitScale && e.root >= 0)
     {
         for (auto& n : out.notes)
             if (inScope(n, false))
@@ -747,7 +803,41 @@ ResolvedClip resolveClip(const StepClip& clip, const ClipEdit& e,
     }
 
     // Note Filter: Mute drops disabled pitch-classes; Fold remaps to nearest kept.
-    if (e.hasNoteFilter() && !out.notes.empty())
+    if (!e.notePitch.empty())
+    {
+        std::vector<RollNote> kept;
+        kept.reserve(out.notes.size());
+        for (auto n : out.notes)
+        {
+            const auto it = e.notePitch.find(n.id);
+            if (it == e.notePitch.end() || (it->second.noteFilterMask & 0x0FFF) == 0x0FFF)
+            {
+                kept.push_back(n);
+                continue;
+            }
+            const auto& s = it->second;
+            const int pc = ((n.pitch % 12) + 12) % 12;
+            const bool enabled = (s.noteFilterMask & (uint16_t) (1u << pc)) != 0;
+            if (s.noteFilterType == NoteFilterType::Mute)
+            {
+                if (enabled)
+                    kept.push_back(n);
+                continue;
+            }
+            if (!enabled)
+            {
+                const int next = foldToEnabledPitchClasses(n.pitch, s.noteFilterMask, s.root, s.mode);
+                if (next != n.pitch)
+                {
+                    n.pitch = next;
+                    n.moved = true;
+                }
+            }
+            kept.push_back(n);
+        }
+        out.notes = std::move(kept);
+    }
+    else if (e.hasNoteFilter() && !out.notes.empty())
     {
         if (e.noteFilterType == NoteFilterType::Mute)
         {
@@ -789,7 +879,30 @@ ResolvedClip resolveClip(const StepClip& clip, const ClipEdit& e,
     };
 
     // Invert: mirror pitches around the midpoint of the (targeted) range.
-    if (e.invert && !out.notes.empty())
+    if (!e.notePitch.empty())
+    {
+        int lo = 127, hi = 0, count = 0;
+        for (const auto& n : out.notes)
+        {
+            const auto it = e.notePitch.find(n.id);
+            if (it == e.notePitch.end() || !it->second.invert) continue;
+            lo = std::min(lo, n.pitch);
+            hi = std::max(hi, n.pitch);
+            ++count;
+        }
+        if (count > 0)
+        {
+            const int pivot = lo + hi;
+            for (auto& n : out.notes)
+            {
+                const auto it = e.notePitch.find(n.id);
+                if (it == e.notePitch.end() || !it->second.invert) continue;
+                n.pitch = juce::jlimit(0, 127, pivot - n.pitch);
+                n.moved = true;
+            }
+        }
+    }
+    else if (e.invert && !out.notes.empty())
     {
         int lo = 127, hi = 0;
         int count = 0;
@@ -813,7 +926,18 @@ ResolvedClip resolveClip(const StepClip& clip, const ClipEdit& e,
     }
 
     // Reverse: flip note starts within the post-trim length.
-    if (e.reverse && !out.notes.empty())
+    if (!e.notePitch.empty())
+    {
+        const double total = (double) out.bars * (double) kStepsPerBar;
+        for (auto& n : out.notes)
+        {
+            const auto it = e.notePitch.find(n.id);
+            if (it == e.notePitch.end() || !it->second.reverse) continue;
+            n.start = juce::jmax(0.0, total - n.start - n.len);
+            n.moved = true;
+        }
+    }
+    else if (e.reverse && !out.notes.empty())
     {
         const double total = (double) out.bars * (double) kStepsPerBar;
         const bool looped = effective.loopEndStep < 1.0e11;
@@ -1199,6 +1323,61 @@ int scoreClipComplexity(const std::vector<RollNote>& notes, int bars, double mea
     const double rhythm = onsetSlotShare(notes);
     const double syncop = offbeatRatio(notes);
 
+    std::set<int> pitches;
+    std::set<int> lengths;
+    std::vector<double> onsets;
+    onsets.reserve(notes.size());
+    int pcCount[12] = {};
+    for (const auto& n : notes)
+    {
+        pitches.insert(n.pitch);
+        lengths.insert(juce::jlimit(1, 64, (int) std::lround(n.len * 4.0)));
+        onsets.push_back(n.start);
+        pcCount[wrapPc(n.pitch)]++;
+    }
+    std::sort(onsets.begin(), onsets.end());
+    int rhythmChanges = 0;
+    double prevGap = -1.0;
+    for (size_t i = 1; i < onsets.size(); ++i)
+    {
+        const double gap = onsets[i] - onsets[i - 1];
+        if (gap < 0.05)
+            continue;
+        if (prevGap >= 0.0 && std::abs(gap - prevGap) > 0.24)
+            ++rhythmChanges;
+        prevGap = gap;
+    }
+    int rootPc = 0;
+    for (int i = 1; i < 12; ++i)
+        if (pcCount[i] > pcCount[rootPc])
+            rootPc = i;
+    int tense = 0;
+    for (const auto& n : notes)
+    {
+        const int rel = (wrapPc(n.pitch) - rootPc + 12) % 12;
+        // Stable tones are the triad plus the 4th. Everything else is a tension.
+        if (rel != 0 && rel != 3 && rel != 4 && rel != 5 && rel != 7)
+            ++tense;
+    }
+    const double distinctScore = juce::jlimit(0.0, 1.0, (double) pitches.size() / 12.0);
+    const double noteCountScore = juce::jlimit(0.0, 1.0,
+        std::log2(1.0 + (double) notes.size()) / std::log2(129.0));
+    const double lengthChange = juce::jlimit(0.0, 1.0, (double) juce::jmax(0, (int) lengths.size() - 1) / 5.0);
+    const double rhythmChangeScore = notes.size() < 3 ? 0.0
+        : juce::jlimit(0.0, 1.0, (double) rhythmChanges / (double) juce::jmax(1, (int) notes.size() / 2));
+    const double tension = juce::jlimit(0.0, 1.0, (double) tense / (double) notes.size());
+    const double shared = 100.0 * (0.16 * noteCountScore
+                                  + 0.14 * distinctScore
+                                  + 0.16 * syncop
+                                  + 0.14 * rhythmChangeScore
+                                  + 0.12 * lengthChange
+                                  + 0.16 * tension
+                                  + 0.12 * density);
+    const auto blend = [shared](double kindScore)
+    {
+        return juce::jlimit(1, 100, (int) std::lround(0.62 * kindScore + 0.38 * shared));
+    };
+
     if (kind == ClipKind::Drums)
     {
         std::set<int> voices;
@@ -1226,7 +1405,7 @@ int scoreClipComplexity(const std::vector<RollNote>& notes, int bars, double mea
                                      + 0.20 * syncop
                                      + 0.15 * ghostScore
                                      + 0.15 * hatScore);
-        return juce::jlimit(1, 100, (int) std::lround(score));
+        return blend(score);
     }
 
     if (kind == ClipKind::Keys)
@@ -1275,7 +1454,7 @@ int scoreClipComplexity(const std::vector<RollNote>& notes, int bars, double mea
                                      + 0.25 * extScore
                                      + 0.25 * harmRhythm
                                      + 0.20 * syncop);
-        return juce::jlimit(1, 100, (int) std::lround(score));
+        return blend(score);
     }
 
     // Bass / Lead: pickups, interval variety, subdivision — not kit size.
@@ -1319,7 +1498,7 @@ int scoreClipComplexity(const std::vector<RollNote>& notes, int bars, double mea
                                  + 0.20 * pickupScore
                                  + 0.15 * interval
                                  + 0.10 * poly);
-    return juce::jlimit(1, 100, (int) std::lround(score));
+    return blend(score);
 }
 
 uint16_t analyseClipTags(const std::vector<RollNote>& notes, int bars, ClipKind kind)
@@ -1448,8 +1627,9 @@ StepClip makeStepClip(const MidiClip& clip)
         distinctPitches.insert(n.noteNumber);
     }
 
-    const double lengthSteps = std::max(clip.lengthBeats * stepsPerBeat, maxEnd);
-    s.bars = std::max(1, (int) std::ceil(lengthSteps / kStepsPerBar));
+    // Bar count follows the last note. Trailing empty measures are not part of the clip.
+    const double contentSteps = maxEnd > 0.0 ? maxEnd : clip.lengthBeats * stepsPerBeat;
+    s.bars = std::max(1, (int) std::ceil(contentSteps / (double) kStepsPerBar));
     s.noteCount = (int) s.notes.size();
     s.difNotes = (int) distinctPitches.size();
 

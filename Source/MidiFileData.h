@@ -64,6 +64,8 @@ MidiClip parseMidiFile(const juce::File& file);
 
 // Remove leading/trailing/middle measures (beatsPerBar-wide) that contain no note audio
 void trimEmptyMeasuresInClip(MidiClip& clip, double beatsPerBar = 4.0);
+/** Drop measures after the last note. Empty bars in the middle stay. */
+void trimTrailingEmptyMeasures(MidiClip& clip);
 
 // ── Write a MidiClip to a standard MIDI file ────────────────────────────────
 // maxLengthBeats: if > 0, trim clip to this length (notes beyond are excluded/trimmed)

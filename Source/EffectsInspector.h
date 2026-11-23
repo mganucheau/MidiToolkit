@@ -210,20 +210,28 @@ private:
 
     fx::FlatTextButton arpGenerateBtn { "Generate" };
     fx::InlineRow arpGenerateRow;
+    fx::FlatSwitch arpInputSwitch;
+    fx::InlineRow arpInputRow;
     fx::FlatPopup arpLengthPopup;
     fx::InlineRow arpLengthRow;
     fx::FlatPopup arpFormPopup;
     fx::InlineRow arpFormRow;
     fx::FlatPopup arpShapePopup; // Type / phrasing morph
     fx::InlineRow arpShapeRow;
+    fx::FlatPopup arpStylePopup;
+    fx::InlineRow arpStyleRow;
     fx::FlatPopup arpRatePopup;
     fx::InlineRow arpRateRow;
+    fx::FlatPopup arpMotionPopup;
+    fx::InlineRow arpMotionRow;
     fx::FlatSliderRow arpDensitySl;
 
     fx::FlatTextButton melodyGenerateBtn { "Generate" };
     fx::InlineRow melodyGenerateRow;
     fx::FlatSwitch melodyInputSwitch;
     fx::InlineRow melodyInputRow;
+    fx::FlatPopup melodyTypePopup;
+    fx::InlineRow melodyTypeRow;
     fx::FlatPopup melodyLengthPopup;
     fx::InlineRow melodyLengthRow;
     fx::FlatPopup melodyFormPopup;
@@ -239,6 +247,12 @@ private:
     fx::InlineRow chordsGenerateRow;
     fx::FlatSwitch chordsInputSwitch;
     fx::InlineRow chordsInputRow;
+    fx::FlatPopup chordTypePopup;
+    fx::InlineRow chordTypeRow;
+    fx::FlatPopup chordSpeedPopup;
+    fx::InlineRow chordSpeedRow;
+    fx::FlatPopup chordMotionPopup;
+    fx::InlineRow chordMotionRow;
     fx::FlatPopup chordLengthPopup;
     fx::InlineRow chordLengthRow;
     fx::FlatPopup chordFormPopup;
@@ -254,6 +268,12 @@ private:
     fx::InlineRow bassGenerateRow;
     fx::FlatSwitch bassInputSwitch;
     fx::InlineRow bassInputRow;
+    fx::FlatPopup bassTypePopup;
+    fx::InlineRow bassTypeRow;
+    fx::FlatPopup bassStylePopup;
+    fx::InlineRow bassStyleRow;
+    fx::FlatPopup bassSpeedPopup;
+    fx::InlineRow bassSpeedRow;
     fx::FlatPopup bassLengthPopup;
     fx::InlineRow bassLengthRow;
     fx::FlatPopup bassFormPopup;
@@ -265,6 +285,8 @@ private:
     fx::InlineRow drumGenerateRow;
     fx::FlatPopup drumStylePopup;
     fx::InlineRow drumStyleRow;
+    fx::FlatPopup drumSpeedPopup;
+    fx::InlineRow drumSpeedRow;
     fx::FlatPopup drumLengthPopup;
     fx::InlineRow drumLengthRow;
     fx::FlatPopup drumFormPopup;

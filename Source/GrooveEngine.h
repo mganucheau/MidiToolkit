@@ -1,5 +1,6 @@
 #pragma once
 #include <array>
+#include <map>
 #include <vector>
 
 #include "EditModel.h"
@@ -147,6 +148,16 @@ enum class MelodySpeed : int
     Slow = 0,
     Medium,
     Fast,
+    Count
+};
+
+/** Shared generator Type: which pitch set the part is built from. */
+enum class PhraseType : int
+{
+    Scale = 0,
+    Chord,
+    Pentatonic,
+    Chromatic,
     Count
 };
 
@@ -332,6 +343,19 @@ inline const char* melodyContourLabel(MelodyContour c)
     return "Even";
 }
 
+inline const char* phraseTypeLabel(PhraseType t)
+{
+    switch (t)
+    {
+        case PhraseType::Scale:      return "Scale";
+        case PhraseType::Chord:      return "Chord";
+        case PhraseType::Pentatonic: return "Pentatonic";
+        case PhraseType::Chromatic:  return "Chromatic";
+        case PhraseType::Count:      break;
+    }
+    return "Scale";
+}
+
 inline const char* melodySpeedLabel(MelodySpeed s)
 {
     switch (s)
@@ -510,6 +534,10 @@ struct GrooveParams
     int arpOctaves = 2;             // 1..3 span for pattern octave lane
     /** 0..100 note activity. 100 forces a note on every step of the arp rate. */
     int arpDensity = 55;
+    /** Melody-style phrasing for the arp (Style). */
+    int arpStyleIndex = (int) MelodyStyle::March;
+    /** Rise / fall / leap across the pattern (Motion). */
+    int arpMotionIndex = (int) MelodyContour::Even;
     int arpIntensity = 70;          // legacy, unused
     int arpDynamics = 55;           // legacy, unused
     int arpLengthIndex = (int) GeneratorLength::FourBars;
@@ -519,6 +547,7 @@ struct GrooveParams
 
     bool melodyEnabled = false;
     bool melodyInput = false;
+    int melodyTypeIndex = (int) PhraseType::Scale;
     int melodyStyleIndex = (int) MelodyStyle::March;
     int melodyContourIndex = (int) MelodyContour::Even;
     int melodySpeedIndex = (int) MelodySpeed::Medium;
@@ -533,6 +562,9 @@ struct GrooveParams
     bool chordsInput = false;
     int chordVoicingIndex = (int) ChordVoicing::Close;
     int chordColorIndex = (int) ChordColor::Triad;
+    int chordTypeIndex = (int) PhraseType::Chord;
+    int chordSpeedIndex = (int) MelodySpeed::Medium;
+    int chordMotionIndex = (int) MelodyContour::Even;
     int chordRhythmIndex = (int) ChordRhythm::Block;
     int chordLengthIndex = (int) GeneratorLength::FourBars;
     int chordFormIndex = (int) GeneratorForm::Auto;
@@ -541,6 +573,9 @@ struct GrooveParams
 
     bool bassEnabled = false;
     bool bassInput = false;
+    int bassTypeIndex = (int) PhraseType::Scale;
+    int bassStyleIndex = (int) MelodyStyle::March;
+    int bassSpeedIndex = (int) MelodySpeed::Medium;
     int bassMotionIndex = (int) BassMotion::Pulse;
     int bassLengthIndex = (int) GeneratorLength::FourBars;
     int bassFormIndex = (int) GeneratorForm::Auto;
@@ -549,6 +584,7 @@ struct GrooveParams
 
     bool drumsEnabled = false;
     int drumStyleIndex = (int) DrumStyle::House;
+    int drumSpeedIndex = (int) MelodySpeed::Medium;
     int drumDensity = 50;           // 0..100
     int drumFill = 35;              // 0..100 end-of-phrase fill amount
     int drumLengthIndex = (int) GeneratorLength::FourBars;
@@ -605,6 +641,46 @@ struct GrooveParams
     DelayTime arpRate() const
     {
         return (DelayTime) juce::jlimit(0, (int) DelayTime::Count - 1, arpRateIndex);
+    }
+    MelodyStyle arpStyle() const
+    {
+        return (MelodyStyle) juce::jlimit(0, (int) MelodyStyle::Count - 1, arpStyleIndex);
+    }
+    MelodyContour arpMotion() const
+    {
+        return (MelodyContour) juce::jlimit(0, (int) MelodyContour::Count - 1, arpMotionIndex);
+    }
+    PhraseType melodyType() const
+    {
+        return (PhraseType) juce::jlimit(0, (int) PhraseType::Count - 1, melodyTypeIndex);
+    }
+    PhraseType chordType() const
+    {
+        return (PhraseType) juce::jlimit(0, (int) PhraseType::Count - 1, chordTypeIndex);
+    }
+    MelodySpeed chordSpeed() const
+    {
+        return (MelodySpeed) juce::jlimit(0, (int) MelodySpeed::Count - 1, chordSpeedIndex);
+    }
+    MelodyContour chordMotion() const
+    {
+        return (MelodyContour) juce::jlimit(0, (int) MelodyContour::Count - 1, chordMotionIndex);
+    }
+    PhraseType bassType() const
+    {
+        return (PhraseType) juce::jlimit(0, (int) PhraseType::Count - 1, bassTypeIndex);
+    }
+    MelodyStyle bassStyle() const
+    {
+        return (MelodyStyle) juce::jlimit(0, (int) MelodyStyle::Count - 1, bassStyleIndex);
+    }
+    MelodySpeed bassSpeed() const
+    {
+        return (MelodySpeed) juce::jlimit(0, (int) MelodySpeed::Count - 1, bassSpeedIndex);
+    }
+    MelodySpeed drumSpeed() const
+    {
+        return (MelodySpeed) juce::jlimit(0, (int) MelodySpeed::Count - 1, drumSpeedIndex);
     }
     GeneratorLength arpLength() const
     {
@@ -724,6 +800,55 @@ std::vector<RollNote> applyGroove(const std::vector<RollNote>& notes, const Groo
                                   int rootPc = -1,
                                   Mode mode = Mode::Ionian,
                                   NoteProcessScope scope = {});
+
+/** Clip-effect fields only (swing through revoice). Generator seeds are left alone. */
+NoteGroove noteGrooveFrom(const GrooveParams& g);
+void applyNoteGroove(GrooveParams& g, const NoteGroove& stored);
+bool clipFxIsDefault(const GrooveParams& g);
+
+/** Apply each note's stored clip effect. Notes missing from `stored` stay dry.
+    `base` supplies generator fields that are not stored per note. */
+std::vector<RollNote> applyStoredGrooves(const std::vector<RollNote>& notes,
+                                         const std::map<int, NoteGroove>& stored,
+                                         const GrooveParams& base,
+                                         int sourceComplexity = -1,
+                                         ClipKind kind = ClipKind::Lead,
+                                         int rootPc = -1,
+                                         Mode mode = Mode::Ionian);
+
+/** Per-note grooves when the clip has any, otherwise the single groove + scope. */
+inline std::vector<RollNote> applyClipGroove(const std::vector<RollNote>& notes,
+                                             const ClipEdit& edit,
+                                             const GrooveParams& groove,
+                                             int sourceComplexity,
+                                             ClipKind kind,
+                                             int rootPc,
+                                             Mode mode,
+                                             NoteProcessScope scope = {})
+{
+    if (edit.noteGroove.empty())
+        return applyGroove(notes, groove, sourceComplexity, kind, rootPc, mode, scope);
+    return applyStoredGrooves(notes, edit.noteGroove, groove, sourceComplexity, kind, rootPc, mode);
+}
+
+/** Re-snap complexity ornaments. Per-note fit uses the settings stored on that note. */
+inline void refitClipGroove(std::vector<RollNote>& notes, const ClipEdit& edit,
+                            const NoteProcessScope& scope = {})
+{
+    if (!edit.notePitch.empty())
+    {
+        for (auto& n : notes)
+        {
+            const auto it = edit.notePitch.find(n.id);
+            if (it == edit.notePitch.end() || !it->second.fitScale || it->second.root < 0)
+                continue;
+            n.pitch = juce::jlimit(0, 127, fitToScale(n.pitch, it->second.root, it->second.mode));
+        }
+        return;
+    }
+    if (edit.fitScale && edit.root >= 0)
+        refitNotesToScale(notes, edit.root, edit.mode, scope);
+}
 
 /** Build CC64 sustain points (beat domain) for export/preview. Empty when Off. */
 std::vector<AutomationPoint> buildSustainPedalAutomation(const std::vector<RollNote>& notes,

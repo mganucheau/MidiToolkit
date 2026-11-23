@@ -271,7 +271,7 @@ TransportBar::TransportBar()
     btnPassthrough.chipRadiusMd = true;
     btnPassthrough.setComponentID("btnPassthrough");
     btnPassthrough.icon = icons::arrowRight;
-    btnPassthrough.setTooltip("Input: live MIDI runs through the Toolkit — no file/generator playback (P)");
+    btnPassthrough.setTooltip("Input mode");
     btnPassthrough.onClick = [this] { if (onTogglePassthrough) onTogglePassthrough(); };
     addAndMakeVisible(btnPassthrough);
 

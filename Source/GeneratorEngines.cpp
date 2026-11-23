@@ -376,8 +376,12 @@ void generateArpBanks(const GrooveParams& g, std::uint32_t seed, int salt, ArpBa
     // Shape index acts like Sting Type: low = more random intervals, high = chord tones.
     const bool acid = g.arpShape() == ArpShape::Acid;
     // Walk..Climb keep their original 0..1 spread; Acid has its own generator.
-    const float type = (float) juce::jmin(g.arpShapeIndex, (int) ArpShape::Climb)
+        float type = (float) juce::jmin(g.arpShapeIndex, (int) ArpShape::Climb)
                        / (float) juce::jmax(1, (int) ArpShape::Climb);
+        if (g.arpStyle() == MelodyStyle::Hold || g.arpStyle() == MelodyStyle::Arch)
+            type = juce::jmin(1.0f, type + 0.35f);
+        else if (g.arpStyle() == MelodyStyle::Drift || g.arpStyle() == MelodyStyle::Turn)
+            type *= 0.45f;
 
     for (int i = 0; i < 16; ++i)
     {
@@ -428,6 +432,12 @@ void generateArpBanks(const GrooveParams& g, std::uint32_t seed, int salt, ArpBa
 
         const float oRoll = unit(seed, i, salt, 23);
         banks.octShift[i] = oRoll < 0.18f ? -1 : (oRoll > 0.82f ? 1 : 0);
+        if (g.arpMotion() == MelodyContour::Rise && i >= 8)
+            banks.octShift[i] = 1;
+        else if (g.arpMotion() == MelodyContour::Fall && i >= 8)
+            banks.octShift[i] = -1;
+        else if (g.arpMotion() == MelodyContour::Leap && (i % 4) == 0)
+            banks.octShift[i] = 1;
     }
     // Always land something on step 0.
     if (banks.velLayer[0] == 0)
@@ -677,7 +687,34 @@ void renderMelody(const GrooveParams& g, double startPpq, double endPpq,
         const Harmony harmony = g.melodyInput
             ? harmonyFromHeld(chordNotes, chordCount, keyRoot, mode, bar)
             : progressionHarmony(keyRoot, mode, bar);
-        const int note = melodyNote(motif, harmony, phraseBar, step, keyRoot, mode);
+        int note = melodyNote(motif, harmony, phraseBar, step, keyRoot, mode);
+        if (g.melodyType() == PhraseType::Pentatonic || g.melodyType() == PhraseType::Chord)
+        {
+            const int root = ((keyRoot % 12) + 12) % 12;
+            const int rel = ((note % 12) - root + 12) % 12;
+            const bool minor = mode == Mode::Aeolian || mode == Mode::Dorian
+                            || mode == Mode::Phrygian || mode == Mode::Locrian;
+            const int targets[5] = {
+                0,
+                g.melodyType() == PhraseType::Chord ? (minor ? 3 : 4) : 2,
+                g.melodyType() == PhraseType::Chord ? 7 : 4,
+                7,
+                9
+            };
+            const int nTargets = g.melodyType() == PhraseType::Chord ? 3 : 5;
+            int best = 0, dist = 99;
+            for (int i = 0; i < nTargets; ++i)
+            {
+                const int d = std::min(std::abs(rel - targets[i]), 12 - std::abs(rel - targets[i]));
+                if (d < dist) { dist = d; best = targets[i]; }
+            }
+            int delta = best - rel;
+            if (delta > 6) delta -= 12;
+            if (delta < -6) delta += 12;
+            note = juce::jlimit(0, 127, note + delta);
+        }
+        else if (g.melodyType() == PhraseType::Chromatic && (step % 3) == 2)
+            note = juce::jlimit(0, 127, note + 1);
         const bool downbeat = step == 0 || step == 8;
         const double onPpq = bar * 4.0 + step * 0.25;
         const double length = downbeat ? 0.7 : 0.32;
@@ -728,6 +765,16 @@ void chordVoices(const GrooveParams& g, const Harmony& harmony, std::vector<int>
     }
     if (g.chordVoicing() == ChordVoicing::Drop && pitches.size() >= 2)
         std::swap(pitches[0], pitches[1]);
+    if (g.chordType() == PhraseType::Pentatonic && pitches.size() > 2)
+        pitches.resize(2);
+    else if (g.chordType() == PhraseType::Chromatic && !pitches.empty())
+        pitches.push_back(juce::jlimit(0, 127, pitches.back() + 1));
+    if (g.chordMotion() == MelodyContour::Rise && !pitches.empty())
+        pitches.back() = juce::jlimit(0, 127, pitches.back() + 12);
+    else if (g.chordMotion() == MelodyContour::Fall && !pitches.empty())
+        pitches.front() = juce::jlimit(0, 127, pitches.front() - 12);
+    else if (g.chordMotion() == MelodyContour::Leap && pitches.size() > 1)
+        pitches.back() = juce::jlimit(0, 127, pitches.back() + 7);
 }
 
 Harmony chordHarmony(const GrooveParams& g, const int* chordNotes, int chordCount,
@@ -816,6 +863,10 @@ void renderChords(const GrooveParams& g, double startPpq, double endPpq,
             case ChordRhythm::Count:
                 break;
         }
+        if (g.chordSpeed() == MelodySpeed::Slow)
+            fire = step == 0 || step == 8;
+        else if (g.chordSpeed() == MelodySpeed::Fast && (step % 4) == 2)
+            fire = true;
         if (!fire) continue;
 
         const Harmony harmony = chordHarmony(g, chordNotes, chordCount, keyRoot, mode, bar + letter);
@@ -886,7 +937,24 @@ void renderBass(const GrooveParams& g, double startPpq, double endPpq,
         int letter = 0, localBar = 0;
         mapFormBar(phraseBars, form, wrapBar(bar, phraseBars), letter, localBar);
         juce::ignoreUnused(localBar);
-        const float densBoost = letter == 0 ? 0.0f : (letter == 1 ? 0.12f : 0.2f);
+        float densBoost = letter == 0 ? 0.0f : (letter == 1 ? 0.12f : 0.2f);
+        if (g.bassSpeed() == MelodySpeed::Slow && (step % 4) != 0)
+            continue;
+        if (g.bassSpeed() == MelodySpeed::Fast)
+            densBoost += 0.35f;
+        if (g.bassStyle() == MelodyStyle::Hold && step != 0 && step != 8)
+            continue;
+
+        int degree = 0;
+        if (g.bassType() == PhraseType::Chord)
+            degree = (step / 4) % 3 == 1 ? 2 : 0;
+        else if (g.bassType() == PhraseType::Pentatonic)
+            degree = (step / 4) % 2 == 1 ? 4 : 0;
+        else if (g.bassType() == PhraseType::Chromatic && (step % 4) == 2)
+            degree = 1;
+
+        if (degree != 0 && (step == 0 || step == 8))
+            emit(bar, step, letter, degree, 40, 1.0f, 96, 0.35);
 
         switch (g.bassMotion())
         {
@@ -1138,6 +1206,7 @@ void renderDrums(const GrooveParams& g, double startPpq, double endPpq, std::vec
     const int phraseBars = generatorLengthBars(g.drumLength());
     const std::uint32_t seed = (std::uint32_t) (g.drumVariation * 97 + g.drumNonce * 13);
     const GeneratorForm form = resolveForm(g.drumForm(), seed);
+    const auto drumSpeed = g.drumSpeed();
     std::vector<DrumHit> hits;
     const int firstBar = (int) std::floor(startPpq / 4.0) - 1;
     const int lastBar = (int) std::floor((endPpq - 1.0e-9) / 4.0) + 1;
@@ -1160,8 +1229,19 @@ void renderDrums(const GrooveParams& g, double startPpq, double endPpq, std::vec
 
         for (int step = 0; step < 16; ++step)
         {
+            if (drumSpeed == MelodySpeed::Slow && (step % 2) != 0)
+                continue;
             drumHitsForStep(g.drumStyle(), step, dens, (float) g.drumFill, fillBar, motifSeed,
                             letter, hits);
+            if (drumSpeed == MelodySpeed::Fast && (step % 2) == 1)
+            {
+                bool hasHat = false;
+                for (const auto& hit : hits)
+                    if (hit.note == 42)
+                        hasHat = true;
+                if (!hasHat)
+                    hits.push_back({ 42, 0.85f, 68 });
+            }
             const double onPpq = absBar * 4.0 + step * 0.25;
             for (const auto& hit : hits)
             {

@@ -158,8 +158,9 @@ int  noteNameIndex(const juce::String& name);   // "C"..."B" -> 0..11, else -1
 int fitToScale(int midi, int rootPc, Mode mode);
 
 /** Which notes a toolkit edit is allowed to change.
-    Default is the whole clip. A loop is [start, end) on note start, and a
-    non-empty selection further limits the edit to those ids. */
+    Default is the whole clip. A non-empty selection limits the edit to those
+    ids. Loop bounds are retained for callers that still set them, but the
+    toolkit no longer gates on the loop — selection or whole clip only. */
 struct NoteProcessScope
 {
     double loopStartStep = -1.0e12;
@@ -231,6 +232,84 @@ inline int mapPitchToOctaveWindow(int pitch, int octaveIndex, int octaveRange, O
     positive = longer). dLen is last so existing {dPitch, dStep} initialisers stay valid. */
 struct NoteMove { int dPitch = 0; int dStep = 0; double dLen = 0.0; };
 
+/** Clip-effect snapshot stored on a note. Defaults match an untouched GrooveParams
+    (generator seeds stay on the file groove, not here). */
+struct NoteGroove
+{
+    int swing = 0;
+    int pocket = 0;
+    int humanize = 0;
+    int dynamics = 0;
+    int length = 100;
+    int intensity = 100;
+    int swingGridIndex = 1;
+    int quantizeGridIndex = 2;      // QuantizeGrid::Eighth
+    int quantizeStrength = 0;
+    int articulationIndex = 0;      // Articulation::Off
+    int articulationStrength = 0;
+    int sustainPedalMode = 0;
+    int complexityTarget = -1;
+    int delayTimeIndex = 2;         // DelayTime::Eighth
+    int delayAmount = 0;
+    int delayFeedback = 40;
+    int velocityRangeLo = 1;
+    int velocityRangeHi = 127;
+    int variationIndex = 0;
+    int revoice = 0;
+    int strumDirectionIndex = 0;
+    int strumSpeed = 40;
+    int strumAmount = 0;
+
+    bool operator==(const NoteGroove& o) const
+    {
+        return swing == o.swing && pocket == o.pocket && humanize == o.humanize
+            && dynamics == o.dynamics && length == o.length && intensity == o.intensity
+            && swingGridIndex == o.swingGridIndex
+            && quantizeGridIndex == o.quantizeGridIndex
+            && quantizeStrength == o.quantizeStrength
+            && articulationIndex == o.articulationIndex
+            && articulationStrength == o.articulationStrength
+            && sustainPedalMode == o.sustainPedalMode
+            && complexityTarget == o.complexityTarget
+            && delayTimeIndex == o.delayTimeIndex
+            && delayAmount == o.delayAmount && delayFeedback == o.delayFeedback
+            && velocityRangeLo == o.velocityRangeLo && velocityRangeHi == o.velocityRangeHi
+            && variationIndex == o.variationIndex && revoice == o.revoice
+            && strumDirectionIndex == o.strumDirectionIndex
+            && strumSpeed == o.strumSpeed && strumAmount == o.strumAmount;
+    }
+};
+
+/** Pitch / form settings remembered on a note. Defaults match a clean ClipEdit. */
+struct NotePitchSettings
+{
+    int pitchShift = 0;
+    int octave = -1;
+    int octaveRange = 0;
+    OutsideRangeMode outsideRange = OutsideRangeMode::Fold;
+    int pitchMin = 0;
+    int pitchMax = 127;
+    bool reverse = false;
+    bool invert = false;
+    bool fitScale = false;
+    bool mapToRoot = false;
+    int root = -1;
+    Mode mode = Mode::Ionian;
+    uint16_t noteFilterMask = 0x0FFF;
+    NoteFilterType noteFilterType = NoteFilterType::Mute;
+
+    bool operator==(const NotePitchSettings& o) const
+    {
+        return pitchShift == o.pitchShift && octave == o.octave
+            && octaveRange == o.octaveRange && outsideRange == o.outsideRange
+            && pitchMin == o.pitchMin && pitchMax == o.pitchMax
+            && reverse == o.reverse && invert == o.invert
+            && fitScale == o.fitScale && mapToRoot == o.mapToRoot
+            && root == o.root && mode == o.mode
+            && noteFilterMask == o.noteFilterMask && noteFilterType == o.noteFilterType;
+    }
+};
+
 struct ClipEdit
 {
     /** Absolute target octave 0..6. -1 = keep the clip's native octave. */
@@ -269,6 +348,12 @@ struct ClipEdit
     int legacyTrimTail = 0;
     std::map<int, int> velocities;  // per-note velocity overrides (1-127)
     std::set<int> deleted;          // per-note non-destructive deletions
+    /** Toolkit clip effects stamped onto notes. Empty = the file groove still
+        applies through the loop/selection scope (legacy). Once any note is
+        stamped, each note uses its own entry, or a dry groove when absent. */
+    std::map<int, NoteGroove> noteGroove;
+    /** Pitch/form settings stamped the same way. Empty keeps the global edit. */
+    std::map<int, NotePitchSettings> notePitch;
 
     bool hasTrim() const
     {
@@ -313,6 +398,49 @@ struct ClipEdit
         legacyTrimTail = 0;
     }
 };
+
+inline NotePitchSettings capturePitchSettings(const ClipEdit& e)
+{
+    NotePitchSettings s;
+    s.pitchShift = e.pitchShift;
+    s.octave = e.octave;
+    s.octaveRange = e.octaveRange;
+    s.outsideRange = e.outsideRange;
+    s.pitchMin = e.pitchMin;
+    s.pitchMax = e.pitchMax;
+    s.reverse = e.reverse;
+    s.invert = e.invert;
+    s.fitScale = e.fitScale;
+    s.mapToRoot = e.mapToRoot;
+    s.root = e.root;
+    s.mode = e.mode;
+    s.noteFilterMask = e.noteFilterMask;
+    s.noteFilterType = e.noteFilterType;
+    return s;
+}
+
+inline void applyPitchSettings(ClipEdit& e, const NotePitchSettings& s)
+{
+    e.pitchShift = s.pitchShift;
+    e.octave = s.octave;
+    e.octaveRange = s.octaveRange;
+    e.outsideRange = s.outsideRange;
+    e.pitchMin = s.pitchMin;
+    e.pitchMax = s.pitchMax;
+    e.reverse = s.reverse;
+    e.invert = s.invert;
+    e.fitScale = s.fitScale;
+    e.mapToRoot = s.mapToRoot;
+    e.root = s.root;
+    e.mode = s.mode;
+    e.noteFilterMask = s.noteFilterMask;
+    e.noteFilterType = s.noteFilterType;
+}
+
+inline bool pitchSettingsActive(const NotePitchSettings& s)
+{
+    return !(s == NotePitchSettings{});
+}
 
 bool editIsClean(const ClipEdit& e);
 

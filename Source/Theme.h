@@ -19,7 +19,7 @@ enum class ThemeDepth : uint8_t { Flat = 0, Soft = 1, Glass = 2, Neo = 3, Brutal
 enum class ThemeFace : uint8_t { Sans = 0, Rounded = 1, Mono = 2, Serif = 3 };
 
 /** Named themes. First half of the catalog is light, second half is dark.
-    Indexes 0–9 / 32–41 are the classic tint themes; 10–31 / 42–63 are skill packs. */
+    Indexes 0–9 / 36–45 are the classic tint themes; 10–35 / 46–71 are skill packs. */
 struct ThemeSpec
 {
     const char* name;
@@ -83,8 +83,12 @@ inline constexpr ThemeSpec kThemes[] = {
     PF_SKILL_L("Clay",         0xff3b82f6, 0xffeef4ff, 0xff1c398e, 0xff3b82f6, 12,20,1.15f, ThemeDepth::Neo,    ThemeFace::Rounded, 0.0f),
     PF_SKILL_L("Cursor",       0xff3b82f6, 0xfff3f3f3, 0xff1f1f1f, 0xff3b82f6, 4, 6, 0.95f, ThemeDepth::Flat,   ThemeFace::Sans,    1.0f),
     PF_SKILL_L("FilmCraft",    0xffe8a317, 0xfff4f1ea, 0xff1c1917, 0xffe8a317, 2, 4, 0.92f, ThemeDepth::Flat,   ThemeFace::Sans,    1.0f),
+    PF_SKILL_L("Final Cut",    0xff01636c, 0xffe8e8ea, 0xff1c1c1e, 0xff467baa, 2, 4, 0.95f, ThemeDepth::Flat,   ThemeFace::Sans,    1.0f),
+    PF_SKILL_L("Finder",       0xff007aff, 0xffffffff, 0xff1d1d1f, 0xff007aff, 6, 12,1.05f, ThemeDepth::Soft,   ThemeFace::Sans,    1.0f),
+    PF_SKILL_L("Photomator",   0xfff18207, 0xfff6f6f6, 0xff1c1c1e, 0xfff18207, 2, 4, 0.95f, ThemeDepth::Flat,   ThemeFace::Sans,    1.0f),
+    PF_SKILL_L("Safari",       0xff007aff, 0xffffffff, 0xff1d1d1f, 0xff007aff, 6, 12,1.05f, ThemeDepth::Soft,   ThemeFace::Rounded, 1.0f),
 
-    // ── Classic dark (32–41) ─────────────────────────────────────────────────
+    // ── Classic dark (36–45) ─────────────────────────────────────────────────
     { "Ink",      true,  0.00f, 0.00f,  0.00f },
     { "Carbon",   true,  0.00f, 0.00f, -0.04f },
     { "Slate",    true,  0.58f, 0.28f,  0.00f },
@@ -96,7 +100,7 @@ inline constexpr ThemeSpec kThemes[] = {
     { "Midnight", true,  0.64f, 0.42f, -0.04f },
     { "Cocoa",    true,  0.07f, 0.26f, -0.01f },
 
-    // ── Skill dark (42–63) ───────────────────────────────────────────────────
+    // ── Skill dark (46–71) ───────────────────────────────────────────────────
     PF_SKILL_D("Minimal",      0xffa5b4fc, 0xff0c0c09, 0xfff4f4f1, 0xffa5b4fc, 4, 8, 1.15f, ThemeDepth::Flat,   ThemeFace::Sans,    1.0f),
     PF_SKILL_D("Clean",        0xff818cf8, 0xff0f172a, 0xfff8fafc, 0xff60a5fa, 6, 12,1.20f, ThemeDepth::Soft,   ThemeFace::Rounded, 1.0f),
     PF_SKILL_D("Professional", 0xfffece14, 0xff111111, 0xfffafafa, 0xfffece14, 4, 8, 0.95f, ThemeDepth::Soft,   ThemeFace::Sans,    1.0f),
@@ -119,21 +123,25 @@ inline constexpr ThemeSpec kThemes[] = {
     PF_SKILL_D("Clay",         0xff60a5fa, 0xff101828, 0xffdbeafe, 0xff3b82f6, 12,20,1.15f, ThemeDepth::Neo,    ThemeFace::Rounded, 0.0f),
     PF_SKILL_D("Cursor",       0xff3b82f6, 0xff181818, 0xffe4e4e7, 0xff3b82f6, 4, 6, 0.95f, ThemeDepth::Flat,   ThemeFace::Sans,    1.0f),
     PF_SKILL_D("FilmCraft",    0xffe8a317, 0xff1a1a1a, 0xfff2f2f2, 0xffe8a317, 2, 4, 0.92f, ThemeDepth::Flat,   ThemeFace::Sans,    1.0f),
+    PF_SKILL_D("Final Cut",    0xff01636c, 0xff191919, 0xffe6e8e9, 0xff467baa, 2, 4, 0.95f, ThemeDepth::Flat,   ThemeFace::Sans,    1.0f),
+    PF_SKILL_D("Finder",       0xff0a84ff, 0xff1c1c1e, 0xfff5f5f7, 0xff0a84ff, 6, 12,1.05f, ThemeDepth::Soft,   ThemeFace::Sans,    1.0f),
+    PF_SKILL_D("Photomator",   0xfff18207, 0xff161616, 0xfff5f5f5, 0xfff18207, 2, 4, 0.95f, ThemeDepth::Flat,   ThemeFace::Sans,    1.0f),
+    PF_SKILL_D("Safari",       0xff0a84ff, 0xff1c1c1e, 0xfff5f5f7, 0xff0a84ff, 6, 12,1.05f, ThemeDepth::Soft,   ThemeFace::Rounded, 1.0f),
 };
 
 #undef PF_SKILL_L
 #undef PF_SKILL_D
 
 inline constexpr int kNumThemes = (int) (sizeof(kThemes) / sizeof(kThemes[0]));
-inline constexpr int kNumThemesPerFamily = 32; // 10 classic + 22 skill
+inline constexpr int kNumThemesPerFamily = 36; // 10 classic + 26 skill
 inline constexpr int kPearlTheme = 5;
-/** Default skill pack (family index): Neobrutal — light 20 / dark 52. */
+/** Default skill pack (family index): Neobrutal — light 20 / dark 56. */
 inline constexpr int kNeobrutalTheme = 20;
 /** Clay light/dark twins (family index). */
 inline constexpr int kClayTheme = 29;
 /** Default theme — Cursor light/dark twins. */
 inline constexpr int kCursorTheme = 30;
-inline constexpr int kInkTheme = 32; // first classic dark
+inline constexpr int kInkTheme = 36; // first classic dark
 
 inline const ThemeSpec& themeAt(int index)
 {
@@ -537,7 +545,7 @@ namespace metrics {
     /** Scale with Text & icons setting so chrome stays proportional. */
     inline int sidebarRailWidth() { return scaled(sidebarRailW); }
     /** Expanded library sidebar is a fixed 150 px (does not follow UI size). */
-    inline int sidebarExpandedWidth() { return sidebarExpandedW; }
+    inline int sidebarExpandedWidth() { return juce::jmax(80, sidebarExpandedW - 20); }
     inline int chromeIconButton() { return scaled(chromeIconBtn); }
     inline int chromeIconGlyphSize()
     {

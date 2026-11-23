@@ -226,6 +226,9 @@ private:
     const std::set<int>* formSelectionIds() const;
     /** Loop region, further limited to the current selection when one exists. */
     NoteProcessScope noteScope() const;
+    /** Load the toolkit from the notes in scope. Does not stamp or reprocess. */
+    void showScopeSettings();
+    bool showingScopeSettings = false;
 
     MidiToolkitProcessor& processorRef;
     PatternFlowLookAndFeel lnf;
@@ -237,6 +240,7 @@ private:
             : juce::TooltipWindow(parent, delayMs)
         {
             setOpaque(false);
+            setInterceptsMouseClicks(false, false);
         }
 
         juce::String getTipFor(juce::Component& c) override
@@ -315,6 +319,8 @@ private:
     KindGridView kindGrid;
     bool gridView = false;
     bool browserSearchOpen = false;
+    bool previewOpenBeforeRoll = true;
+    bool rollHidPreview = false;
     bool showPreviewVelocity = false;
     bool previewMuted = false;
     int browserContentWidth() const;
@@ -379,6 +385,19 @@ private:
     int lastWindowH = 700;
     /** Height after the first layout. The window cannot shrink below this. */
     int openedWindowH = 0;
+    /** Height before the piano roll opened. Restored when the roll closes. */
+    int heightBeforeRollCap = 0;
+    /** Transport plus the default piano roll and its velocity row or lane. */
+    int defaultRollWindowHeight() const;
+    /** Transport, generator sections, and the preview fold. */
+    int generatorWindowHeight() const;
+    /** Transport plus the toolkit column, through the last section. */
+    int toolkitWindowHeight() const;
+    /** Width of every column that is actually open. */
+    int columnWidth() const;
+    /** Snap the host window to the open columns. Browser-only may stay between min and max. */
+    void applyWindowSize(bool snapBrowserToDefault);
+    bool applyingWindowSize = false;
     int trackedBrowserContentW = -1;
     int chromeApplyAttempts = 0;
     void* spaceToHostMonitor = nullptr;
