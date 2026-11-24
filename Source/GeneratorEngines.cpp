@@ -355,23 +355,13 @@ Harmony harmonyFromHeld(const int* chordNotes, int chordCount, int keyRoot, Mode
     return progressionHarmony(keyRoot, mode, bar);
 }
 
-// ── Arp (Sting-inspired pattern engine) ──────────────────────────────────────
-// Generates related 16-step note / velocity / gate / octave banks, then tiles
-// them across the clip with song-form sections — not a classic up/down arp.
+// ── Arp (classic grid arpeggiator) ───────────────────────────────────────────
+// Sting model: Division (Speed) clocks an even grid; Density picks how many of
+// the 16 pattern steps sound (scale 0..1 → 1..16), spaced evenly — never random
+// rests. Type walks the chord/scale pool in order (Up / Skip / Pedal / …).
 
-struct ArpBanks
-{
-    int noteIdx[16];   // index into pitch pool
-    int velLayer[16];  // 0=rest, 1=soft, 2=mid, 3=accent
-    float gateMul[16]; // duration scale
-    int octShift[16];  // -1 / 0 / +1
-    bool slide[16];    // Acid: note holds into the next step (overlap = legato glide)
-};
-
-// Arp Gate / Intensity / Dynamics have no UI any more; these are the old defaults.
 constexpr float kArpGate = 0.70f;
-constexpr float kArpIntensity = 0.70f;
-constexpr float kArpDynamics = 0.55f;
+constexpr int kArpPatternSteps = 16;
 
 void buildPitchPool(const GrooveParams& g, const int* chordNotes, int chordCount,
                     int keyRoot, Mode mode, std::vector<int>& pool)
@@ -394,8 +384,8 @@ void buildPitchPool(const GrooveParams& g, const int* chordNotes, int chordCount
         int count = 0;
         const int* deg = scaleDegrees(mode, count);
         pool.push_back(root);
-        pool.push_back(root + deg[2]);
-        pool.push_back(root + deg[4]);
+        pool.push_back(root + deg[juce::jmin(2, count - 1)]);
+        pool.push_back(root + deg[juce::jmin(4, count - 1)]);
         if (count > 5) pool.push_back(root + deg[5]);
     }
     std::sort(pool.begin(), pool.end());
@@ -407,138 +397,109 @@ void buildPitchPool(const GrooveParams& g, const int* chordNotes, int chordCount
                 pool.push_back(n + o * 12);
 }
 
-void generateArpBanks(const GrooveParams& g, std::uint32_t seed, int salt, ArpBanks& banks)
+/** Ordered pitch cycle for one form letter — classic arp walk, not a melody. */
+void buildArpOrder(const GrooveParams& g, const std::vector<int>& pool,
+                   std::uint32_t seed, int formLetter, std::vector<int>& order)
 {
-    // Density 100% → every slot active (render maps slots onto the rate grid).
-    const float density = clampf((float) g.arpDensity / 100.0f, 0.0f, 1.0f);
-    const bool fillAll = g.arpDensity >= 100;
-    // Shape index acts like Sting Type: low = more random intervals, high = chord tones.
-    const bool acid = g.arpShape() == ArpShape::Acid;
-    // Walk..Climb keep their original 0..1 spread; Acid has its own generator.
-        float type = (float) juce::jmin(g.arpShapeIndex, (int) ArpShape::Climb)
-                       / (float) juce::jmax(1, (int) ArpShape::Climb);
-        if (g.arpStyle() == MelodyStyle::Hold || g.arpStyle() == MelodyStyle::Arch)
-            type = juce::jmin(1.0f, type + 0.35f);
-        else if (g.arpStyle() == MelodyStyle::Drift || g.arpStyle() == MelodyStyle::Turn)
-            type *= 0.45f;
+    order.clear();
+    if (pool.empty()) return;
+    const int n = (int) pool.size();
+    auto at = [&](int i) { return pool[(size_t) ((i % n + n) % n)]; };
 
-    for (int i = 0; i < 16; ++i)
+    switch (g.arpShape())
     {
-        const float r = unit(seed, i, salt, 3);
-        const bool strong = (i % 4) == 0;
-        const bool play = fillAll || (strong ? (r < density * 1.15f + 0.15f) : (r < density));
-        banks.slide[i] = false;
-        if (!play)
-        {
-            banks.noteIdx[i] = 0;
-            banks.velLayer[i] = 0;
-            banks.gateMul[i] = 0.5f;
-            banks.octShift[i] = 0;
-            continue;
-        }
-
-        if (acid)
-        {
-            // 303-style: root-heavy low line, accents on strong steps, octave
-            // jumps up (and the odd dip), slides that tie into the next step.
-            const float pick = unit(seed, i, salt, 9);
-            banks.noteIdx[i] = pick < 0.5f ? 0 : (int) (unit(seed, i, salt, 11) * 4.0f);
-            const float accentRoll = unit(seed, i, salt, 17);
-            banks.velLayer[i] = (strong || accentRoll > 0.7f) ? 3 : (accentRoll > 0.3f ? 2 : 1);
-            banks.gateMul[i] = 0.75f;
-            const float oRoll = unit(seed, i, salt, 23);
-            banks.octShift[i] = oRoll < 0.30f ? 1 : (oRoll > 0.9f ? -1 : 0);
-            banks.slide[i] = unit(seed, i, salt, 29) < 0.28f;
-            continue;
-        }
-
-        // Prefer chord-tone indices when type is high.
-        const float pick = unit(seed, i, salt, 9);
-        int idx;
-        if (pick < type * 0.75f + 0.15f)
-            idx = (i / 2 + (int) (unit(seed, i, salt, 11) * 3.0f)) % 4;
-        else
-            idx = (int) (unit(seed, i, salt, 13) * 8.0f);
-        banks.noteIdx[i] = idx;
-
-        const float accentRoll = unit(seed, i, salt, 17);
-        if (strong || accentRoll > 0.72f) banks.velLayer[i] = 3;
-        else if (accentRoll > 0.35f)      banks.velLayer[i] = 2;
-        else                              banks.velLayer[i] = 1;
-
-        const float gRoll = unit(seed, i, salt, 19);
-        banks.gateMul[i] = gRoll < 0.33f ? 0.35f : (gRoll < 0.7f ? 0.65f : 1.05f);
-
-        const float oRoll = unit(seed, i, salt, 23);
-        banks.octShift[i] = oRoll < 0.18f ? -1 : (oRoll > 0.82f ? 1 : 0);
-        if (g.arpMotion() == MelodyContour::Rise && i >= 8)
-            banks.octShift[i] = 1;
-        else if (g.arpMotion() == MelodyContour::Fall && i >= 8)
-            banks.octShift[i] = -1;
-        else if (g.arpMotion() == MelodyContour::Leap && (i % 4) == 0)
-            banks.octShift[i] = 1;
+        case ArpShape::Walk:
+            for (int i = 0; i < n; ++i)
+                order.push_back(at(i));
+            break;
+        case ArpShape::Skip:
+            for (int i = 0; i < n; i += 2)
+                order.push_back(at(i));
+            for (int i = 1; i < n; i += 2)
+                order.push_back(at(i));
+            break;
+        case ArpShape::Pedal:
+            for (int i = 1; i < n; ++i)
+            {
+                order.push_back(at(0));
+                order.push_back(at(i));
+            }
+            if (order.empty())
+                order.push_back(at(0));
+            break;
+        case ArpShape::Arch: // Up then down (pendulum), like Sting Fwd/Bwd pendulum
+            for (int i = 0; i < n; ++i)
+                order.push_back(at(i));
+            for (int i = n - 2; i >= 1; --i)
+                order.push_back(at(i));
+            break;
+        case ArpShape::Climb:
+            for (int i = 0; i < n; ++i)
+                order.push_back(at(i));
+            for (int i = 0; i < n; ++i)
+                order.push_back(juce::jlimit(0, 127, at(i) + 12));
+            break;
+        case ArpShape::Acid:
+            // Root-heavy 303 cycle: 1–1–3–1–5–1–… with seeded octave bumps.
+            for (int i = 0; i < juce::jmax(4, n * 2); ++i)
+            {
+                int deg = 0;
+                if ((i % 4) == 2) deg = juce::jmin(2, n - 1);
+                else if ((i % 4) == 3) deg = juce::jmin(1, n - 1);
+                int note = at(deg);
+                if (unit(seed, i, formLetter, 23) < 0.28f)
+                    note = juce::jlimit(0, 127, note + 12);
+                else if (unit(seed, i, formLetter, 29) < 0.08f)
+                    note = juce::jlimit(0, 127, note - 12);
+                order.push_back(note);
+            }
+            break;
+        case ArpShape::Count:
+            break;
     }
-    // Always land something on step 0.
-    if (banks.velLayer[0] == 0)
+    if (order.empty())
+        order.push_back(at(0));
+
+    // Motion flips / stretches the cycle without breaking even timing.
+    if (g.arpMotion() == MelodyContour::Fall)
+        std::reverse(order.begin(), order.end());
+    else if (g.arpMotion() == MelodyContour::Rise)
     {
-        banks.velLayer[0] = 3;
-        banks.noteIdx[0] = 0;
-        banks.gateMul[0] = 0.8f;
-        banks.octShift[0] = 0;
+        for (size_t i = order.size() / 2; i < order.size(); ++i)
+            order[i] = juce::jlimit(0, 127, order[i] + 12);
     }
+    else if (g.arpMotion() == MelodyContour::Leap)
+    {
+        for (size_t i = 0; i < order.size(); i += 2)
+            order[i] = juce::jlimit(0, 127, order[i] + 12);
+    }
+
+    // Form B/C: rotate / invert so AAAB/ABAB changes the line, not the grid.
+    if (formLetter == 1)
+        std::rotate(order.begin(), order.begin() + (order.size() / 2), order.end());
+    else if (formLetter >= 2)
+        std::reverse(order.begin(), order.end());
 }
 
-void renderArpBanksBar(const GrooveParams& g, const ArpBanks& banks,
-                       const std::vector<int>& pool, int bar,
-                       double startPpq, double endPpq, std::vector<Event>& out)
+/** Sting Density: 0% → 1 note, 100% → all 16 pattern steps, spaced evenly. */
+void buildEvenDensityMask(int densityPct, bool* active /*[kArpPatternSteps]*/)
 {
-    if (pool.empty()) return;
-    const double stepLength = delayPeriodBeats(g.arpRate());
-    const bool acid = g.arpShape() == ArpShape::Acid;
-    const int velLo = juce::roundToInt(48.0f + 20.0f * kArpIntensity);
-    const int velMid = juce::roundToInt(72.0f + 28.0f * kArpIntensity);
-    const int velHi = juce::roundToInt(96.0f + 28.0f * kArpIntensity);
-
-    // Density 100%: a note on every step of the selected rate (1/16 → every 16th),
-    // not a probability. Steps sit on the rate grid, so dotted rates stay even
-    // across bar lines.
-    const bool fillAll = g.arpDensity >= 100;
-    const double barStart = (double) bar * 4.0;
-    const int firstStep = (int) std::ceil(barStart / stepLength - 1.0e-6);
-    const int endStep = (int) std::ceil((barStart + 4.0) / stepLength - 1.0e-6);
-    for (int k = firstStep; k < endStep; ++k)
+    const int count = juce::jlimit(1, kArpPatternSteps,
+                                   1 + juce::roundToInt((densityPct / 100.0) * (kArpPatternSteps - 1)));
+    for (int i = 0; i < kArpPatternSteps; ++i)
+        active[i] = false;
+    if (count >= kArpPatternSteps)
     {
-        const int s = k - firstStep;
-        const int patternStep = s % 16;
-        const bool planned = banks.velLayer[patternStep] > 0;
-        int layer = banks.velLayer[patternStep];
-        if (!planned)
-        {
-            if (!fillAll) continue;
-            layer = (s % 4) == 0 ? 3 : 2;
-        }
-
-        const int flat = juce::jlimit(1, 127, (velLo + velMid + velHi) / 3);
-        const int layered = layer == 1 ? velLo : (layer == 2 ? velMid : velHi);
-        const int velocity = juce::jlimit(1, 127,
-            juce::roundToInt((float) flat * (1.0f - kArpDynamics) + (float) layered * kArpDynamics));
-
-        const int rawIdx = planned ? banks.noteIdx[patternStep] : s;
-        const int idx = ((rawIdx % (int) pool.size()) + (int) pool.size()) % (int) pool.size();
-        const int oct = planned ? banks.octShift[patternStep] : 0;
-        const float gMul = planned ? banks.gateMul[patternStep] : 0.75f;
-        const int note = juce::jlimit(0, 127, pool[(size_t) idx] + oct * 12);
-
-        const double onPpq = (double) k * stepLength;
-        // Acid slides run a hair past the next onset so the notes overlap (legato glide).
-        const bool slide = acid && planned && banks.slide[patternStep];
-        const double offPpq = slide ? onPpq + stepLength * 1.08
-                                    : onPpq + stepLength * (double) (gMul * kArpGate);
-        if (onPpq >= startPpq && onPpq < endPpq)
-            out.push_back({ onPpq, note, velocity });
-        if (offPpq >= startPpq && offPpq < endPpq)
-            out.push_back({ offPpq, note, 0 });
+        for (int i = 0; i < kArpPatternSteps; ++i)
+            active[i] = true;
+        return;
     }
+    for (int i = 0; i < count; ++i)
+    {
+        const int idx = (i * kArpPatternSteps) / count;
+        active[juce::jlimit(0, kArpPatternSteps - 1, idx)] = true;
+    }
+    active[0] = true; // always land on the first step of the cycle
 }
 
 void renderArp(const GrooveParams& g, double startPpq, double endPpq,
@@ -550,83 +511,89 @@ void renderArp(const GrooveParams& g, double startPpq, double endPpq,
     if (g.arpInput && (chordNotes == nullptr || chordCount <= 0)) return;
 
     const std::uint32_t seed = partSeed(g.arpVariation, g.arpNonce, g.arpGenreIndex, 11);
-    const auto feel = genreFeel(g.arpGenre());
     std::vector<int> pool;
     buildPitchPool(g, chordNotes, chordCount, keyRoot, mode, pool);
     if (pool.empty()) return;
 
-    ArpBanks bankA {}, bankB {}, bankC {};
-    generateArpBanks(g, seed, 1, bankA);
-    generateArpBanks(g, seed ^ 0xA11CE, 2, bankB);
-    generateArpBanks(g, seed ^ 0xBEEF5, 3, bankC);
-    // Genre reshapes gate / accent density before form motifs.
-    for (auto* bank : { &bankA, &bankB, &bankC })
-    {
-        for (int i = 0; i < 16; ++i)
-        {
-            if (feel.densityMul < 0.8f && bank->velLayer[i] > 0
-                && unit(seed, i, 3, 41) > feel.densityMul)
-                bank->velLayer[i] = 0;
-            else if (feel.densityMul > 1.1f && bank->velLayer[i] == 0
-                     && unit(seed, i, 5, 43) < (feel.densityMul - 1.0f))
-                bank->velLayer[i] = 1 + (int) (unit(seed, i, 7, 47) * 2.0f);
-            if (feel.preferOffbeats && (i % 2) == 0 && bank->velLayer[i] > 0
-                && unit(seed, i, 9, 53) < feel.syncopation * 0.4f)
-            {
-                const int j = juce::jmin(15, i + 1);
-                bank->velLayer[j] = juce::jmax(bank->velLayer[j], bank->velLayer[i]);
-                bank->noteIdx[j] = bank->noteIdx[i];
-                bank->velLayer[i] = 0;
-            }
-            bank->gateMul[i] = clampf(bank->gateMul[i] + feel.sustainBias * 0.35f, 0.2f, 1.4f);
-        }
-    }
-    // Form motifs: B = inverted/shifted A, C = busier offbeat cousin — audible AAAB/ABAB/…
-    for (int i = 0; i < 16; ++i)
-    {
-        const int j = 15 - i;
-        bankB.noteIdx[i] = (bankA.noteIdx[j] + 1) % 4;
-        bankB.velLayer[i] = bankA.velLayer[j] > 0 ? bankA.velLayer[j]
-                         : (bankA.velLayer[i] > 0 ? 1 : 0);
-        bankB.gateMul[i] = bankA.gateMul[j];
-        bankB.octShift[i] = -bankA.octShift[j];
-        bankB.slide[i] = bankA.slide[j];
-
-        if ((i % 2) == 1)
-        {
-            bankC.velLayer[i] = juce::jmax(1, bankA.velLayer[i] > 0 ? bankA.velLayer[i] : 2);
-            bankC.noteIdx[i] = (bankA.noteIdx[i] + 2) % 4;
-            bankC.octShift[i] = bankA.octShift[i] != 0 ? bankA.octShift[i] : 1;
-            bankC.gateMul[i] = 0.55f;
-            bankC.slide[i] = bankA.slide[i];
-        }
-        else
-        {
-            bankC.noteIdx[i] = bankA.noteIdx[i];
-            bankC.velLayer[i] = bankA.velLayer[i];
-            bankC.gateMul[i] = bankA.gateMul[i];
-            bankC.octShift[i] = bankA.octShift[i];
-            bankC.slide[i] = bankA.slide[i];
-        }
-    }
-
+    const double stepLength = juce::jmax(1.0 / 48.0, delayPeriodBeats(g.arpRate()));
+    const bool acid = g.arpShape() == ArpShape::Acid;
     const int phraseBars = generatorLengthBars(g.arpLength());
     const GeneratorForm form = resolveForm(g.arpForm(), seed);
-    const ArpBanks* banks[3] = { &bankA, &bankB, &bankC };
-    const int firstBar = (int) std::floor(startPpq / 4.0) - 1;
-    const int lastBar = (int) std::floor((endPpq - 1.0e-9) / 4.0) + 1;
 
-    for (int absBar = firstBar; absBar <= lastBar; ++absBar)
+    bool active[kArpPatternSteps];
+    buildEvenDensityMask(g.arpDensity, active);
+
+    // Prebuild orders for form letters A/B/C.
+    std::vector<int> orders[3];
+    for (int letter = 0; letter < 3; ++letter)
+        buildArpOrder(g, pool, seed ^ (std::uint32_t) (letter * 0x9E3779B9u), letter, orders[letter]);
+
+    // Style only colours velocity accents — never timing.
+    auto accentVel = [&](int patternStep) -> int
     {
-        if (absBar < 0) continue;
-        int letter = 0, local = 0;
-        mapFormBar(phraseBars, form, wrapBar(absBar, phraseBars), letter, local);
-        juce::ignoreUnused(local);
-        renderArpBanksBar(g, *banks[juce::jlimit(0, 2, letter)], pool, absBar, startPpq, endPpq, out);
+        const bool beat = (patternStep % 4) == 0;
+        int base = beat ? 108 : 88;
+        switch (g.arpStyle())
+        {
+            case MelodyStyle::March: base = beat ? 112 : 82; break;
+            case MelodyStyle::Hold:  base = beat ? 118 : 70; break;
+            case MelodyStyle::Drift: base = 90 + (patternStep % 3) * 6; break;
+            case MelodyStyle::Turn:  base = (patternStep % 8) >= 6 ? 110 : 86; break;
+            case MelodyStyle::Call:  base = patternStep < 8 ? 108 : 78; break;
+            case MelodyStyle::Arch:  base = 84 + std::abs(8 - patternStep) * 3; break;
+            case MelodyStyle::Count: break;
+        }
+        // Genre: slight accent bias only.
+        if (g.arpGenre() == GeneratorGenre::Funk && !beat)
+            base = juce::jmax(1, base - 12);
+        else if (g.arpGenre() == GeneratorGenre::Techno)
+            base = juce::jmin(127, base + 4);
+        return juce::jlimit(1, 127, base);
+    };
+
+    const int firstStep = (int) std::floor(startPpq / stepLength + 1.0e-9);
+    const int lastStep = (int) std::ceil(endPpq / stepLength - 1.0e-9);
+    // Cursor advances only on sounding steps so the walk stays continuous.
+    int noteCursor = 0;
+    // Count sounding steps before the window so live/offline stay phase-aligned.
+    {
+        const int pre = juce::jmax(0, firstStep);
+        for (int k = 0; k < pre; ++k)
+            if (active[((k % kArpPatternSteps) + kArpPatternSteps) % kArpPatternSteps])
+                ++noteCursor;
     }
-    // Density 100% promises a note on every step — the QA thinning pass would drop some.
-    if (g.arpDensity < 100 && isFullPhraseWindow(startPpq, endPpq, phraseBars))
-        musicalQaPass(out, phraseBars, false);
+
+    for (int k = firstStep; k < lastStep; ++k)
+    {
+        if (k < 0) continue;
+        const double onPpq = (double) k * stepLength;
+        if (onPpq < startPpq || onPpq >= endPpq)
+            continue;
+
+        const int patternStep = ((k % kArpPatternSteps) + kArpPatternSteps) % kArpPatternSteps;
+        if (!active[patternStep])
+            continue;
+
+        const int absBar = (int) std::floor(onPpq / 4.0);
+        int letter = 0, local = 0;
+        mapFormBar(phraseBars, form, wrapBar(juce::jmax(0, absBar), phraseBars), letter, local);
+        juce::ignoreUnused(local);
+        const auto& order = orders[juce::jlimit(0, 2, letter)];
+        if (order.empty()) continue;
+
+        const int note = order[(size_t) (noteCursor % (int) order.size())];
+        ++noteCursor;
+
+        const int velocity = accentVel(patternStep);
+        // Even gate on the rate grid; Acid may slide past the next onset.
+        const bool slide = acid && unit(seed, k, patternStep, 31) < 0.28f;
+        const double offPpq = slide ? onPpq + stepLength * 1.08
+                                    : onPpq + stepLength * (double) kArpGate;
+
+        out.push_back({ onPpq, note, velocity });
+        if (offPpq >= startPpq && offPpq < endPpq + stepLength)
+            out.push_back({ offPpq, note, 0 });
+    }
     sortEvents(out);
 }
 

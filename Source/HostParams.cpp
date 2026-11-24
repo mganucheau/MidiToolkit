@@ -418,7 +418,7 @@ void HostParams::create(juce::AudioProcessor& owner)
                     (int) ArpShape::Walk, &GrooveParams::arpShapeIndex);
     addGrooveChoice(owner, "gen_arp_rate", "Arp Rate", delayTimeLabels(),
                     (int) DelayTime::Sixteenth, &GrooveParams::arpRateIndex);
-    addGrooveInt(owner, "gen_arp_density", "Arp Density", 0, 100, 55, &GrooveParams::arpDensity);
+    addGrooveInt(owner, "gen_arp_density", "Arp Density", 0, 100, 100, &GrooveParams::arpDensity);
 
     // Melody
     addGrooveBool(owner, "gen_melody_input", "Melody Input", false, &GrooveParams::melodyInput);

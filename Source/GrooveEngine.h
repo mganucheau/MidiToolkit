@@ -535,8 +535,8 @@ struct GrooveParams
     /** Legacy (XML compat) — Gate / Intensity / Dynamics have no UI; the arp uses fixed values. */
     int arpGate = 70;               // 10..100 %
     int arpOctaves = 2;             // 1..3 span for pattern octave lane
-    /** 0..100 note activity. 100 forces a note on every step of the arp rate. */
-    int arpDensity = 55;
+    /** 0..100 → 1..16 sounding steps in the pattern, spaced evenly on Speed. */
+    int arpDensity = 100;
     /** Melody-style phrasing for the arp (Style). */
     int arpStyleIndex = (int) MelodyStyle::March;
     /** Genre flavour (House / Breakbeat / …) shared with drums. */

@@ -34,7 +34,7 @@ EffectsInspector::EffectsInspector()
     , arpGenreRow("Genre", arpGenrePopup)
     , arpRateRow("Speed", arpRatePopup)
     , arpMotionRow("Motion", arpMotionPopup)
-    , arpDensitySl("Density", 0, 100, 55, false)
+    , arpDensitySl("Density", 0, 100, 100, false)
     , melodyGenerateRow({}, melodyGenerateBtn)
     , melodyInputRow("Input", melodyInputSwitch)
     , melodyTypeRow("Type", melodyTypePopup)
@@ -540,7 +540,7 @@ EffectsInspector::EffectsInspector()
         for (int i = 0; i < (int) ArpShape::Count; ++i)
             shapes.add(arpShapeLabel((ArpShape) i));
         arpShapePopup.setItems(shapes, 0);
-        arpShapePopup.setTooltip("Morphs phrasing from open intervals toward classic lines. Acid adds octave jumps and slides on the rate grid");
+        arpShapePopup.setTooltip("Arp order through the chord: Walk up, Skip, Pedal, Arch (up/down), Climb, or Acid");
         arpShapePopup.onChange = [this](int idx)
         {
             groove.arpShapeIndex = juce::jlimit(0, (int) ArpShape::Count - 1, idx);
@@ -634,10 +634,12 @@ EffectsInspector::EffectsInspector()
         arpDensitySl.onChange = [this](int v)
         {
             groove.arpDensity = v;
-            arpDensitySl.valueText = v >= 100 ? "Every" : (juce::String(v) + "%");
+            // Sting-style: density maps to how many of 16 pattern steps sound.
+            const int notes = juce::jlimit(1, 16, 1 + juce::roundToInt((v / 100.0) * 15.0));
+            arpDensitySl.valueText = juce::String(notes) + "/16";
             notifyGroove();
         };
-        arpDensitySl.setTooltip("Note activity. 100% plays a note on every step of the Rate");
+        arpDensitySl.setTooltip("How many notes in the 16-step pattern, spaced evenly on the Speed grid");
         arpGenerateBtn.setTooltip("Roll a new pattern into the piano roll");
         arpGenerateBtn.onClick = [this, rollGenerateSeed]
         {
@@ -648,9 +650,16 @@ EffectsInspector::EffectsInspector()
             groove.arpStyleIndex = rng.nextInt((int) MelodyStyle::Count);
             groove.arpMotionIndex = rng.nextInt((int) MelodyContour::Count);
             groove.arpShapeIndex = rng.nextInt((int) ArpShape::Count);
-            groove.arpRateIndex = rng.nextInt((int) DelayTime::Count);
+            // Prefer straight grids so Generate still feels like an arp.
+            static constexpr int kArpRates[] = {
+                (int) DelayTime::Quarter,
+                (int) DelayTime::Eighth,
+                (int) DelayTime::Sixteenth,
+                (int) DelayTime::ThirtySecond
+            };
+            groove.arpRateIndex = kArpRates[rng.nextInt(4)];
             groove.arpFormIndex = (int) GeneratorForm::Auto;
-            groove.arpDensity = 35 + rng.nextInt(56);
+            groove.arpDensity = 50 + rng.nextInt(51); // 8..16 of 16 steps
             setGroove(groove);
             notifyGroove();
             if (onGeneratorGenerated) onGeneratorGenerated(0);
@@ -669,7 +678,7 @@ EffectsInspector::EffectsInspector()
                     || groove.arpLengthIndex >= (int) GeneratorLength::FourBars);
         });
         arpSec.addRow(&arpDensitySl, kSliderRowH, [this] {
-            return groove.arpEnabled && groove.arpDensity != 55;
+            return groove.arpEnabled && groove.arpDensity != 100;
         });
         arpSec.addRow(&arpGenerateRow, kRowMinH, [this] { return groove.arpEnabled; });
 
@@ -1497,7 +1506,10 @@ void EffectsInspector::setGroove(const GrooveParams& g, juce::NotificationType)
     arpRatePopup.setIndex(juce::jlimit(0, (int) DelayTime::Count - 1, g.arpRateIndex),
                           juce::dontSendNotification);
     arpDensitySl.setValue(g.arpDensity, juce::dontSendNotification);
-    arpDensitySl.valueText = g.arpDensity >= 100 ? "Every" : (juce::String(g.arpDensity) + "%");
+    {
+        const int notes = juce::jlimit(1, 16, 1 + juce::roundToInt((g.arpDensity / 100.0) * 15.0));
+        arpDensitySl.valueText = juce::String(notes) + "/16";
+    }
     melodyInputSwitch.setToggleState(g.melodyInput, juce::dontSendNotification);
     melodyTypePopup.setIndex(juce::jlimit(0, (int) PhraseType::Count - 1, g.melodyTypeIndex),
                              juce::dontSendNotification);
