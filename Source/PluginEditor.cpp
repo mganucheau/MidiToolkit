@@ -977,12 +977,24 @@ MidiToolkitEditor::MidiToolkitEditor(MidiToolkitProcessor& p)
         }
         if (hasRecording)
         {
-            // Generated clips re-render live when density / intensity / dynamics /
-            // gate / form / length / style change. Recorded takes keep note data.
-            if (lastGeneratedPart >= 0 && recordedClip.filePath.startsWith("generator://"))
+            // Generated clips re-render live when Type / Density / Speed / etc.
+            // change so the piano roll matches the next sounding pattern.
+            if (recordedClip.filePath.startsWith("generator://"))
             {
-                regenerateGeneratedClip(k);
-                return;
+                if (lastGeneratedPart < 0)
+                {
+                    const auto path = recordedClip.filePath.fromFirstOccurrenceOf("generator://", false, false);
+                    if (path == "arpeggio") lastGeneratedPart = (int) gen::Part::Arp;
+                    else if (path == "melody") lastGeneratedPart = (int) gen::Part::Melody;
+                    else if (path == "chords") lastGeneratedPart = (int) gen::Part::Chords;
+                    else if (path == "bass") lastGeneratedPart = (int) gen::Part::Bass;
+                    else if (path == "drums") lastGeneratedPart = (int) gen::Part::Drums;
+                }
+                if (lastGeneratedPart >= 0)
+                {
+                    regenerateGeneratedClip(k);
+                    return;
+                }
             }
             auto edit = effectsInspector.getEdit();
             if (edit.noteGroove.empty())
@@ -2956,7 +2968,13 @@ void MidiToolkitEditor::regenerateGeneratedClip(const GrooveParams& groove)
     effectsInspector.setClipSourceOctave(clipReferenceOctave(recordedClip));
     effectsInspector.setClipComplexity(recordedClip.complexity);
     effectsInspector.setClipScaleAnalysis(analyseClipScale(recordedClip));
-    pushPreviewToProcessor();
+    // Hard preview update so notes from the previous pattern are note-off'd —
+    // soft updates would leave hanging notes until the DAW is restarted.
+    {
+        const auto preview = buildRenderedClip();
+        processorRef.setPreviewState(preview, !preview.notes.empty(), previewMuted, false, false);
+        pushLiveFxToProcessor();
+    }
     updateMiniPreview();
     if (firstGenerate)
         applyLayoutState();

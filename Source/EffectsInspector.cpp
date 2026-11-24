@@ -540,7 +540,7 @@ EffectsInspector::EffectsInspector()
         for (int i = 0; i < (int) ArpShape::Count; ++i)
             shapes.add(arpShapeLabel((ArpShape) i));
         arpShapePopup.setItems(shapes, 0);
-        arpShapePopup.setTooltip("Arp order through the chord: Walk up, Skip, Pedal, Arch (up/down), Climb, or Acid");
+        arpShapePopup.setTooltip("Arp order through the chord: Walk, Skip, Pedal, Arch, Climb, Rolling, or Acid");
         arpShapePopup.onChange = [this](int idx)
         {
             groove.arpShapeIndex = juce::jlimit(0, (int) ArpShape::Count - 1, idx);

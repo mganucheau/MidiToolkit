@@ -96,6 +96,8 @@ enum class ArpShape : int
     Pedal,
     Arch,
     Climb,
+    /** Ascending/descending spiral across octaves with overlapping gates. */
+    Rolling,
     /** 303-style line: low pool, octave jumps and slides (overlapping notes) on the rate grid. */
     Acid,
     Count
@@ -306,13 +308,14 @@ inline const char* arpShapeLabel(ArpShape s)
 {
     switch (s)
     {
-        case ArpShape::Walk:  return "Walk";
-        case ArpShape::Skip:  return "Skip";
-        case ArpShape::Pedal: return "Pedal";
-        case ArpShape::Arch:  return "Arch";
-        case ArpShape::Climb: return "Climb";
-        case ArpShape::Acid:  return "Acid";
-        case ArpShape::Count: break;
+        case ArpShape::Walk:    return "Walk";
+        case ArpShape::Skip:    return "Skip";
+        case ArpShape::Pedal:   return "Pedal";
+        case ArpShape::Arch:    return "Arch";
+        case ArpShape::Climb:   return "Climb";
+        case ArpShape::Rolling: return "Rolling";
+        case ArpShape::Acid:    return "Acid";
+        case ArpShape::Count:   break;
     }
     return "Walk";
 }

@@ -439,6 +439,15 @@ void buildArpOrder(const GrooveParams& g, const std::vector<int>& pool,
             for (int i = 0; i < n; ++i)
                 order.push_back(juce::jlimit(0, 127, at(i) + 12));
             break;
+        case ArpShape::Rolling:
+            // Spiral up through the pool across octaves, then roll back down.
+            for (int o = 0; o < juce::jmax(1, 2); ++o)
+                for (int i = 0; i < n; ++i)
+                    order.push_back(juce::jlimit(0, 127, at(i) + o * 12));
+            for (int o = 1; o >= 0; --o)
+                for (int i = n - 1; i >= 0; --i)
+                    order.push_back(juce::jlimit(0, 127, at(i) + o * 12));
+            break;
         case ArpShape::Acid:
             // Root-heavy 303 cycle: 1–1–3–1–5–1–… with seeded octave bumps.
             for (int i = 0; i < juce::jmax(4, n * 2); ++i)
@@ -517,6 +526,7 @@ void renderArp(const GrooveParams& g, double startPpq, double endPpq,
 
     const double stepLength = juce::jmax(1.0 / 48.0, delayPeriodBeats(g.arpRate()));
     const bool acid = g.arpShape() == ArpShape::Acid;
+    const bool rolling = g.arpShape() == ArpShape::Rolling;
     const int phraseBars = generatorLengthBars(g.arpLength());
     const GeneratorForm form = resolveForm(g.arpForm(), seed);
 
@@ -585,14 +595,16 @@ void renderArp(const GrooveParams& g, double startPpq, double endPpq,
         ++noteCursor;
 
         const int velocity = accentVel(patternStep);
-        // Even gate on the rate grid; Acid may slide past the next onset.
-        const bool slide = acid && unit(seed, k, patternStep, 31) < 0.28f;
-        const double offPpq = slide ? onPpq + stepLength * 1.08
-                                    : onPpq + stepLength * (double) kArpGate;
+        // Even gate on the rate grid. Acid/Rolling may overlap into the next step.
+        const bool slide = (acid && unit(seed, k, patternStep, 31) < 0.28f)
+                        || rolling;
+        const double gateMul = rolling ? 1.35 : (slide ? 1.08 : (double) kArpGate);
+        const double offPpq = onPpq + stepLength * gateMul;
 
         out.push_back({ onPpq, note, velocity });
-        if (offPpq >= startPpq && offPpq < endPpq + stepLength)
-            out.push_back({ offPpq, note, 0 });
+        // Always emit the off inside or just past the window so live chunks
+        // never leave a note hanging without a matching note-off.
+        out.push_back({ offPpq, note, 0 });
     }
     sortEvents(out);
 }

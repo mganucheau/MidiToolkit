@@ -321,6 +321,7 @@ void LiveMidiFx::flush(juce::MidiBuffer& out, int samplePosition)
     freeBeat_ = 0.0;
     sustainDown_.fill(false);
     sustainLatched_.fill(false);
+    generatorSig_ = 0;
 }
 
 void LiveMidiFx::observePitchInput(const juce::MidiBuffer& midi)
@@ -440,24 +441,64 @@ void LiveMidiFx::runGenerators(juce::MidiBuffer& out, const LiveFxState& snap, d
     bassNonce_ = snap.groove.bassNonce;
     drumNonce_ = snap.groove.drumNonce;
 
+    // If arp/melody/… knobs change mid-phrase, kill held notes so nothing hangs
+    // until the host transport is restarted.
+    const int genSig = snap.groove.arpEnabled
+        * (1 + snap.groove.arpShapeIndex * 17 + snap.groove.arpRateIndex * 31
+           + snap.groove.arpDensity * 13 + snap.groove.arpNonce * 97
+           + snap.groove.arpStyleIndex * 7 + snap.groove.arpMotionIndex * 11
+           + snap.groove.arpGenreIndex * 19 + snap.groove.arpVariation * 23)
+        + snap.groove.melodyEnabled * (10007 + snap.groove.melodyNonce)
+        + snap.groove.chordsEnabled * (20011 + snap.groove.chordNonce)
+        + snap.groove.bassEnabled * (30013 + snap.groove.bassNonce)
+        + snap.groove.drumsEnabled * (40013 + snap.groove.drumNonce);
+    if (genSig != generatorSig_)
+    {
+        for (int ch = 0; ch < 16; ++ch)
+        {
+            for (int n = 0; n < 128; ++n)
+            {
+                auto& slot = held_[(size_t) ch][(size_t) n];
+                if (!slot.active) continue;
+                emitOrQueue(out, juce::MidiMessage::noteOff(ch + 1, slot.outPitch), 0, numSamples);
+                slot = {};
+            }
+            emitOrQueue(out, juce::MidiMessage::controllerEvent(ch + 1, 123, 0), 0, numSamples);
+        }
+        // Drop pending note-offs that belonged to the previous pattern.
+        pending_.erase(std::remove_if(pending_.begin(), pending_.end(),
+                                      [](const Pending& p) { return p.message.isNoteOff(); }),
+                       pending_.end());
+        generatorSig_ = genSig;
+    }
+
     auto emitEvents = [&](const std::vector<gen::Event>& events, int channel, bool drumChannel)
     {
         for (const auto& ev : events)
         {
             const double beatsIntoBlock = ev.ppq - startPpq;
-            const int samplePos = juce::jlimit(0, juce::jmax(0, numSamples - 1),
-                (int) std::lround(beatsIntoBlock * sampleRate * 60.0 / bpm));
+            // Allow note-offs that land just past the block end to queue.
+            const int samplePos = (int) std::lround(beatsIntoBlock * sampleRate * 60.0 / bpm);
             if (ev.velocity > 0)
             {
-                emitTransformed(out, snap, channel, ev.note, ev.velocity, samplePos, numSamples,
+                const int onPos = juce::jlimit(0, juce::jmax(0, numSamples - 1), samplePos);
+                emitTransformed(out, snap, channel, ev.note, ev.velocity, onPos, numSamples,
                                 sampleRate, bpm, beatPos, true, drumChannel);
             }
             else
             {
-                const int outPitch = transformLivePitch(ev.note, snap.edit, snap.sourceRoot,
-                                                        snap.sourceOctave, drumChannel);
-                emitOrQueue(out, juce::MidiMessage::noteOff(channel, outPitch),
-                            samplePos, numSamples);
+                // Release the held slot opened by the matching note-on. Using the
+                // stored outPitch keeps offs correct if pitch transform changed.
+                const int ch = juce::jlimit(1, 16, channel);
+                const int inPitch = juce::jlimit(0, 127, ev.note);
+                auto& slot = held_[(size_t) (ch - 1)][(size_t) inPitch];
+                const int outPitch = slot.active
+                    ? slot.outPitch
+                    : transformLivePitch(ev.note, snap.edit, snap.sourceRoot,
+                                         snap.sourceOctave, drumChannel);
+                emitOrQueue(out, juce::MidiMessage::noteOff(ch, outPitch),
+                            juce::jmax(0, samplePos), numSamples);
+                slot = {};
             }
         }
     };

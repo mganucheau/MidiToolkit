@@ -129,6 +129,8 @@ private:
     int chordNonce_ = 0;
     int bassNonce_ = 0;
     int drumNonce_ = 0;
+    /** Fingerprint of live generator params — change forces a held-note flush. */
+    int generatorSig_ = 0;
 };
 
 } // namespace pflow
