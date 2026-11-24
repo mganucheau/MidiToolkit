@@ -220,6 +220,8 @@ private:
     fx::InlineRow arpShapeRow;
     fx::FlatPopup arpStylePopup;
     fx::InlineRow arpStyleRow;
+    fx::FlatPopup arpGenrePopup;
+    fx::InlineRow arpGenreRow;
     fx::FlatPopup arpRatePopup;
     fx::InlineRow arpRateRow;
     fx::FlatPopup arpMotionPopup;
@@ -238,6 +240,8 @@ private:
     fx::InlineRow melodyFormRow;
     fx::FlatPopup melodyStylePopup;
     fx::InlineRow melodyStyleRow;
+    fx::FlatPopup melodyGenrePopup;
+    fx::InlineRow melodyGenreRow;
     fx::FlatPopup melodyContourPopup;
     fx::InlineRow melodyContourRow;
     fx::FlatPopup melodySpeedPopup;
@@ -261,6 +265,8 @@ private:
     fx::InlineRow chordVoicingRow;
     fx::FlatPopup chordColorPopup;
     fx::InlineRow chordColorRow;
+    fx::FlatPopup chordGenrePopup;
+    fx::InlineRow chordGenreRow;
     fx::FlatPopup chordRhythmPopup;
     fx::InlineRow chordRhythmRow;
 
@@ -272,6 +278,8 @@ private:
     fx::InlineRow bassTypeRow;
     fx::FlatPopup bassStylePopup;
     fx::InlineRow bassStyleRow;
+    fx::FlatPopup bassGenrePopup;
+    fx::InlineRow bassGenreRow;
     fx::FlatPopup bassSpeedPopup;
     fx::InlineRow bassSpeedRow;
     fx::FlatPopup bassLengthPopup;
@@ -284,7 +292,7 @@ private:
     fx::FlatTextButton drumGenerateBtn { "Generate" };
     fx::InlineRow drumGenerateRow;
     fx::FlatPopup drumStylePopup;
-    fx::InlineRow drumStyleRow;
+    fx::InlineRow drumStyleRow; // Genre (drums)
     fx::FlatPopup drumSpeedPopup;
     fx::InlineRow drumSpeedRow;
     fx::FlatPopup drumLengthPopup;

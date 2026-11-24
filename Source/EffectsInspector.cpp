@@ -31,6 +31,7 @@ EffectsInspector::EffectsInspector()
     , arpFormRow("Form", arpFormPopup)
     , arpShapeRow("Type", arpShapePopup)
     , arpStyleRow("Style", arpStylePopup)
+    , arpGenreRow("Genre", arpGenrePopup)
     , arpRateRow("Speed", arpRatePopup)
     , arpMotionRow("Motion", arpMotionPopup)
     , arpDensitySl("Density", 0, 100, 55, false)
@@ -40,6 +41,7 @@ EffectsInspector::EffectsInspector()
     , melodyLengthRow("Length", melodyLengthPopup)
     , melodyFormRow("Form", melodyFormPopup)
     , melodyStyleRow("Style", melodyStylePopup)
+    , melodyGenreRow("Genre", melodyGenrePopup)
     , melodyContourRow("Motion", melodyContourPopup)
     , melodySpeedRow("Speed", melodySpeedPopup)
     , chordsGenerateRow({}, chordsGenerateBtn)
@@ -51,17 +53,19 @@ EffectsInspector::EffectsInspector()
     , chordFormRow("Form", chordFormPopup)
     , chordVoicingRow("Voicing", chordVoicingPopup)
     , chordColorRow("Style", chordColorPopup)
+    , chordGenreRow("Genre", chordGenrePopup)
     , chordRhythmRow("Rhythm", chordRhythmPopup)
     , bassGenerateRow({}, bassGenerateBtn)
     , bassInputRow("Input", bassInputSwitch)
     , bassTypeRow("Type", bassTypePopup)
     , bassStyleRow("Style", bassStylePopup)
+    , bassGenreRow("Genre", bassGenrePopup)
     , bassSpeedRow("Speed", bassSpeedPopup)
     , bassLengthRow("Length", bassLengthPopup)
     , bassFormRow("Form", bassFormPopup)
     , bassMotionRow("Motion", bassMotionPopup)
     , drumGenerateRow({}, drumGenerateBtn)
-    , drumStyleRow("Style", drumStylePopup)
+    , drumStyleRow("Genre", drumStylePopup)
     , drumSpeedRow("Speed", drumSpeedPopup)
     , drumLengthRow("Length", drumLengthPopup)
     , drumFormRow("Form", drumFormPopup)
@@ -561,6 +565,13 @@ EffectsInspector::EffectsInspector()
                 items.add(melodyStyleLabel((MelodyStyle) i));
             popup.setItems(items, 0);
         };
+        auto fillGenres = [](fx::FlatPopup& popup, int selected = 0)
+        {
+            juce::StringArray items;
+            for (int i = 0; i < (int) GeneratorGenre::Count; ++i)
+                items.add(generatorGenreLabel((GeneratorGenre) i));
+            popup.setItems(items, selected);
+        };
         auto fillMotions = [](fx::FlatPopup& popup)
         {
             juce::StringArray items;
@@ -575,10 +586,26 @@ EffectsInspector::EffectsInspector()
                 items.add(melodySpeedLabel((MelodySpeed) i));
             popup.setItems(items, selected);
         };
+        // Sting-like roll: fresh seed + scramble phrasing knobs; keep Genre + Length.
+        auto rollGenerateSeed = [](int& variation, int& nonce)
+        {
+            auto& rng = juce::Random::getSystemRandom();
+            int next = rng.nextInt({ 1, 17 });
+            if (next == variation)
+                next = next >= 16 ? 1 : next + 1;
+            variation = next;
+            nonce += 1 + rng.nextInt(100000);
+        };
         fillStyles(arpStylePopup);
         arpStylePopup.onChange = [this](int idx)
         {
             groove.arpStyleIndex = juce::jlimit(0, (int) MelodyStyle::Count - 1, idx);
+            notifyGroove();
+        };
+        fillGenres(arpGenrePopup);
+        arpGenrePopup.onChange = [this](int idx)
+        {
+            groove.arpGenreIndex = juce::jlimit(0, (int) GeneratorGenre::Count - 1, idx);
             notifyGroove();
         };
         fillMotions(arpMotionPopup);
@@ -612,18 +639,26 @@ EffectsInspector::EffectsInspector()
         };
         arpDensitySl.setTooltip("Note activity. 100% plays a note on every step of the Rate");
         arpGenerateBtn.setTooltip("Roll a new pattern into the piano roll");
-        arpGenerateBtn.onClick = [this]
+        arpGenerateBtn.onClick = [this, rollGenerateSeed]
         {
             groove.arpEnabled = true;
             groove.melodyEnabled = groove.chordsEnabled = groove.bassEnabled = groove.drumsEnabled = false;
-            groove.arpVariation = groove.arpVariation >= 16 ? 1 : groove.arpVariation + 1;
-            ++groove.arpNonce;
+            auto& rng = juce::Random::getSystemRandom();
+            rollGenerateSeed(groove.arpVariation, groove.arpNonce);
+            groove.arpStyleIndex = rng.nextInt((int) MelodyStyle::Count);
+            groove.arpMotionIndex = rng.nextInt((int) MelodyContour::Count);
+            groove.arpShapeIndex = rng.nextInt((int) ArpShape::Count);
+            groove.arpRateIndex = rng.nextInt((int) DelayTime::Count);
+            groove.arpFormIndex = (int) GeneratorForm::Auto;
+            groove.arpDensity = 35 + rng.nextInt(56);
+            setGroove(groove);
             notifyGroove();
             if (onGeneratorGenerated) onGeneratorGenerated(0);
         };
         arpSec.addRow(&arpInputRow, kRowMinH, [this] { return groove.arpInput; });
         arpSec.addRow(&arpShapeRow, kRowMinH, [this] { return groove.arpEnabled; });
         arpSec.addRow(&arpStyleRow, kRowMinH, [this] { return groove.arpEnabled; });
+        arpSec.addRow(&arpGenreRow, kRowMinH, [this] { return groove.arpEnabled; });
         arpSec.addRow(&arpRateRow, kRowMinH, [this] { return groove.arpEnabled; });
         arpSec.addRow(&arpMotionRow, kRowMinH, [this] { return groove.arpEnabled; });
         arpSec.addRow(&arpLengthRow, kRowMinH, [this] { return groove.arpEnabled; });
@@ -651,6 +686,12 @@ EffectsInspector::EffectsInspector()
         melodyStylePopup.onChange = [this](int idx)
         {
             groove.melodyStyleIndex = idx;
+            notifyGroove();
+        };
+        fillGenres(melodyGenrePopup);
+        melodyGenrePopup.onChange = [this](int idx)
+        {
+            groove.melodyGenreIndex = juce::jlimit(0, (int) GeneratorGenre::Count - 1, idx);
             notifyGroove();
         };
         fillLengthItems(melodyLengthPopup, (int) GeneratorLength::FourBars);
@@ -689,18 +730,25 @@ EffectsInspector::EffectsInspector()
             notifyGroove();
         };
         melodyGenerateBtn.setTooltip("Roll a new melody into the piano roll");
-        melodyGenerateBtn.onClick = [this]
+        melodyGenerateBtn.onClick = [this, rollGenerateSeed]
         {
             groove.melodyEnabled = true;
             groove.arpEnabled = groove.chordsEnabled = groove.bassEnabled = groove.drumsEnabled = false;
-            groove.melodyVariation = groove.melodyVariation >= 16 ? 1 : groove.melodyVariation + 1;
-            ++groove.melodyNonce;
+            auto& rng = juce::Random::getSystemRandom();
+            rollGenerateSeed(groove.melodyVariation, groove.melodyNonce);
+            groove.melodyStyleIndex = rng.nextInt((int) MelodyStyle::Count);
+            groove.melodyContourIndex = rng.nextInt((int) MelodyContour::Count);
+            groove.melodySpeedIndex = rng.nextInt((int) MelodySpeed::Count);
+            groove.melodyTypeIndex = rng.nextInt((int) PhraseType::Count);
+            groove.melodyFormIndex = (int) GeneratorForm::Auto;
+            setGroove(groove);
             notifyGroove();
             if (onGeneratorGenerated) onGeneratorGenerated(1);
         };
         melodySec.addRow(&melodyInputRow, kRowMinH, [this] { return groove.melodyInput; });
         melodySec.addRow(&melodyTypeRow, kRowMinH, [this] { return groove.melodyEnabled; });
         melodySec.addRow(&melodyStyleRow, kRowMinH, [this] { return groove.melodyEnabled; });
+        melodySec.addRow(&melodyGenreRow, kRowMinH, [this] { return groove.melodyEnabled; });
         melodySec.addRow(&melodySpeedRow, kRowMinH, [this] { return groove.melodyEnabled; });
         melodySec.addRow(&melodyContourRow, kRowMinH, [this] { return groove.melodyEnabled; });
         melodySec.addRow(&melodyLengthRow, kRowMinH, [this] { return groove.melodyEnabled; });
@@ -727,6 +775,12 @@ EffectsInspector::EffectsInspector()
         chordColorPopup.onChange = [this](int idx)
         {
             groove.chordColorIndex = idx;
+            notifyGroove();
+        };
+        fillGenres(chordGenrePopup);
+        chordGenrePopup.onChange = [this](int idx)
+        {
+            groove.chordGenreIndex = juce::jlimit(0, (int) GeneratorGenre::Count - 1, idx);
             notifyGroove();
         };
         juce::StringArray rhythms;
@@ -774,18 +828,26 @@ EffectsInspector::EffectsInspector()
             notifyGroove();
         };
         chordsGenerateBtn.setTooltip("Roll a new chord pattern into the piano roll");
-        chordsGenerateBtn.onClick = [this]
+        chordsGenerateBtn.onClick = [this, rollGenerateSeed]
         {
             groove.chordsEnabled = true;
             groove.arpEnabled = groove.melodyEnabled = groove.bassEnabled = groove.drumsEnabled = false;
-            groove.chordVariation = groove.chordVariation >= 16 ? 1 : groove.chordVariation + 1;
-            ++groove.chordNonce;
+            auto& rng = juce::Random::getSystemRandom();
+            rollGenerateSeed(groove.chordVariation, groove.chordNonce);
+            groove.chordColorIndex = rng.nextInt((int) ChordColor::Count);
+            groove.chordVoicingIndex = rng.nextInt((int) ChordVoicing::Count);
+            groove.chordRhythmIndex = rng.nextInt((int) ChordRhythm::Count);
+            groove.chordMotionIndex = rng.nextInt((int) MelodyContour::Count);
+            groove.chordSpeedIndex = rng.nextInt((int) MelodySpeed::Count);
+            groove.chordFormIndex = (int) GeneratorForm::Auto;
+            setGroove(groove);
             notifyGroove();
             if (onGeneratorGenerated) onGeneratorGenerated(2);
         };
         chordsSec.addRow(&chordsInputRow, kRowMinH, [this] { return groove.chordsInput; });
         chordsSec.addRow(&chordTypeRow, kRowMinH, [this] { return groove.chordsEnabled; });
         chordsSec.addRow(&chordColorRow, kRowMinH, [this] { return groove.chordsEnabled; });
+        chordsSec.addRow(&chordGenreRow, kRowMinH, [this] { return groove.chordsEnabled; });
         chordsSec.addRow(&chordSpeedRow, kRowMinH, [this] { return groove.chordsEnabled; });
         chordsSec.addRow(&chordMotionRow, kRowMinH, [this] { return groove.chordsEnabled; });
         chordsSec.addRow(&chordLengthRow, kRowMinH, [this] { return groove.chordsEnabled; });
@@ -831,6 +893,12 @@ EffectsInspector::EffectsInspector()
             groove.bassStyleIndex = juce::jlimit(0, (int) MelodyStyle::Count - 1, idx);
             notifyGroove();
         };
+        fillGenres(bassGenrePopup);
+        bassGenrePopup.onChange = [this](int idx)
+        {
+            groove.bassGenreIndex = juce::jlimit(0, (int) GeneratorGenre::Count - 1, idx);
+            notifyGroove();
+        };
         fillSpeeds(bassSpeedPopup, (int) MelodySpeed::Medium);
         bassSpeedPopup.onChange = [this](int idx)
         {
@@ -843,18 +911,25 @@ EffectsInspector::EffectsInspector()
             notifyGroove();
         };
         bassGenerateBtn.setTooltip("Roll a new bass pattern into the piano roll");
-        bassGenerateBtn.onClick = [this]
+        bassGenerateBtn.onClick = [this, rollGenerateSeed]
         {
             groove.bassEnabled = true;
             groove.arpEnabled = groove.melodyEnabled = groove.chordsEnabled = groove.drumsEnabled = false;
-            groove.bassVariation = groove.bassVariation >= 16 ? 1 : groove.bassVariation + 1;
-            ++groove.bassNonce;
+            auto& rng = juce::Random::getSystemRandom();
+            rollGenerateSeed(groove.bassVariation, groove.bassNonce);
+            groove.bassStyleIndex = rng.nextInt((int) MelodyStyle::Count);
+            groove.bassMotionIndex = rng.nextInt((int) BassMotion::Count);
+            groove.bassSpeedIndex = rng.nextInt((int) MelodySpeed::Count);
+            groove.bassTypeIndex = rng.nextInt((int) PhraseType::Count);
+            groove.bassFormIndex = (int) GeneratorForm::Auto;
+            setGroove(groove);
             notifyGroove();
             if (onGeneratorGenerated) onGeneratorGenerated(3);
         };
         bassSec.addRow(&bassInputRow, kRowMinH, [this] { return groove.bassInput; });
         bassSec.addRow(&bassTypeRow, kRowMinH, [this] { return groove.bassEnabled; });
         bassSec.addRow(&bassStyleRow, kRowMinH, [this] { return groove.bassEnabled; });
+        bassSec.addRow(&bassGenreRow, kRowMinH, [this] { return groove.bassEnabled; });
         bassSec.addRow(&bassSpeedRow, kRowMinH, [this] { return groove.bassEnabled; });
         bassSec.addRow(&bassMotionRow, kRowMinH, [this] { return groove.bassEnabled; });
         bassSec.addRow(&bassLengthRow, kRowMinH, [this] { return groove.bassEnabled; });
@@ -865,13 +940,10 @@ EffectsInspector::EffectsInspector()
         });
         bassSec.addRow(&bassGenerateRow, kRowMinH, [this] { return groove.bassEnabled; });
 
-        juce::StringArray drumStyles;
-        for (int i = 0; i < (int) DrumStyle::Count; ++i)
-            drumStyles.add(drumStyleLabel((DrumStyle) i));
-        drumStylePopup.setItems(drumStyles, 0);
+        fillGenres(drumStylePopup);
         drumStylePopup.onChange = [this](int idx)
         {
-            groove.drumStyleIndex = idx;
+            groove.drumStyleIndex = juce::jlimit(0, (int) DrumStyle::Count - 1, idx);
             notifyGroove();
         };
         fillSpeeds(drumSpeedPopup, (int) MelodySpeed::Medium);
@@ -893,12 +965,17 @@ EffectsInspector::EffectsInspector()
             notifyGroove();
         };
         drumGenerateBtn.setTooltip("Roll a new drum groove into the piano roll");
-        drumGenerateBtn.onClick = [this]
+        drumGenerateBtn.onClick = [this, rollGenerateSeed]
         {
             groove.drumsEnabled = true;
             groove.arpEnabled = groove.melodyEnabled = groove.chordsEnabled = groove.bassEnabled = false;
-            groove.drumVariation = groove.drumVariation >= 16 ? 1 : groove.drumVariation + 1;
-            ++groove.drumNonce;
+            auto& rng = juce::Random::getSystemRandom();
+            rollGenerateSeed(groove.drumVariation, groove.drumNonce);
+            groove.drumSpeedIndex = rng.nextInt((int) MelodySpeed::Count);
+            groove.drumFormIndex = (int) GeneratorForm::Auto;
+            groove.drumDensity = 30 + rng.nextInt(61);
+            groove.drumFill = 15 + rng.nextInt(56);
+            setGroove(groove);
             notifyGroove();
             if (onGeneratorGenerated) onGeneratorGenerated(4);
         };
@@ -1412,6 +1489,8 @@ void EffectsInspector::setGroove(const GrooveParams& g, juce::NotificationType)
                            juce::dontSendNotification);
     arpStylePopup.setIndex(juce::jlimit(0, (int) MelodyStyle::Count - 1, g.arpStyleIndex),
                            juce::dontSendNotification);
+    arpGenrePopup.setIndex(juce::jlimit(0, (int) GeneratorGenre::Count - 1, g.arpGenreIndex),
+                           juce::dontSendNotification);
     arpMotionPopup.setIndex(juce::jlimit(0, (int) MelodyContour::Count - 1, g.arpMotionIndex),
                             juce::dontSendNotification);
     arpInputSwitch.setToggleState(g.arpInput, juce::dontSendNotification);
@@ -1423,6 +1502,8 @@ void EffectsInspector::setGroove(const GrooveParams& g, juce::NotificationType)
     melodyTypePopup.setIndex(juce::jlimit(0, (int) PhraseType::Count - 1, g.melodyTypeIndex),
                              juce::dontSendNotification);
     melodyStylePopup.setIndex(juce::jlimit(0, (int) MelodyStyle::Count - 1, g.melodyStyleIndex),
+                              juce::dontSendNotification);
+    melodyGenrePopup.setIndex(juce::jlimit(0, (int) GeneratorGenre::Count - 1, g.melodyGenreIndex),
                               juce::dontSendNotification);
     melodyLengthPopup.setIndex(juce::jlimit(0, (int) GeneratorLength::Count - 1, g.melodyLengthIndex),
                                juce::dontSendNotification);
@@ -1447,12 +1528,16 @@ void EffectsInspector::setGroove(const GrooveParams& g, juce::NotificationType)
                                juce::dontSendNotification);
     chordColorPopup.setIndex(juce::jlimit(0, (int) ChordColor::Count - 1, g.chordColorIndex),
                              juce::dontSendNotification);
+    chordGenrePopup.setIndex(juce::jlimit(0, (int) GeneratorGenre::Count - 1, g.chordGenreIndex),
+                             juce::dontSendNotification);
     chordRhythmPopup.setIndex(juce::jlimit(0, (int) ChordRhythm::Count - 1, g.chordRhythmIndex),
                               juce::dontSendNotification);
     bassInputSwitch.setToggleState(g.bassInput, juce::dontSendNotification);
     bassTypePopup.setIndex(juce::jlimit(0, (int) PhraseType::Count - 1, g.bassTypeIndex),
                            juce::dontSendNotification);
     bassStylePopup.setIndex(juce::jlimit(0, (int) MelodyStyle::Count - 1, g.bassStyleIndex),
+                            juce::dontSendNotification);
+    bassGenrePopup.setIndex(juce::jlimit(0, (int) GeneratorGenre::Count - 1, g.bassGenreIndex),
                             juce::dontSendNotification);
     bassSpeedPopup.setIndex(juce::jlimit(0, (int) MelodySpeed::Count - 1, g.bassSpeedIndex),
                             juce::dontSendNotification);
@@ -1908,12 +1993,14 @@ void EffectsInspector::resized()
     fitSelect(arpFormPopup, arpFormRow);
     fitSelect(arpShapePopup, arpShapeRow);
     fitSelect(arpStylePopup, arpStyleRow);
+    fitSelect(arpGenrePopup, arpGenreRow);
     fitSelect(arpRatePopup, arpRateRow);
     fitSelect(arpMotionPopup, arpMotionRow);
     fitSelect(melodyLengthPopup, melodyLengthRow);
     fitSelect(melodyFormPopup, melodyFormRow);
     fitSelect(melodyTypePopup, melodyTypeRow);
     fitSelect(melodyStylePopup, melodyStyleRow);
+    fitSelect(melodyGenrePopup, melodyGenreRow);
     fitSelect(melodyContourPopup, melodyContourRow);
     fitSelect(melodySpeedPopup, melodySpeedRow);
     fitSelect(chordLengthPopup, chordLengthRow);
@@ -1923,11 +2010,13 @@ void EffectsInspector::resized()
     fitSelect(chordMotionPopup, chordMotionRow);
     fitSelect(chordVoicingPopup, chordVoicingRow);
     fitSelect(chordColorPopup, chordColorRow);
+    fitSelect(chordGenrePopup, chordGenreRow);
     fitSelect(chordRhythmPopup, chordRhythmRow);
     fitSelect(bassLengthPopup, bassLengthRow);
     fitSelect(bassFormPopup, bassFormRow);
     fitSelect(bassTypePopup, bassTypeRow);
     fitSelect(bassStylePopup, bassStyleRow);
+    fitSelect(bassGenrePopup, bassGenreRow);
     fitSelect(bassSpeedPopup, bassSpeedRow);
     fitSelect(bassMotionPopup, bassMotionRow);
     fitSelect(drumStylePopup, drumStyleRow);

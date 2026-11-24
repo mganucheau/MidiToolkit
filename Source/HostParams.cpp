@@ -458,7 +458,7 @@ void HostParams::create(juce::AudioProcessor& owner)
                     (int) BassMotion::Pulse, &GrooveParams::bassMotionIndex);
 
     // Drums
-    addGrooveChoice(owner, "gen_drums_style", "Drums Style", enumLabels<DrumStyle>(drumStyleLabel),
+    addGrooveChoice(owner, "gen_drums_style", "Drums Genre", enumLabels<DrumStyle>(drumStyleLabel),
                     (int) DrumStyle::House, &GrooveParams::drumStyleIndex);
     addGrooveChoice(owner, "gen_drums_length", "Drums Length", lengthLabels(),
                     (int) GeneratorLength::FourBars, &GrooveParams::drumLengthIndex);

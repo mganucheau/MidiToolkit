@@ -613,6 +613,7 @@ private:
     ColumnRects splitRowColumns(juce::Rectangle<int> row) const;
     int totalContentWidth() const;
     bool foldersOnly() const;
+    bool anyMetaColumnVisible() const;
     bool isColumnVisible(SortColumn col) const;
     void showColumnVisibilityMenu();
 

@@ -2588,10 +2588,21 @@ bool FileListPanel::foldersOnly() const
     return true;
 }
 
+bool FileListPanel::anyMetaColumnVisible() const
+{
+    return columnsVisible.key || columnsVisible.tempo || columnsVisible.bars
+        || columnsVisible.kind || columnsVisible.complexity || columnsVisible.difNotes
+        || columnsVisible.timeSig || columnsVisible.notes;
+}
+
 int FileListPanel::totalContentWidth() const
 {
-    if (foldersOnly())
-        return juce::jmax(metrics::fileTableWidth(), metrics::scaled(8) * 2 + metrics::scaled(nameColumnW));
+    // Name-only (or folders-only): fill the viewport — don't leave a stub Name width.
+    if (foldersOnly() || !anyMetaColumnVisible())
+        return juce::jmax(metrics::fileTableWidth(),
+                          viewport.getMaximumVisibleWidth() > 0
+                              ? viewport.getMaximumVisibleWidth()
+                              : getWidth());
     int w = metrics::scaled(8) * 2 + metrics::scaled(nameColumnW);
     if (columnsVisible.key)        w += metaColumnPx(SortColumn::Key);
     if (columnsVisible.tempo)      w += metaColumnPx(SortColumn::Tempo);
@@ -2820,7 +2831,8 @@ FileListPanel::ColumnRects FileListPanel::splitRowColumns(juce::Rectangle<int> r
 {
     ColumnRects cols;
     row = row.reduced(metrics::scaled(8), 0);
-    if (foldersOnly())
+    // Folders-only or Name-only: Name takes the whole row (no ghost meta space).
+    if (foldersOnly() || !anyMetaColumnVisible())
     {
         cols.name = row;
         return cols;
@@ -2842,6 +2854,9 @@ FileListPanel::ColumnRects FileListPanel::splitRowColumns(juce::Rectangle<int> r
         cols.timeSig = row.removeFromLeft(metaColumnPx(SortColumn::TimeSig));
     if (columnsVisible.notes)
         cols.notes = row.removeFromLeft(metaColumnPx(SortColumn::Notes));
+    // Leftover width after metas goes to Name so long titles aren't clipped early.
+    if (row.getWidth() > 0)
+        cols.name.setRight(cols.name.getRight() + row.getWidth());
     return cols;
 }
 

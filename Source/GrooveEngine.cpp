@@ -139,11 +139,15 @@ void applyGrooveSectionLock(const GrooveParams& locked, GrooveParams& target, ui
         target.arpDynamics = locked.arpDynamics;
         target.arpLengthIndex = locked.arpLengthIndex;
         target.arpFormIndex = locked.arpFormIndex;
+        target.arpStyleIndex = locked.arpStyleIndex;
+        target.arpGenreIndex = locked.arpGenreIndex;
+        target.arpMotionIndex = locked.arpMotionIndex;
         target.arpVariation = locked.arpVariation;
         target.arpNonce = locked.arpNonce;
         target.melodyEnabled = locked.melodyEnabled;
         target.melodyInput = locked.melodyInput;
         target.melodyStyleIndex = locked.melodyStyleIndex;
+        target.melodyGenreIndex = locked.melodyGenreIndex;
         target.melodyContourIndex = locked.melodyContourIndex;
         target.melodySpeedIndex = locked.melodySpeedIndex;
         target.melodyPhraseIndex = locked.melodyPhraseIndex;
@@ -155,6 +159,7 @@ void applyGrooveSectionLock(const GrooveParams& locked, GrooveParams& target, ui
         target.chordsInput = locked.chordsInput;
         target.chordVoicingIndex = locked.chordVoicingIndex;
         target.chordColorIndex = locked.chordColorIndex;
+        target.chordGenreIndex = locked.chordGenreIndex;
         target.chordRhythmIndex = locked.chordRhythmIndex;
         target.chordLengthIndex = locked.chordLengthIndex;
         target.chordFormIndex = locked.chordFormIndex;
@@ -163,6 +168,8 @@ void applyGrooveSectionLock(const GrooveParams& locked, GrooveParams& target, ui
         target.bassEnabled = locked.bassEnabled;
         target.bassInput = locked.bassInput;
         target.bassMotionIndex = locked.bassMotionIndex;
+        target.bassStyleIndex = locked.bassStyleIndex;
+        target.bassGenreIndex = locked.bassGenreIndex;
         target.bassLengthIndex = locked.bassLengthIndex;
         target.bassFormIndex = locked.bassFormIndex;
         target.bassVariation = locked.bassVariation;
@@ -910,44 +917,98 @@ std::vector<RollNote> applyMusicalVariation(std::vector<RollNote> notes, int var
     if (notes.empty() || variationIndex <= 0)
         return notes;
 
+    // Jam-take variations: same clip identity, different performance —
+    // phrasing, density, octave placement, and rhythmic feel — not micro nudges.
     const int var = juce::jlimit(1, kMaxVariations, variationIndex);
     const auto anchors = anchorOnsets(notes, kind);
-    constexpr int kCandidates = 10;
+    constexpr int kCandidates = 14;
     std::vector<RollNote> best = notes;
     double bestScore = -1.0e9;
     bool found = false;
 
+    auto differenceScore = [&](const std::vector<RollNote>& cand) -> double
+    {
+        // Prefer takes that clearly diverge while staying same-ballpark size.
+        const double sizeRatio = (double) cand.size() / (double) juce::jmax(1, (int) notes.size());
+        const double sizeScore = 1.0 - std::abs(sizeRatio - 1.0); // soft prefer ~same density
+        int pitchMoves = 0, timeMoves = 0, matched = 0;
+        auto byKey = [](const RollNote& a, const RollNote& b)
+        {
+            if (a.start < b.start) return true;
+            if (b.start < a.start) return false;
+            return a.pitch < b.pitch;
+        };
+        auto sa = notes, sb = cand;
+        std::sort(sa.begin(), sa.end(), byKey);
+        std::sort(sb.begin(), sb.end(), byKey);
+        size_t i = 0, j = 0;
+        while (i < sa.size() && j < sb.size())
+        {
+            if (std::abs(sa[i].start - sb[j].start) < 1.5
+                && std::abs(sa[i].pitch - sb[j].pitch) <= 12)
+            {
+                ++matched;
+                if (sa[i].pitch != sb[j].pitch) ++pitchMoves;
+                if (std::abs(sa[i].start - sb[j].start) > 0.4) ++timeMoves;
+                ++i; ++j;
+            }
+            else if (sa[i].start < sb[j].start)
+                ++i;
+            else
+                ++j;
+        }
+        const double n = (double) juce::jmax(1, (int) notes.size());
+        const double change = ((double) pitchMoves + (double) timeMoves
+                               + std::abs((double) cand.size() - (double) notes.size())) / n;
+        // Want audible change (high) but still some identity (matched fraction).
+        const double identity = (double) matched / n;
+        return change * 2.0 + identity * 0.35 + sizeScore * 0.25;
+    };
+
     for (int c = 0; c < kCandidates; ++c)
     {
-        const int seed = var * 97 + c * 31;
+        const int seed = var * 7919 + c * 104729 + 17;
+        const uint32_t modeRoll = knuthHash(seed * 3 + var * 11);
         std::vector<RollNote> cand = notes;
+        const double amt = 0.45 + 0.022 * (double) var; // substantial morph strength
 
         if (kind == ClipKind::Drums)
         {
-            // Vary decoration only: nudge non-anchor hats/perc timing & drop/add ghosts.
+            // Take A: denser hats/ghosts. Take B: peel decoration. Mix with rhythm shifts.
+            if ((modeRoll % 3u) == 0u)
+                cand = morphDrumsOnce(cand, amt, true, seed);
+            else
+                cand = morphDrumsOnce(cand, amt, false, seed);
+
             for (auto& n : cand)
             {
-                if (isDrumAnchor(n))
-                    continue;
-                const uint32_t h = knuthHash(n.id * 11 + seed);
-                if (drumVoiceOf(n.pitch) == DrumVoice::Hat || drumVoiceOf(n.pitch) == DrumVoice::Perc)
+                const uint32_t h = knuthHash(n.id * 11 + seed + var);
+                const auto v = drumVoiceOf(n.pitch);
+                // Move non-anchor hits by a 16th / 8th — a real alternate groove feel.
+                if (!isDrumAnchor(n) && (h % 100u) < (uint32_t) (35 + var))
                 {
-                    if ((h % 100u) < 40u)
-                        n.start += hashSigned(n.id + seed, 2) * 0.35;
+                    const double shift = ((h & 1u) ? -1.0 : 1.0)
+                        * (((h >> 2) & 1u) ? 1.0 : 2.0);
+                    n.start = std::max(0.0, n.start + shift);
                     n.moved = true;
                 }
-                else if (drumVoiceOf(n.pitch) == DrumVoice::Snare && n.fileVelocity < 55)
+                // Occasionally swap hat open/closed or ghost velocity for a new pocket.
+                if (v == DrumVoice::Hat && (h % 100u) < 40u)
                 {
-                    if ((h % 100u) < 30u)
-                        n.start += hashSigned(n.id + seed, 3) * 0.25;
+                    n.pitch = (n.pitch == 46) ? 42 : ((h & 2u) ? 46 : 42);
+                    n.fileVelocity = juce::jlimit(1, 127,
+                        n.fileVelocity + ((h & 4u) ? 18 : -14));
+                    n.moved = true;
+                }
+                else if (v == DrumVoice::Snare && !isDrumAnchor(n) && (h % 100u) < 30u)
+                {
+                    n.fileVelocity = juce::jlimit(1, 127, 35 + (int) (h % 40u));
                     n.moved = true;
                 }
             }
-            if (var >= 6)
-            {
-                // Mild hat density swap via a light complexity nudge.
-                cand = morphDrumsOnce(cand, 0.25 + 0.04 * (double) var, false, seed);
-            }
+            // Second morph pass at higher var = denser alternate kit layers.
+            if (var >= 5)
+                cand = morphDrumsOnce(cand, 0.35 + 0.03 * (double) var, false, seed + 99);
         }
         else if (kind == ClipKind::Keys)
         {
@@ -955,47 +1016,100 @@ std::vector<RollNote> applyMusicalVariation(std::vector<RollNote> notes, int var
             for (size_t gi = 0; gi < groups.size(); ++gi)
             {
                 auto& g = groups[gi];
-                const uint32_t h = knuthHash(seed + (int) gi * 13);
-                // Rotate voicing: move bass up an octave (inversion).
-                if ((h % 100u) < (uint32_t) (20 + var) && g.indices.size() >= 2)
+                const uint32_t h = knuthHash(seed + (int) gi * 13 + var * 7);
+                // Invert / open voicing frequently.
+                if ((h % 100u) < (uint32_t) (45 + var) && g.indices.size() >= 2)
                 {
                     size_t bassIdx = g.indices.front();
-                    for (size_t idx : g.indices)
-                        if (cand[idx].pitch < cand[bassIdx].pitch)
-                            bassIdx = idx;
-                    cand[bassIdx].pitch = juce::jlimit(0, 127, cand[bassIdx].pitch + 12);
-                    cand[bassIdx].moved = true;
-                }
-                // Syncopate every other chord.
-                if ((h % 100u) < (uint32_t) (15 + var) && g.start >= 1.0 && (gi % 2) == 1)
-                {
+                    size_t topIdx = g.indices.front();
                     for (size_t idx : g.indices)
                     {
-                        cand[idx].start = std::max(0.0, cand[idx].start - 1.0);
+                        if (cand[idx].pitch < cand[bassIdx].pitch) bassIdx = idx;
+                        if (cand[idx].pitch > cand[topIdx].pitch) topIdx = idx;
+                    }
+                    const int oct = ((h & 1u) ? 12 : -12);
+                    cand[bassIdx].pitch = juce::jlimit(0, 127, cand[bassIdx].pitch + oct);
+                    cand[bassIdx].moved = true;
+                    if ((h % 100u) < 50u)
+                    {
+                        cand[topIdx].pitch = juce::jlimit(0, 127, cand[topIdx].pitch - oct);
+                        cand[topIdx].moved = true;
+                    }
+                }
+                // Anticipation / delay by an 8th — syncopated jam take.
+                if ((h % 100u) < (uint32_t) (40 + var) && g.start >= 1.0)
+                {
+                    const double shift = ((h >> 3) & 1u) ? -2.0 : 2.0;
+                    for (size_t idx : g.indices)
+                    {
+                        cand[idx].start = std::max(0.0, cand[idx].start + shift);
                         cand[idx].moved = true;
                     }
                 }
+                // Drop or restage a mid-phrase chord for breathing room.
+                if ((h % 100u) < (uint32_t) (12 + var / 2) && gi > 0 && gi + 1 < groups.size())
+                {
+                    for (size_t idx : g.indices)
+                        cand[idx].fileVelocity = 1; // soft kill; cleaned below
+                }
             }
-            // Optional diatonic recolor via a light enrich pass.
+            cand.erase(std::remove_if(cand.begin(), cand.end(),
+                                      [](const RollNote& n) { return n.fileVelocity <= 1; }),
+                       cand.end());
+            cand = morphPianoOnce(cand, amt, (modeRoll % 2u) == 0u, seed, rootPc, mode);
             if (var >= 8)
-                cand = morphPianoOnce(cand, 0.2, false, seed, rootPc, mode);
+                cand = morphPianoOnce(cand, 0.4, false, seed + 41, rootPc, mode);
         }
         else
         {
-            // Bass / Lead: octave flips and pickup timing, keep contour pitches.
+            // Bass / Lead: rewrite register, pickups, and rhythmic placement.
             for (auto& n : cand)
             {
-                const uint32_t h = knuthHash(n.id * 7 + seed);
-                if (metricWeight(n.start) >= 0.72 && (h % 100u) < (uint32_t) (10 + var))
+                const uint32_t h = knuthHash(n.id * 7 + seed + var * 3);
+                if ((h % 100u) < (uint32_t) (40 + var))
                 {
                     n.pitch = juce::jlimit(0, 127, n.pitch + ((h & 1u) ? 12 : -12));
                     n.moved = true;
                 }
-                else if ((h % 100u) < 35u)
+                if ((h % 100u) < (uint32_t) (50 + var))
                 {
-                    n.start += hashSigned(n.id + var, 4) * 0.3;
+                    // 8th or 16th displace — alternate phrasing, not humanize jitter.
+                    const double grid = ((h >> 2) & 1u) ? 2.0 : 1.0;
+                    n.start = std::max(0.0, n.start + (((h >> 3) & 1u) ? -grid : grid));
                     n.moved = true;
                 }
+                if ((h % 100u) < (uint32_t) (20 + var / 2))
+                {
+                    n.len = juce::jmax(0.25, n.len * (((h >> 4) & 1u) ? 1.6 : 0.55));
+                    n.moved = true;
+                }
+            }
+            // Drop some weak offbeats / add octave answers for a new line shape.
+            if ((modeRoll % 2u) == 1u)
+            {
+                std::vector<RollNote> kept;
+                kept.reserve(cand.size());
+                const int baseId = nextGeneratedId(cand, seed);
+                int gen = 0;
+                for (const auto& n : cand)
+                {
+                    const uint32_t h = knuthHash(n.id + seed * 5);
+                    if (metricWeight(n.start) < 0.55 && (h % 100u) < (uint32_t) (25 + var))
+                        continue; // rest that pickup this take
+                    kept.push_back(n);
+                    if (metricWeight(n.start) >= 0.72 && (h % 100u) < (uint32_t) (18 + var / 2))
+                    {
+                        RollNote echo = n;
+                        echo.id = baseId + gen++;
+                        echo.start = n.start + 2.0;
+                        echo.pitch = juce::jlimit(0, 127, n.pitch + ((h & 1u) ? 12 : -12));
+                        echo.fileVelocity = juce::jmax(1, (int) std::lround(n.fileVelocity * 0.7));
+                        echo.moved = true;
+                        kept.push_back(echo);
+                    }
+                }
+                if (!kept.empty())
+                    cand = std::move(kept);
             }
         }
 
@@ -1005,15 +1119,21 @@ std::vector<RollNote> applyMusicalVariation(std::vector<RollNote> notes, int var
             continue;
         if (kind == ClipKind::Keys && !noNewOutOfScalePitches(notes, cand, rootPc, mode))
             continue;
-        if (!anchorsPreserved(anchors, cand, kind))
-            continue;
+        // Looser skeleton: jam takes may move more anchors; keep ~1/3.
+        {
+            const auto afterAnchors = anchorOnsets(cand, kind);
+            const double tol = kind == ClipKind::Keys ? 2.5 : 1.0;
+            int matched = 0;
+            for (double t : anchors)
+                for (double u : afterAnchors)
+                    if (std::abs(u - t) < tol) { ++matched; break; }
+            if (!anchors.empty() && matched * 3 < (int) anchors.size())
+                continue;
+        }
         if (notesNearlyIdentical(notes, cand))
             continue;
 
-        // Prefer candidates that still feel related: moderate note-count delta.
-        const double sizeDelta = std::abs((double) cand.size() - (double) notes.size())
-                               / (double) juce::jmax(1, (int) notes.size());
-        const double score = 1.0 - sizeDelta + hashSigned(c, 8) * 0.01;
+        const double score = differenceScore(cand) + hashSigned(c + var, 8) * 0.02;
         if (!found || score > bestScore)
         {
             bestScore = score;

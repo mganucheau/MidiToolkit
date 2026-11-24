@@ -203,6 +203,7 @@ enum class BassMotion : int
     Count
 };
 
+/** Shared generator Genre (House / Breakbeat / …) for every part. */
 enum class DrumStyle : int
 {
     House = 0,
@@ -212,6 +213,7 @@ enum class DrumStyle : int
     Funk,
     Count
 };
+using GeneratorGenre = DrumStyle;
 
 enum class StrumDirection : int
 {
@@ -484,6 +486,7 @@ inline const char* drumStyleLabel(DrumStyle s)
     }
     return "House";
 }
+inline const char* generatorGenreLabel(GeneratorGenre g) { return drumStyleLabel(g); }
 
 inline const char* strumDirectionLabel(StrumDirection d)
 {
@@ -536,6 +539,8 @@ struct GrooveParams
     int arpDensity = 55;
     /** Melody-style phrasing for the arp (Style). */
     int arpStyleIndex = (int) MelodyStyle::March;
+    /** Genre flavour (House / Breakbeat / …) shared with drums. */
+    int arpGenreIndex = (int) GeneratorGenre::House;
     /** Rise / fall / leap across the pattern (Motion). */
     int arpMotionIndex = (int) MelodyContour::Even;
     int arpIntensity = 70;          // legacy, unused
@@ -549,6 +554,7 @@ struct GrooveParams
     bool melodyInput = false;
     int melodyTypeIndex = (int) PhraseType::Scale;
     int melodyStyleIndex = (int) MelodyStyle::March;
+    int melodyGenreIndex = (int) GeneratorGenre::House;
     int melodyContourIndex = (int) MelodyContour::Even;
     int melodySpeedIndex = (int) MelodySpeed::Medium;
     int melodyPhraseIndex = (int) MelodyPhrase::FourBars;
@@ -562,6 +568,7 @@ struct GrooveParams
     bool chordsInput = false;
     int chordVoicingIndex = (int) ChordVoicing::Close;
     int chordColorIndex = (int) ChordColor::Triad;
+    int chordGenreIndex = (int) GeneratorGenre::House;
     int chordTypeIndex = (int) PhraseType::Chord;
     int chordSpeedIndex = (int) MelodySpeed::Medium;
     int chordMotionIndex = (int) MelodyContour::Even;
@@ -575,6 +582,7 @@ struct GrooveParams
     bool bassInput = false;
     int bassTypeIndex = (int) PhraseType::Scale;
     int bassStyleIndex = (int) MelodyStyle::March;
+    int bassGenreIndex = (int) GeneratorGenre::House;
     int bassSpeedIndex = (int) MelodySpeed::Medium;
     int bassMotionIndex = (int) BassMotion::Pulse;
     int bassLengthIndex = (int) GeneratorLength::FourBars;
@@ -583,7 +591,7 @@ struct GrooveParams
     int bassNonce = 0;
 
     bool drumsEnabled = false;
-    int drumStyleIndex = (int) DrumStyle::House;
+    int drumStyleIndex = (int) DrumStyle::House; // Genre for drums
     int drumSpeedIndex = (int) MelodySpeed::Medium;
     int drumDensity = 50;           // 0..100
     int drumFill = 35;              // 0..100 end-of-phrase fill amount
@@ -600,7 +608,7 @@ struct GrooveParams
     int velocityRangeLo = 1;
     int velocityRangeHi = 127;
 
-    /** 0 = original. 1..kMaxVariations = alternate slight variations of the clip. */
+    /** 0 = original. 1..kMaxVariations = alternate jam takes of the same clip. */
     int variationIndex = 0;
     /** 0 = original voicing. 1..kMaxRevoice puts the third, then the fifth, in the bass,
         and opens the chord at the top of the range. Pitch classes stay; only octaves move. */
@@ -646,6 +654,10 @@ struct GrooveParams
     {
         return (MelodyStyle) juce::jlimit(0, (int) MelodyStyle::Count - 1, arpStyleIndex);
     }
+    GeneratorGenre arpGenre() const
+    {
+        return (GeneratorGenre) juce::jlimit(0, (int) GeneratorGenre::Count - 1, arpGenreIndex);
+    }
     MelodyContour arpMotion() const
     {
         return (MelodyContour) juce::jlimit(0, (int) MelodyContour::Count - 1, arpMotionIndex);
@@ -674,6 +686,10 @@ struct GrooveParams
     {
         return (MelodyStyle) juce::jlimit(0, (int) MelodyStyle::Count - 1, bassStyleIndex);
     }
+    GeneratorGenre bassGenre() const
+    {
+        return (GeneratorGenre) juce::jlimit(0, (int) GeneratorGenre::Count - 1, bassGenreIndex);
+    }
     MelodySpeed bassSpeed() const
     {
         return (MelodySpeed) juce::jlimit(0, (int) MelodySpeed::Count - 1, bassSpeedIndex);
@@ -693,6 +709,10 @@ struct GrooveParams
     MelodyStyle melodyStyle() const
     {
         return (MelodyStyle) juce::jlimit(0, (int) MelodyStyle::Count - 1, melodyStyleIndex);
+    }
+    GeneratorGenre melodyGenre() const
+    {
+        return (GeneratorGenre) juce::jlimit(0, (int) GeneratorGenre::Count - 1, melodyGenreIndex);
     }
     MelodyContour melodyContour() const
     {
@@ -721,6 +741,10 @@ struct GrooveParams
     ChordColor chordColor() const
     {
         return (ChordColor) juce::jlimit(0, (int) ChordColor::Count - 1, chordColorIndex);
+    }
+    GeneratorGenre chordGenre() const
+    {
+        return (GeneratorGenre) juce::jlimit(0, (int) GeneratorGenre::Count - 1, chordGenreIndex);
     }
     ChordRhythm chordRhythm() const
     {

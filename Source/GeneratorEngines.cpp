@@ -32,6 +32,45 @@ float unit(std::uint32_t seed, int a, int b = 0, int salt = 0)
     return (float) (h & 0xFFFFFFu) / (float) 0x1000000u;
 }
 
+/** Strong scramble so consecutive Generate presses land far apart in pattern space. */
+std::uint32_t partSeed(int variation, int nonce, int genreIndex, int salt = 0)
+{
+    return mix((std::uint32_t) variation * 0x9E3779B9u
+               ^ (std::uint32_t) nonce * 0x85EBCA6Bu
+               ^ (std::uint32_t) (genreIndex + 1) * 0xC2B2AE35u
+               ^ (std::uint32_t) salt * 0x27D4EB2Du
+               ^ 0xA5A5A5A5u);
+}
+
+/** Genre feel for non-drum parts: density / syncopation bias. */
+struct GenreFeel
+{
+    float densityMul = 1.0f;
+    float syncopation = 0.35f;
+    float sustainBias = 0.0f;
+    bool preferOffbeats = false;
+};
+
+GenreFeel genreFeel(GeneratorGenre g)
+{
+    switch (g)
+    {
+        case GeneratorGenre::House:
+            return { 1.05f, 0.25f, 0.05f, false };
+        case GeneratorGenre::Breakbeat:
+            return { 1.15f, 0.70f, -0.05f, true };
+        case GeneratorGenre::Dub:
+            return { 0.55f, 0.20f, 0.45f, false };
+        case GeneratorGenre::Techno:
+            return { 1.25f, 0.35f, -0.10f, false };
+        case GeneratorGenre::Funk:
+            return { 0.95f, 0.65f, 0.0f, true };
+        case GeneratorGenre::Count:
+            break;
+    }
+    return {};
+}
+
 double delayPeriodBeats(DelayTime t)
 {
     switch (t)
@@ -510,15 +549,38 @@ void renderArp(const GrooveParams& g, double startPpq, double endPpq,
     if (!(endPpq > startPpq) || !g.arpEnabled) return;
     if (g.arpInput && (chordNotes == nullptr || chordCount <= 0)) return;
 
-    const std::uint32_t seed = (std::uint32_t) (g.arpVariation * 97 + g.arpNonce * 13);
+    const std::uint32_t seed = partSeed(g.arpVariation, g.arpNonce, g.arpGenreIndex, 11);
+    const auto feel = genreFeel(g.arpGenre());
     std::vector<int> pool;
     buildPitchPool(g, chordNotes, chordCount, keyRoot, mode, pool);
     if (pool.empty()) return;
 
     ArpBanks bankA {}, bankB {}, bankC {};
     generateArpBanks(g, seed, 1, bankA);
-    generateArpBanks(g, seed, 2, bankB);
-    generateArpBanks(g, seed, 3, bankC);
+    generateArpBanks(g, seed ^ 0xA11CE, 2, bankB);
+    generateArpBanks(g, seed ^ 0xBEEF5, 3, bankC);
+    // Genre reshapes gate / accent density before form motifs.
+    for (auto* bank : { &bankA, &bankB, &bankC })
+    {
+        for (int i = 0; i < 16; ++i)
+        {
+            if (feel.densityMul < 0.8f && bank->velLayer[i] > 0
+                && unit(seed, i, 3, 41) > feel.densityMul)
+                bank->velLayer[i] = 0;
+            else if (feel.densityMul > 1.1f && bank->velLayer[i] == 0
+                     && unit(seed, i, 5, 43) < (feel.densityMul - 1.0f))
+                bank->velLayer[i] = 1 + (int) (unit(seed, i, 7, 47) * 2.0f);
+            if (feel.preferOffbeats && (i % 2) == 0 && bank->velLayer[i] > 0
+                && unit(seed, i, 9, 53) < feel.syncopation * 0.4f)
+            {
+                const int j = juce::jmin(15, i + 1);
+                bank->velLayer[j] = juce::jmax(bank->velLayer[j], bank->velLayer[i]);
+                bank->noteIdx[j] = bank->noteIdx[i];
+                bank->velLayer[i] = 0;
+            }
+            bank->gateMul[i] = clampf(bank->gateMul[i] + feel.sustainBias * 0.35f, 0.2f, 1.4f);
+        }
+    }
     // Form motifs: B = inverted/shifted A, C = busier offbeat cousin — audible AAAB/ABAB/…
     for (int i = 0; i < 16; ++i)
     {
@@ -574,27 +636,32 @@ bool melodyStepPlays(const GrooveParams& g, int phraseBar, int step)
 {
     const auto style = g.melodyStyle();
     const auto speed = g.melodySpeed();
-    const std::uint32_t seed = (std::uint32_t) (g.melodyVariation * 97 + g.melodyNonce * 13);
+    const std::uint32_t seed = partSeed(g.melodyVariation, g.melodyNonce, g.melodyGenreIndex, 21);
+    const auto feel = genreFeel(g.melodyGenre());
     const float roll = unit(seed, phraseBar, step, 8);
 
     if (speed == MelodySpeed::Slow && (step % 2) == 1) return false;
     if (speed == MelodySpeed::Medium && (step % 4) == 1) return false;
+    if (feel.densityMul < 0.7f && !feel.preferOffbeats && (step % 4) == 2
+        && roll > feel.densityMul)
+        return false;
 
     const bool downbeat = step == 0 || step == 8;
     switch (style)
     {
         case MelodyStyle::March:
             return step == 0 || step == 4 || step == 8 || step == 12
-                || ((step % 2) == 0 && roll < 0.35f);
+                || ((step % 2) == 0 && roll < 0.35f * feel.densityMul)
+                || (feel.preferOffbeats && (step % 2) == 1 && roll < feel.syncopation * 0.5f);
         case MelodyStyle::Arch:
         {
             const float mid = 1.0f - std::abs(step - 8) / 8.0f;
-            return downbeat || roll < mid * 0.7f;
+            return downbeat || roll < mid * 0.7f * feel.densityMul;
         }
         case MelodyStyle::Call:
             return phraseBar % 2 == 0
-                ? (downbeat || step == 4 || roll < 0.45f)
-                : (downbeat || roll < 0.2f);
+                ? (downbeat || step == 4 || roll < 0.45f * feel.densityMul)
+                : (downbeat || roll < 0.2f * feel.densityMul);
         case MelodyStyle::Turn:
             return downbeat || step == 6 || step == 7 || step == 14 || step == 15
                 || ((step % 4) == 2 && roll < 0.4f);
@@ -614,7 +681,7 @@ int melodyNote(const GrooveParams& g, const Harmony& harmony, int phraseBar, int
 {
     int count = 0;
     const int* deg = scaleDegrees(mode, count);
-    const std::uint32_t seed = (std::uint32_t) (g.melodyVariation * 97 + g.melodyNonce * 13);
+    const std::uint32_t seed = partSeed(g.melodyVariation, g.melodyNonce, g.melodyGenreIndex, 22);
 
     int bias = 0;
     switch (g.melodyContour())
@@ -665,7 +732,7 @@ void renderMelody(const GrooveParams& g, double startPpq, double endPpq,
     if (g.melodyInput && (chordNotes == nullptr || chordCount <= 0)) return;
 
     const int phraseBars = generatorLengthBars(g.melodyLength());
-    const std::uint32_t seed = (std::uint32_t) (g.melodyVariation * 97 + g.melodyNonce * 13);
+    const std::uint32_t seed = partSeed(g.melodyVariation, g.melodyNonce, g.melodyGenreIndex, 23);
     const GeneratorForm form = resolveForm(g.melodyForm(), seed);
     const int sectionBars = juce::jmax(1, phraseBars / 4);
     const int first = std::max(0, (int) std::floor((startPpq - 1.0) / 0.25) - 1);
@@ -823,7 +890,8 @@ void renderChords(const GrooveParams& g, double startPpq, double endPpq,
     const int phraseBars = generatorLengthBars(g.chordLength());
     const int first = std::max(0, (int) std::floor((startPpq - 1.0) / 0.25) - 1);
     const int last = (int) std::ceil((endPpq + 0.25) / 0.25) + 1;
-    const std::uint32_t seed = (std::uint32_t) (g.chordVariation * 97 + g.chordNonce * 13);
+    const std::uint32_t seed = partSeed(g.chordVariation, g.chordNonce, g.chordGenreIndex, 31);
+    const auto feel = genreFeel(g.chordGenre());
     const GeneratorForm form = resolveForm(g.chordForm(), seed);
 
     for (int index = first; index <= last; ++index)
@@ -867,7 +935,18 @@ void renderChords(const GrooveParams& g, double startPpq, double endPpq,
             fire = step == 0 || step == 8;
         else if (g.chordSpeed() == MelodySpeed::Fast && (step % 4) == 2)
             fire = true;
+        // Genre: Dub thins; Techno/Breakbeat add offbeat stabs.
+        if (fire && feel.densityMul < 0.7f && step != 0
+            && unit(motifSeed, bar, step, 11) > feel.densityMul)
+            fire = false;
+        if (!fire && feel.preferOffbeats && (step == 2 || step == 6 || step == 10 || step == 14)
+            && unit(motifSeed, bar, step, 13) < feel.syncopation * 0.55f)
+        {
+            fire = true;
+            length = 0.45;
+        }
         if (!fire) continue;
+        length = juce::jmax(0.2, length + (double) feel.sustainBias * 0.6);
 
         const Harmony harmony = chordHarmony(g, chordNotes, chordCount, keyRoot, mode, bar + letter);
         std::vector<int> pitches;
@@ -904,7 +983,8 @@ void renderBass(const GrooveParams& g, double startPpq, double endPpq,
     const int phraseBars = generatorLengthBars(g.bassLength());
     const int first = std::max(0, (int) std::floor((startPpq - 1.0) / 0.25) - 1);
     const int last = (int) std::ceil((endPpq + 0.25) / 0.25) + 1;
-    const std::uint32_t seed = (std::uint32_t) (g.bassVariation * 97 + g.bassNonce * 13);
+    const std::uint32_t seed = partSeed(g.bassVariation, g.bassNonce, g.bassGenreIndex, 41);
+    const auto feel = genreFeel(g.bassGenre());
     const GeneratorForm form = resolveForm(g.bassForm(), seed);
     const int bassBias = (int) (mix(seed) >> 9) % 5;
     static constexpr int bassShift[] = { 0, 3, 7, 10, 12 };
@@ -938,10 +1018,14 @@ void renderBass(const GrooveParams& g, double startPpq, double endPpq,
         mapFormBar(phraseBars, form, wrapBar(bar, phraseBars), letter, localBar);
         juce::ignoreUnused(localBar);
         float densBoost = letter == 0 ? 0.0f : (letter == 1 ? 0.12f : 0.2f);
+        densBoost += (feel.densityMul - 1.0f) * 0.5f;
         if (g.bassSpeed() == MelodySpeed::Slow && (step % 4) != 0)
             continue;
         if (g.bassSpeed() == MelodySpeed::Fast)
             densBoost += 0.35f;
+        if (feel.densityMul < 0.7f && step != 0 && step != 8
+            && unit(seed, bar, step, 71) > feel.densityMul + densBoost)
+            continue;
         if (g.bassStyle() == MelodyStyle::Hold && step != 0 && step != 8)
             continue;
 
@@ -1204,7 +1288,7 @@ void renderDrums(const GrooveParams& g, double startPpq, double endPpq, std::vec
     if (!(endPpq > startPpq) || !g.drumsEnabled) return;
 
     const int phraseBars = generatorLengthBars(g.drumLength());
-    const std::uint32_t seed = (std::uint32_t) (g.drumVariation * 97 + g.drumNonce * 13);
+    const std::uint32_t seed = partSeed(g.drumVariation, g.drumNonce, g.drumStyleIndex, 51);
     const GeneratorForm form = resolveForm(g.drumForm(), seed);
     const auto drumSpeed = g.drumSpeed();
     std::vector<DrumHit> hits;
