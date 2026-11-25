@@ -237,6 +237,7 @@ if(MIDITOOLKIT_BUILD_TESTS)
         Tests/ScanEfficiencyTests.cpp
         Tests/SnapshotTests.cpp
         Tests/GenrePackTests.cpp
+        Tests/GeneratorSafetyTests.cpp
     )
     target_link_libraries(MidiToolkitTests PRIVATE
         MidiToolkit

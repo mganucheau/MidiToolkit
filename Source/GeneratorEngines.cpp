@@ -14,6 +14,35 @@ float clampf(float v, float lo, float hi)
     return std::max(lo, std::min(hi, v));
 }
 
+/** Steps to walk for one render. The span is capped so a huge or non-finite
+    playhead cannot ask std::vector for a size it cannot represent. */
+struct StepWindow
+{
+    int64_t first = 0;
+    int count = 0;
+};
+
+StepWindow makeStepWindow(double startPpq, double endPpq, double step, int pad, int maxCount)
+{
+    StepWindow w;
+    if (!(step > 0.0) || !std::isfinite(startPpq) || !std::isfinite(endPpq) || !(endPpq > startPpq))
+        return w;
+    constexpr double kMaxBeats = 64.0 * 4.0; // longer than any generator phrase
+    const double end = startPpq + std::min(endPpq - startPpq, kMaxBeats);
+    auto toIdx = [&](double ppq) -> int64_t
+    {
+        const double s = ppq / step;
+        if (!std::isfinite(s))
+            return 0;
+        return (int64_t) std::floor(std::clamp(s, -1.0e12, 1.0e12));
+    };
+    w.first = toIdx(startPpq + 1.0e-9) - pad;
+    const int64_t last = toIdx(end) + pad + 1;
+    const int64_t n = std::max<int64_t>(0, last - w.first);
+    w.count = (int) std::min<int64_t>(n, std::max(1, maxCount));
+    return w;
+}
+
 std::uint32_t mix(std::uint32_t v)
 {
     v ^= v >> 16;
@@ -78,7 +107,10 @@ void sortEvents(std::vector<Event>& out)
 {
     std::sort(out.begin(), out.end(), [](const Event& a, const Event& b)
     {
-        if (a.ppq != b.ppq) return a.ppq < b.ppq;
+        const bool aFin = std::isfinite(a.ppq);
+        const bool bFin = std::isfinite(b.ppq);
+        if (aFin != bFin) return aFin;
+        if (aFin && a.ppq != b.ppq) return a.ppq < b.ppq;
         if (a.note != b.note) return a.note < b.note;
         return a.velocity < b.velocity;
     });
@@ -557,42 +589,59 @@ void renderArp(const GrooveParams& g, double startPpq, double endPpq,
         return juce::jlimit(1, 127, base);
     };
 
-    const int firstStep = (int) std::floor(startPpq / stepLength + 1.0e-9);
-    const int lastStep = (int) std::ceil(endPpq / stepLength - 1.0e-9);
-    // Cursor advances only on sounding steps so the walk stays continuous.
-    int noteCursor = 0;
-    // Count sounding steps before the window so live/offline stay phase-aligned.
-    {
-        const int pre = juce::jmax(0, firstStep);
-        for (int k = 0; k < pre; ++k)
-            if (active[((k % kArpPatternSteps) + kArpPatternSteps) % kArpPatternSteps])
-                ++noteCursor;
-    }
+    const auto window = makeStepWindow(startPpq, endPpq, stepLength, 0, 8192);
+    if (window.count <= 0)
+        return;
 
-    for (int k = firstStep; k < lastStep; ++k)
+    int perCycle = 0;
+    for (int i = 0; i < kArpPatternSteps; ++i)
+        if (active[i])
+            ++perCycle;
+
+    // Sounding steps before the window, in O(1), so a long arrangement does not
+    // walk every step from bar 1 on each audio block.
+    auto soundedBefore = [&](int64_t step) -> int64_t
     {
-        if (k < 0) continue;
+        if (step <= 0 || perCycle <= 0)
+            return 0;
+        const int64_t cycles = step / kArpPatternSteps;
+        const int rem = (int) (step % kArpPatternSteps);
+        int64_t n = cycles * perCycle;
+        for (int i = 0; i < rem; ++i)
+            if (active[i])
+                ++n;
+        return n;
+    };
+    int64_t sounded = soundedBefore(std::max<int64_t>(0, window.first));
+
+    for (int i = 0; i < window.count; ++i)
+    {
+        const int64_t k = window.first + i;
+        if (k < 0)
+            continue;
         const double onPpq = (double) k * stepLength;
         if (onPpq < startPpq || onPpq >= endPpq)
             continue;
 
-        const int patternStep = ((k % kArpPatternSteps) + kArpPatternSteps) % kArpPatternSteps;
+        const int patternStep = (int) (k % kArpPatternSteps);
         if (!active[patternStep])
             continue;
 
-        const int absBar = (int) std::floor(onPpq / 4.0);
+        const double barD = std::floor(onPpq / 4.0);
+        const int absBar = (barD >= 0.0 && barD < 2.0e9) ? (int) barD : 0;
         int letter = 0, local = 0;
         mapFormBar(phraseBars, form, wrapBar(juce::jmax(0, absBar), phraseBars), letter, local);
         juce::ignoreUnused(local);
         const auto& order = orders[juce::jlimit(0, 2, letter)];
         if (order.empty()) continue;
 
-        const int note = order[(size_t) (noteCursor % (int) order.size())];
-        ++noteCursor;
+        const int note = order[(size_t) (sounded % (int64_t) order.size())];
+        ++sounded;
 
         const int velocity = accentVel(patternStep);
         // Even gate on the rate grid. Acid/Rolling may overlap into the next step.
-        const bool slide = (acid && unit(seed, k, patternStep, 31) < 0.28f)
+        const int stepKey = k <= 2000000000LL ? (int) k : (int) (k % 1000003);
+        const bool slide = (acid && unit(seed, stepKey, patternStep, 31) < 0.28f)
                         || rolling;
         const double gateMul = rolling ? 1.35 : (slide ? 1.08 : (double) kArpGate);
         const double offPpq = onPpq + stepLength * gateMul;
@@ -692,8 +741,20 @@ int melodyNote(const GrooveParams& g, const Harmony& harmony, int phraseBar, int
     const int direction = amount < 0.5f ? -1 : 1;
     int at = index + direction * hops;
     int octShift = 0;
-    while (at < 0) { at += count; --octShift; }
-    while (at >= count) { at -= count; ++octShift; }
+    if (count <= 0)
+        return juce::jlimit(0, 127, center);
+    if (at < 0 || at >= count)
+    {
+        int q = at / count;
+        int r = at % count;
+        if (r < 0)
+        {
+            r += count;
+            --q;
+        }
+        at = r;
+        octShift = q;
+    }
     const int pc = (keyRoot + deg[at]) % 12;
     return pitchInRange(pc, low, high, center + octShift * 12);
 }
@@ -710,11 +771,14 @@ void renderMelody(const GrooveParams& g, double startPpq, double endPpq,
     const std::uint32_t seed = partSeed(g.melodyVariation, g.melodyNonce, g.melodyGenreIndex, 23);
     const GeneratorForm form = resolveForm(g.melodyForm(), seed);
     const int sectionBars = juce::jmax(1, phraseBars / 4);
-    const int first = std::max(0, (int) std::floor((startPpq - 1.0) / 0.25) - 1);
-    const int last = (int) std::ceil((endPpq + 0.25) / 0.25) + 1;
+    const auto window = makeStepWindow(startPpq, endPpq, 0.25, 4, 4096);
 
-    for (int index = first; index <= last; ++index)
+    for (int i = 0; i < window.count; ++i)
     {
+        const int64_t index64 = window.first + i;
+        if (index64 < 0 || index64 > 2000000000LL)
+            continue;
+        const int index = (int) index64;
         const int bar = index / 16;
         const int step = index % 16;
         if (bar < 0) continue;
@@ -863,16 +927,19 @@ void renderChords(const GrooveParams& g, double startPpq, double endPpq,
     if (g.chordsInput && (chordNotes == nullptr || chordCount <= 0)) return;
 
     const int phraseBars = generatorLengthBars(g.chordLength());
-    const int first = std::max(0, (int) std::floor((startPpq - 1.0) / 0.25) - 1);
-    const int last = (int) std::ceil((endPpq + 0.25) / 0.25) + 1;
+    const auto window = makeStepWindow(startPpq, endPpq, 0.25, 4, 4096);
     const std::uint32_t seed = partSeed(g.chordVariation, g.chordNonce, g.chordGenreIndex, 31);
     const auto feel = genreFeel(g.chordGenre());
     const auto& chordPack = genrePack(g.chordGenre());
     const bool packedChords = chordPack.anyChords();
     const GeneratorForm form = resolveForm(g.chordForm(), seed);
 
-    for (int index = first; index <= last; ++index)
+    for (int i = 0; i < window.count; ++i)
     {
+        const int64_t index64 = window.first + i;
+        if (index64 < 0 || index64 > 2000000000LL)
+            continue;
+        const int index = (int) index64;
         const int bar = index / 16;
         const int step = index % 16;
         if (bar < 0) continue;
@@ -970,8 +1037,7 @@ void renderBass(const GrooveParams& g, double startPpq, double endPpq,
     if (g.bassInput && (chordNotes == nullptr || chordCount <= 0)) return;
 
     const int phraseBars = generatorLengthBars(g.bassLength());
-    const int first = std::max(0, (int) std::floor((startPpq - 1.0) / 0.25) - 1);
-    const int last = (int) std::ceil((endPpq + 0.25) / 0.25) + 1;
+    const auto window = makeStepWindow(startPpq, endPpq, 0.25, 4, 4096);
     const std::uint32_t seed = partSeed(g.bassVariation, g.bassNonce, g.bassGenreIndex, 41);
     const auto feel = genreFeel(g.bassGenre());
     const auto& bassPack = genrePack(g.bassGenre());
@@ -999,8 +1065,12 @@ void renderBass(const GrooveParams& g, double startPpq, double endPpq,
             out.push_back({ offPpq, note, 0 });
     };
 
-    for (int index = first; index <= last; ++index)
+    for (int i = 0; i < window.count; ++i)
     {
+        const int64_t index64 = window.first + i;
+        if (index64 < 0 || index64 > 2000000000LL)
+            continue;
+        const int index = (int) index64;
         const int bar = index / 16;
         const int step = index % 16;
         if (bar < 0) continue;
@@ -1157,7 +1227,10 @@ std::vector<RollNote> eventsToRollNotes(const std::vector<Event>& events, int ch
     }
     std::sort(notes.begin(), notes.end(), [](const RollNote& a, const RollNote& b)
     {
-        if (a.start != b.start) return a.start < b.start;
+        const bool aFin = std::isfinite(a.start);
+        const bool bFin = std::isfinite(b.start);
+        if (aFin != bFin) return aFin;
+        if (aFin && a.start != b.start) return a.start < b.start;
         return a.pitch < b.pitch;
     });
     return notes;
@@ -1173,13 +1246,15 @@ void renderDrums(const GrooveParams& g, double startPpq, double endPpq, std::vec
     const GeneratorForm form = resolveForm(g.drumForm(), seed);
     const auto drumSpeed = g.drumSpeed();
     std::vector<DrumHit> hits;
-    const int firstBar = (int) std::floor(startPpq / 4.0) - 1;
-    const int lastBar = (int) std::floor((endPpq - 1.0e-9) / 4.0) + 1;
+    const auto window = makeStepWindow(startPpq, endPpq, 4.0, 1, 128);
     const int sectionBars = juce::jmax(1, phraseBars / 4);
 
-    for (int absBar = firstBar; absBar <= lastBar; ++absBar)
+    for (int i = 0; i < window.count; ++i)
     {
-        if (absBar < 0) continue;
+        const int64_t bar64 = window.first + i;
+        if (bar64 < 0 || bar64 > 2000000000LL)
+            continue;
+        const int absBar = (int) bar64;
         int letter = 0, local = 0;
         const int phraseBar = wrapBar(absBar, phraseBars);
         mapFormBar(phraseBars, form, phraseBar, letter, local);
