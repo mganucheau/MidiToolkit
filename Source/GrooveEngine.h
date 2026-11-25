@@ -213,6 +213,9 @@ enum class DrumStyle : int
     Dub,
     Techno,
     Funk,
+    Reggae,
+    DubTechno,
+    Dnb,
     Count
 };
 using GeneratorGenre = DrumStyle;
@@ -480,12 +483,15 @@ inline const char* drumStyleLabel(DrumStyle s)
 {
     switch (s)
     {
-        case DrumStyle::House:     return "House";
-        case DrumStyle::Breakbeat: return "Breakbeat";
-        case DrumStyle::Dub:       return "Dub";
-        case DrumStyle::Techno:    return "Techno";
-        case DrumStyle::Funk:      return "Funk";
-        case DrumStyle::Count:     break;
+        case DrumStyle::House:      return "House";
+        case DrumStyle::Breakbeat:  return "Breakbeat";
+        case DrumStyle::Dub:        return "Dub";
+        case DrumStyle::Techno:     return "Techno";
+        case DrumStyle::Funk:       return "Funk";
+        case DrumStyle::Reggae:     return "Reggae";
+        case DrumStyle::DubTechno:  return "Dub Techno";
+        case DrumStyle::Dnb:        return "DNB";
+        case DrumStyle::Count:      break;
     }
     return "House";
 }

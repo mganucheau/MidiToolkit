@@ -29,8 +29,10 @@ struct RollNote
     bool   moved = false;   // set by resolveClip when a manual move applies
 };
 
-enum class ClipKind { Bass, Keys, Lead, Arp, Drums };
-constexpr int kNumClipKinds = 5;
+enum class ClipKind { Bass, Keys, Lead, Arp, Drums, Unsure };
+constexpr int kNumClipKinds = 6;
+/** Content score below this stays Unsure instead of a guessed label. */
+constexpr int kKindConfidenceThreshold = 60;
 
 const char* clipKindName(ClipKind k);
 
@@ -72,6 +74,8 @@ struct StepClip
     ClipKind kind = ClipKind::Lead;
     /** 0..100 confidence in `kind`. Low values mean the nearest label is a guess. */
     int    kindConfidence = 50;
+    /** User set this kind. Rescans and filename tags leave it alone. */
+    bool   kindPinned = false;
     /** True when a non-trivial share of notes sit on the GM drum map. */
     bool   hasDrumContent = false;
     /** Bitmask of clipTag::* derived from content. */

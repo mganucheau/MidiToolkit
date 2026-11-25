@@ -531,6 +531,7 @@ public:
     std::function<void()> onActivated;
     std::function<void(const juce::File&)> onRevealFile;
     std::function<void(const juce::File&)> onCopyFileToFolder;
+    std::function<void(const juce::File&, ClipKind)> onSetKind;
 
     void setSort(SortColumn column, bool ascending);
 
@@ -661,8 +662,9 @@ inline juce::Colour kindClipColour(ClipKind k)
         case ClipKind::Keys:  return ds::play();     // success green
         case ClipKind::Lead:  return ds::warning();  // warning amber
         case ClipKind::Arp:   return ds::primary();  // primary neutral
+        case ClipKind::Unsure: return ds::hl();
     }
-    return ds::acc();
+    return ds::hl();
 }
 
 /** Grid browser: files as clip slots in one column per kind (Groove ClipSlot look). */

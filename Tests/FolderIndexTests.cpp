@@ -81,6 +81,41 @@ TEST_CASE("FolderIndex binary roundtrip", "[folder_index]")
     tmp.deleteRecursively();
 }
 
+TEST_CASE("pinned kind survives a rescan", "[folder_index]")
+{
+    auto tmp = juce::File::getSpecialLocation(juce::File::tempDirectory)
+                   .getChildFile("MidiToolkitPinTest");
+    tmp.deleteRecursively();
+    REQUIRE(tmp.createDirectory());
+    const auto file = tmp.getChildFile("clip.mid");
+    REQUIRE(file.replaceWithText("MThd"));
+
+    StepClip clip;
+    clip.filePath = file.getFullPathName();
+    clip.name = "clip";
+    clip.kind = ClipKind::Drums;
+    clip.kindConfidence = 90;
+    auto first = FolderIndex::fromClips(tmp, false, std::vector<StepClip> { clip });
+    first.pinKind(clip.filePath, ClipKind::Arp);
+    REQUIRE(first.save());
+
+    clip.kind = ClipKind::Drums;
+    clip.kindConfidence = 92;
+    clip.kindPinned = false;
+    auto rescanned = FolderIndex::fromClips(tmp, false, std::vector<StepClip> { clip });
+    auto previous = FolderIndex::load(tmp, false);
+    REQUIRE(previous.has_value());
+    rescanned.retainPinnedFrom(*previous);
+    REQUIRE(rescanned.save());
+
+    auto loaded = FolderIndex::loadValidClips(tmp, false);
+    REQUIRE(loaded.has_value());
+    REQUIRE(loaded->size() == 1);
+    CHECK(loaded->at(0).kind == ClipKind::Arp);
+    CHECK(loaded->at(0).kindPinned);
+    tmp.deleteRecursively();
+}
+
 TEST_CASE("Parallel parse sample from Drums vs serial", "[perf][midi_parsed]")
 {
     const auto drums = midiParsedRoot().getChildFile("Drums");

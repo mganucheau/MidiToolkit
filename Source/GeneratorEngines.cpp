@@ -1,4 +1,5 @@
 #include "GeneratorEngines.h"
+#include "GenrePacks.h"
 #include <algorithm>
 #include <cmath>
 #include <map>
@@ -53,22 +54,8 @@ struct GenreFeel
 
 GenreFeel genreFeel(GeneratorGenre g)
 {
-    switch (g)
-    {
-        case GeneratorGenre::House:
-            return { 1.05f, 0.25f, 0.05f, false };
-        case GeneratorGenre::Breakbeat:
-            return { 1.15f, 0.70f, -0.05f, true };
-        case GeneratorGenre::Dub:
-            return { 0.55f, 0.20f, 0.45f, false };
-        case GeneratorGenre::Techno:
-            return { 1.25f, 0.35f, -0.10f, false };
-        case GeneratorGenre::Funk:
-            return { 0.95f, 0.65f, 0.0f, true };
-        case GeneratorGenre::Count:
-            break;
-    }
-    return {};
+    const auto& pack = genrePack(g);
+    return { pack.densityMul, pack.syncopation, pack.sustainBias, pack.preferOffbeats };
 }
 
 double delayPeriodBeats(DelayTime t)
@@ -532,6 +519,15 @@ void renderArp(const GrooveParams& g, double startPpq, double endPpq,
 
     bool active[kArpPatternSteps];
     buildEvenDensityMask(g.arpDensity, active);
+    {
+        const auto& pack = genrePack(g.arpGenre());
+        if (pack.anyArp())
+        {
+            for (int i = 0; i < kArpPatternSteps; ++i)
+                if (pack.arp[(size_t) i].velocity <= 0)
+                    active[i] = false;
+        }
+    }
 
     // Prebuild orders for form letters A/B/C.
     std::vector<int> orders[3];
@@ -871,6 +867,8 @@ void renderChords(const GrooveParams& g, double startPpq, double endPpq,
     const int last = (int) std::ceil((endPpq + 0.25) / 0.25) + 1;
     const std::uint32_t seed = partSeed(g.chordVariation, g.chordNonce, g.chordGenreIndex, 31);
     const auto feel = genreFeel(g.chordGenre());
+    const auto& chordPack = genrePack(g.chordGenre());
+    const bool packedChords = chordPack.anyChords();
     const GeneratorForm form = resolveForm(g.chordForm(), seed);
 
     for (int index = first; index <= last; ++index)
@@ -887,7 +885,16 @@ void renderChords(const GrooveParams& g, double startPpq, double endPpq,
         bool fire = false;
         double length = 1.2;
         int velocity = 92 + letter * 3;
-        switch (g.chordRhythm())
+        double tick = 0.0;
+        if (packedChords)
+        {
+            const auto& st = chordPack.chords[(size_t) step];
+            fire = st.velocity > 0;
+            length = chordPack.chordGate;
+            velocity = st.velocity;
+            tick = st.ticks / 480.0;
+        }
+        else switch (g.chordRhythm())
         {
             case ChordRhythm::Block:
                 fire = step == 0 || step == 8;
@@ -910,27 +917,30 @@ void renderChords(const GrooveParams& g, double startPpq, double endPpq,
             case ChordRhythm::Count:
                 break;
         }
-        if (g.chordSpeed() == MelodySpeed::Slow)
-            fire = step == 0 || step == 8;
-        else if (g.chordSpeed() == MelodySpeed::Fast && (step % 4) == 2)
-            fire = true;
-        // Genre: Dub thins; Techno/Breakbeat add offbeat stabs.
-        if (fire && feel.densityMul < 0.7f && step != 0
-            && unit(motifSeed, bar, step, 11) > feel.densityMul)
-            fire = false;
-        if (!fire && feel.preferOffbeats && (step == 2 || step == 6 || step == 10 || step == 14)
-            && unit(motifSeed, bar, step, 13) < feel.syncopation * 0.55f)
+        if (!packedChords)
         {
-            fire = true;
-            length = 0.45;
+            if (g.chordSpeed() == MelodySpeed::Slow)
+                fire = step == 0 || step == 8;
+            else if (g.chordSpeed() == MelodySpeed::Fast && (step % 4) == 2)
+                fire = true;
+            if (fire && feel.densityMul < 0.7f && step != 0
+                && unit(motifSeed, bar, step, 11) > feel.densityMul)
+                fire = false;
+            if (!fire && feel.preferOffbeats && (step == 2 || step == 6 || step == 10 || step == 14)
+                && unit(motifSeed, bar, step, 13) < feel.syncopation * 0.55f)
+            {
+                fire = true;
+                length = 0.45;
+            }
+            length = juce::jmax(0.2, length + (double) feel.sustainBias * 0.6);
         }
         if (!fire) continue;
-        length = juce::jmax(0.2, length + (double) feel.sustainBias * 0.6);
 
         const Harmony harmony = chordHarmony(g, chordNotes, chordCount, keyRoot, mode, bar + letter);
         std::vector<int> pitches;
         chordVoices(g, harmony, pitches);
-        const double onBase = bar * 4.0 + step * 0.25;
+        const double swing = (step % 4) == 2 ? chordPack.swing * 0.25 : 0.0;
+        const double onBase = bar * 4.0 + step * 0.25 + tick + swing;
         for (size_t i = 0; i < pitches.size(); ++i)
         {
             const double onPpq = g.chordRhythm() == ChordRhythm::Strum
@@ -944,7 +954,7 @@ void renderChords(const GrooveParams& g, double startPpq, double endPpq,
                 out.push_back({ offPpq, pitches[i], 0 });
         }
     }
-    if (isFullPhraseWindow(startPpq, endPpq, phraseBars))
+    if (!packedChords && isFullPhraseWindow(startPpq, endPpq, phraseBars))
         musicalQaPass(out, phraseBars, false);
     sortEvents(out);
 }
@@ -964,6 +974,8 @@ void renderBass(const GrooveParams& g, double startPpq, double endPpq,
     const int last = (int) std::ceil((endPpq + 0.25) / 0.25) + 1;
     const std::uint32_t seed = partSeed(g.bassVariation, g.bassNonce, g.bassGenreIndex, 41);
     const auto feel = genreFeel(g.bassGenre());
+    const auto& bassPack = genrePack(g.bassGenre());
+    const bool packedBass = bassPack.anyBass();
     const GeneratorForm form = resolveForm(g.bassForm(), seed);
     const int bassBias = (int) (mix(seed) >> 9) % 5;
     static constexpr int bassShift[] = { 0, 3, 7, 10, 12 };
@@ -996,6 +1008,24 @@ void renderBass(const GrooveParams& g, double startPpq, double endPpq,
         int letter = 0, localBar = 0;
         mapFormBar(phraseBars, form, wrapBar(bar, phraseBars), letter, localBar);
         juce::ignoreUnused(localBar);
+        if (packedBass)
+        {
+            const auto& st = bassPack.bass[(size_t) step];
+            if (st.velocity <= 0)
+                continue;
+            const Harmony harmony = g.bassInput
+                ? harmonyFromHeld(chordNotes, chordCount, keyRoot, mode, bar)
+                : progressionHarmony(keyRoot, mode, bar + letter);
+            const int note = pitchInRange(toneOf(harmony, 0), 28, 52, 40);
+            const double swing = (step % 4) == 2 ? bassPack.swing * 0.25 : 0.0;
+            const double onPpq = bar * 4.0 + step * 0.25 + st.ticks / 480.0 + swing;
+            const double offPpq = onPpq + bassPack.bassGate;
+            if (onPpq >= startPpq && onPpq < endPpq)
+                out.push_back({ onPpq, note, st.velocity });
+            if (offPpq >= startPpq && offPpq < endPpq)
+                out.push_back({ offPpq, note, 0 });
+            continue;
+        }
         float densBoost = letter == 0 ? 0.0f : (letter == 1 ? 0.12f : 0.2f);
         densBoost += (feel.densityMul - 1.0f) * 0.5f;
         if (g.bassSpeed() == MelodySpeed::Slow && (step % 4) != 0)
@@ -1045,7 +1075,7 @@ void renderBass(const GrooveParams& g, double startPpq, double endPpq,
         if ((color || letter > 0) && step == 4)
             emit(bar, step, letter, 2, 43, 1.0f, 92, 0.35);
     }
-    if (isFullPhraseWindow(startPpq, endPpq, phraseBars))
+    if (!packedBass && isFullPhraseWindow(startPpq, endPpq, phraseBars))
         musicalQaPass(out, phraseBars, false);
     sortEvents(out);
 }
@@ -1054,160 +1084,32 @@ void renderBass(const GrooveParams& g, double startPpq, double endPpq,
 // GM: 36 kick, 38 snare, 37 side stick, 39 clap, 42 closed hat, 46 open hat,
 // 43 low tom, 47 mid tom, 50 high tom.
 
-struct DrumHit { int note; float chance; int velocity; };
+struct DrumHit { int note; float chance; int velocity; int ticks = 0; };
 
-/** Instant Haus pattern banks: bit i set → hit on 16th step i. */
-constexpr std::uint16_t hausKickBanks[] = {
-    0b0001000100010001, // 0,4,8,12 — classic four-on-the-floor
-    0b1001000100010001, // + ghost on 15
-    0b0001000100011001, // + offbeat 3
-    0b0101000100010001, // + step 1
-};
-constexpr std::uint16_t hausClapBanks[] = {
-    0b0001000000010000, // 4 + 12
-    0b0001001000010000, // 4 + 6 + 12
-    0b0001000000010100, // 4 + 10 + 12
-    0b0011000000010000, // 4 + 5 + 12
-};
-constexpr std::uint16_t hausHatBanks[] = {
-    0b0101010101010101, // every 8th
-    0b1101010101010101, // + 16th pickup
-    0b0111010101010101, // busier
-    0b0101011101010111, // late-bar chatter
-};
-constexpr std::uint16_t beatKickBanks[] = {
-    0b0100100100010001, // Instant Haus beat-ish
-    0b0100100101010001,
-    0b0001000100010001, // 4OTF variant inside beat mode
-    0b0100101000010001,
-};
-constexpr std::uint16_t beatSnareBanks[] = {
-    0b1001010000010000, // 4, 10, 12, 15
-    0b0001010000010000, // 4 + 12
-    0b1000010000011000, // 4, 11, 12, 15
-    0b0001010010010000, // 4, 8-ish, 12
-};
-constexpr std::uint16_t beatHatBanks[] = {
-    0b0101010101010101,
-    0b1111111111111111, // 16ths
-    0b0111011101110111,
-    0b0100010101000101,
-};
-
-inline bool bankHit(std::uint16_t mask, int step)
-{
-    return ((mask >> (step & 15)) & 1u) != 0;
-}
-
-void drumHitsForStep(DrumStyle style, int step, float density, float fill,
-                     bool fillBar, std::uint32_t seed, int formLetter,
+void drumHitsForStep(DrumStyle style, int step, float /*density*/, float fill,
+                     bool fillBar, std::uint32_t /*seed*/, int /*formLetter*/,
                      std::vector<DrumHit>& hits)
 {
     hits.clear();
-    auto add = [&](int note, float chance, int vel)
+    const auto& pack = genrePack(style);
+    auto add = [&](int note, const PackStep& hit)
     {
-        hits.push_back({ note, chance, vel });
+        if (hit.velocity > 0)
+            hits.push_back({ note, 1.0f, hit.velocity, hit.ticks });
     };
+    const int s = step & 15;
+    add(36, pack.kick[(size_t) s]);
+    add(38, pack.snare[(size_t) s]);
+    add(42, pack.hat[(size_t) s]);
+    add(38, pack.ghost[(size_t) s]);
 
-    const float dens = clampf(density / 100.0f, 0.0f, 1.0f);
     const float fillAmt = clampf(fill / 100.0f, 0.0f, 1.0f);
-    // Form letter picks an Instant Haus pattern bank (A/B/C → audible ABAB etc.).
-    const int bank = juce::jlimit(0, 3, formLetter + (int) ((mix(seed) >> 10) & 1u));
-
-    if (fillBar && fillAmt > 0.05f && step >= 8)
+    if (fillBar && fillAmt > 0.05f && s >= 12)
     {
-        // Phrase-end fill only — keep beat 1 kick, then snare/tom work.
-        if (step == 8) add(36, 1.0f, 112);
-        if (step == 8 || step == 10 || step == 12 || step == 14)
-            add(38, 0.55f + 0.4f * fillAmt, 100 + (int) (20 * fillAmt));
-        if (step == 9 || step == 11 || step == 13 || step == 15)
-            add(step >= 13 ? 50 : 47, 0.35f * fillAmt + 0.25f, 88);
-        if (step == 15) add(49, 0.55f * fillAmt, 110); // crash
-        // Still allow closed hats under the fill.
-        if ((step % 2) == 0) add(42, 0.7f, 72);
-        return;
-    }
-
-    switch (style)
-    {
-        case DrumStyle::House:
-        {
-            // Instant Haus "haus": four-on-the-floor kick skeleton, clap on 2&4,
-            // closed hats on 8ths; density opens offbeat hats / ghosts / perc.
-            if (bankHit(hausKickBanks[bank % 4], step))
-                add(36, 1.0f, step == 0 ? 120 : 114);
-            if (bankHit(hausClapBanks[bank % 4], step))
-                add(39, 1.0f, 110); // clap
-            if (bankHit(hausHatBanks[0], step))
-                add(42, 1.0f, step % 4 == 0 ? 88 : 74); // CH every 8th always
-            if ((step % 2) == 1)
-                add(46, 0.12f + 0.78f * dens, 70); // OH offbeats with density
-            if (dens > 0.45f && bankHit(hausHatBanks[juce::jmin(3, bank + 1)], step)
-                && (step % 2) == 1)
-                add(42, 0.55f * dens, 58); // 16th CH ghosts
-            if (dens > 0.7f && (step == 7 || step == 15))
-                add(37, 0.35f * dens, 64); // rim color
-            if (formLetter >= 1 && (step == 2 || step == 10))
-                add(36, 0.45f, 92); // B/C ghost kicks
-            if (formLetter >= 2 && (step == 6 || step == 14))
-                add(47, 0.4f, 78); // C tom chatter
-            break;
-        }
-
-        case DrumStyle::Breakbeat:
-        {
-            // Instant Haus "beat" lane: syncopated kick/snare banks; density = hats.
-            if (bankHit(beatKickBanks[bank % 4], step))
-                add(36, 1.0f, 116);
-            if (bankHit(beatSnareBanks[bank % 4], step))
-                add(38, 1.0f, step == 4 || step == 12 ? 118 : 100);
-            if (bankHit(beatHatBanks[dens > 0.55f ? juce::jmin(3, bank + 1) : 0], step))
-                add(42, 0.85f + 0.15f * dens, (step % 2) == 0 ? 80 : 60);
-            if (dens > 0.4f && (step == 3 || step == 11))
-                add(37, 0.45f * dens, 70); // rim
-            if (dens > 0.65f && step == 15)
-                add(46, 0.55f, 82);
-            if (formLetter >= 2 && (step == 7 || step == 13))
-                add(50, 0.5f, 84); // C section tom
-            break;
-        }
-
-        case DrumStyle::Dub:
-            // Sparse kick, snare on 3, space, rim / stick color.
-            if (step == 0) add(36, 1.0f, 118);
-            if (step == 4) add(42, 0.4f * dens, 58);
-            if (step == 8) { add(38, 1.0f, 112); add(37, 0.55f * dens, 78); }
-            if (step == 12) add(42, 0.35f * dens, 56);
-            if (step == 14) add(36, 0.3f * dens, 86);
-            if (step == 6) add(37, 0.25f * dens, 70);
-            break;
-
-        case DrumStyle::Techno:
-            // Four-on-the-floor + driving 16th hats.
-            if (step == 0 || step == 4 || step == 8 || step == 12) add(36, 1.0f, 116);
-            add(42, 0.85f + 0.15f * dens, (step % 2) == 0 ? 84 : 66);
-            if (step == 6 || step == 14) add(36, 0.45f * dens, 94);
-            if (step == 4 || step == 12) add(39, 0.85f, 102);
-            if (step == 15) add(46, 0.35f * dens, 88);
-            break;
-
-        case DrumStyle::Funk:
-            // Syncopated kick, ghost snares, swung hats.
-            if (step == 0) add(36, 1.0f, 112);
-            if (step == 3) add(36, 0.65f * dens, 96);
-            if (step == 4) { add(38, 1.0f, 114); add(42, 1.0f, 78); }
-            if (step == 5) add(38, 0.4f * dens, 58); // ghost
-            if (step == 7) add(38, 0.3f * dens, 52);
-            if (step == 8) { add(36, 0.55f, 100); add(42, 1.0f, 76); }
-            if (step == 10) add(36, 0.7f * dens, 104);
-            if (step == 12) { add(38, 1.0f, 116); add(42, 1.0f, 80); }
-            if (step == 13) add(38, 0.35f * dens, 56);
-            if ((step % 2) == 0) add(42, 0.85f, 74);
-            if ((step % 2) == 1) add(42, 0.45f * dens, 58);
-            break;
-
-        case DrumStyle::Count:
-            break;
+        if (s == 12 || s == 14)
+            hits.push_back({ 38, 0.45f * fillAmt, 96, 0 });
+        if (s == 13 || s == 15)
+            hits.push_back({ s == 15 ? 50 : 47, 0.4f * fillAmt, 84, 0 });
     }
 }
 
@@ -1305,11 +1207,13 @@ void renderDrums(const GrooveParams& g, double startPpq, double endPpq, std::vec
                 if (!hasHat)
                     hits.push_back({ 42, 0.85f, 68 });
             }
-            const double onPpq = absBar * 4.0 + step * 0.25;
+            const auto& drumPack = genrePack(g.drumStyle());
+            const double swing = (step % 4) == 2 ? drumPack.swing * 0.25 : 0.0;
             for (const auto& hit : hits)
             {
                 if (hit.chance < 0.999f && unit(seed, absBar, step, hit.note + letter * 17) >= hit.chance)
                     continue;
+                const double onPpq = absBar * 4.0 + step * 0.25 + hit.ticks / 480.0 + swing;
                 if (onPpq >= startPpq && onPpq < endPpq)
                     out.push_back({ onPpq, hit.note, hit.velocity });
                 const double offPpq = onPpq + 0.2;
@@ -1318,8 +1222,6 @@ void renderDrums(const GrooveParams& g, double startPpq, double endPpq, std::vec
             }
         }
     }
-    if (isFullPhraseWindow(startPpq, endPpq, phraseBars))
-        musicalQaPass(out, phraseBars, true);
     sortEvents(out);
 }
 

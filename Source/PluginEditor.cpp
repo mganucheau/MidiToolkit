@@ -21,10 +21,6 @@ FileListEntry entryForClip(const StepClip& clip, const juce::File& f,
     e.name = f.getFileNameWithoutExtension();
     // Keyword lexicon always wins for display — fixes stale scan/index kinds.
     e.kind = clip.kind;
-    if (auto tagged = kindKeywordFromFileName(f.getFullPathName()))
-        e.kind = *tagged;
-    else if (auto tagged = kindKeywordFromFileName(e.name))
-        e.kind = *tagged;
     e.rootName = clip.root >= 0 ? juce::String(kNoteNames[(size_t) clip.root]) : juce::String();
     e.bpm = clip.bpm;
     e.bars = clip.bars;
@@ -299,6 +295,156 @@ void scanMidiFiles(const juce::File& dir, bool subdirs,
         if (d.getFileName().startsWithChar('.')) continue;
         scanMidiFiles(d, true, out, matches);
     }
+}
+
+bool generatorContentChanged(const GrooveParams& a, const GrooveParams& b, int part)
+{
+    switch (part)
+    {
+        case (int) gen::Part::Arp:
+            return a.arpEnabled != b.arpEnabled
+                || a.arpRateIndex != b.arpRateIndex
+                || a.arpDensity != b.arpDensity
+                || a.arpMotionIndex != b.arpMotionIndex
+                || a.arpShapeIndex != b.arpShapeIndex
+                || a.arpStyleIndex != b.arpStyleIndex
+                || a.arpGenreIndex != b.arpGenreIndex
+                || a.arpLengthIndex != b.arpLengthIndex
+                || a.arpFormIndex != b.arpFormIndex
+                || a.arpVariation != b.arpVariation
+                || a.arpNonce != b.arpNonce
+                || a.arpOctaves != b.arpOctaves
+                || a.arpGate != b.arpGate;
+        case (int) gen::Part::Melody:
+            return a.melodyEnabled != b.melodyEnabled
+                || a.melodyTypeIndex != b.melodyTypeIndex
+                || a.melodyStyleIndex != b.melodyStyleIndex
+                || a.melodyGenreIndex != b.melodyGenreIndex
+                || a.melodyContourIndex != b.melodyContourIndex
+                || a.melodySpeedIndex != b.melodySpeedIndex
+                || a.melodyLengthIndex != b.melodyLengthIndex
+                || a.melodyFormIndex != b.melodyFormIndex
+                || a.melodyVariation != b.melodyVariation
+                || a.melodyNonce != b.melodyNonce;
+        case (int) gen::Part::Chords:
+            return a.chordsEnabled != b.chordsEnabled
+                || a.chordTypeIndex != b.chordTypeIndex
+                || a.chordColorIndex != b.chordColorIndex
+                || a.chordVoicingIndex != b.chordVoicingIndex
+                || a.chordRhythmIndex != b.chordRhythmIndex
+                || a.chordGenreIndex != b.chordGenreIndex
+                || a.chordMotionIndex != b.chordMotionIndex
+                || a.chordSpeedIndex != b.chordSpeedIndex
+                || a.chordLengthIndex != b.chordLengthIndex
+                || a.chordFormIndex != b.chordFormIndex
+                || a.chordVariation != b.chordVariation
+                || a.chordNonce != b.chordNonce;
+        case (int) gen::Part::Bass:
+            return a.bassEnabled != b.bassEnabled
+                || a.bassTypeIndex != b.bassTypeIndex
+                || a.bassStyleIndex != b.bassStyleIndex
+                || a.bassGenreIndex != b.bassGenreIndex
+                || a.bassMotionIndex != b.bassMotionIndex
+                || a.bassSpeedIndex != b.bassSpeedIndex
+                || a.bassLengthIndex != b.bassLengthIndex
+                || a.bassFormIndex != b.bassFormIndex
+                || a.bassVariation != b.bassVariation
+                || a.bassNonce != b.bassNonce;
+        case (int) gen::Part::Drums:
+            return a.drumsEnabled != b.drumsEnabled
+                || a.drumStyleIndex != b.drumStyleIndex
+                || a.drumSpeedIndex != b.drumSpeedIndex
+                || a.drumDensity != b.drumDensity
+                || a.drumFill != b.drumFill
+                || a.drumLengthIndex != b.drumLengthIndex
+                || a.drumFormIndex != b.drumFormIndex
+                || a.drumVariation != b.drumVariation
+                || a.drumNonce != b.drumNonce;
+        default:
+            return true;
+    }
+}
+
+/** Keep notes outside the selection. Notes from `fresh` that start inside the
+    selected span replace the selected notes. Toolkit stamps move with them. */
+bool spliceGeneratedSelection(StepClip& fresh, const StepClip& previous,
+                              const std::set<int>& oldSel, std::set<int>& newSel,
+                              ClipEdit& edit, const GrooveParams& groove)
+{
+    double t0 = 1.0e9;
+    double t1 = -1.0;
+    int maxId = 0;
+    for (const auto& n : previous.notes)
+        maxId = std::max(maxId, n.id);
+
+    std::vector<RollNote> kept;
+    kept.reserve(previous.notes.size());
+    for (const auto& n : previous.notes)
+    {
+        if (oldSel.count(n.id) != 0)
+        {
+            t0 = std::min(t0, n.start);
+            t1 = std::max(t1, n.start + std::max(0.0, n.len));
+        }
+        else
+            kept.push_back(n);
+    }
+    if (!(t1 > t0))
+        return false;
+
+    NoteGroove inherit{};
+    bool haveInherit = false;
+    for (int id : oldSel)
+    {
+        if (const auto it = edit.noteGroove.find(id); it != edit.noteGroove.end())
+        {
+            inherit = it->second;
+            haveInherit = true;
+            edit.noteGroove.erase(it);
+        }
+        edit.notePitch.erase(id);
+        edit.moves.erase(id);
+        edit.velocities.erase(id);
+        edit.deleted.erase(id);
+    }
+    if (!haveInherit && edit.noteGroove.empty() && !clipFxIsDefault(groove))
+    {
+        inherit = noteGrooveFrom(groove);
+        haveInherit = true;
+        for (const auto& n : kept)
+            edit.noteGroove[n.id] = inherit;
+    }
+
+    for (const auto& n : fresh.notes)
+    {
+        if (n.start < t0 - 1.0e-6 || n.start >= t1 - 1.0e-6)
+            continue;
+        auto copy = n;
+        copy.id = ++maxId;
+        newSel.insert(copy.id);
+        if (haveInherit)
+            edit.noteGroove[copy.id] = inherit;
+        kept.push_back(std::move(copy));
+    }
+
+    std::stable_sort(kept.begin(), kept.end(), [](const RollNote& a, const RollNote& b)
+    {
+        if (std::abs(a.start - b.start) > 1.0e-9) return a.start < b.start;
+        if (a.pitch != b.pitch) return a.pitch < b.pitch;
+        return a.id < b.id;
+    });
+
+    fresh.notes = std::move(kept);
+    fresh.noteCount = (int) fresh.notes.size();
+    fresh.bars = previous.bars;
+    fresh.filePath = previous.filePath;
+    fresh.name = previous.name;
+    fresh.kind = previous.kind;
+    fresh.complexity = previous.complexity;
+    fresh.root = previous.root;
+    if (previous.bpm > 0.0)
+        fresh.bpm = previous.bpm;
+    return true;
 }
 
 } // namespace
@@ -853,6 +999,28 @@ MidiToolkitEditor::MidiToolkitEditor(MidiToolkitProcessor& p)
     fileList.onActivated = [this] { claimKeyNav(KeyNavTarget::Browser); };
     fileList.onRevealFile = [](const juce::File& f) { f.revealToUser(); };
     fileList.onCopyFileToFolder = [this](const juce::File& f) { copyFileToFolder(f); };
+    fileList.onSetKind = [this](const juce::File& file, ClipKind kind)
+    {
+        const auto path = file.getFullPathName();
+        for (auto& clip : clips)
+        {
+            if (clip.filePath != path)
+                continue;
+            clip.kind = kind;
+            clip.kindPinned = true;
+            clip.kindConfidence = 100;
+        }
+        if (rootDir.isDirectory())
+        {
+            auto idx = FolderIndex::load(rootDir, recursiveBrowse)
+                           .value_or(FolderIndex::fromClips(rootDir, recursiveBrowse, clips));
+            if (idx.rootPath.isEmpty())
+                idx = FolderIndex::fromClips(rootDir, recursiveBrowse, clips);
+            idx.pinKind(path, kind);
+            idx.save();
+        }
+        rebuildEntries();
+    };
     fileList.setColumnVisibility(processorRef.columnVisibility);
     fileList.setNameColumnWidth(processorRef.nameColumnWidth);
     fileList.onColumnVisibilityChanged = [this](const BrowserColumnVisibility& v)
@@ -977,8 +1145,8 @@ MidiToolkitEditor::MidiToolkitEditor(MidiToolkitProcessor& p)
         }
         if (hasRecording)
         {
-            // Generated clips re-render live when Type / Density / Speed / etc.
-            // change so the piano roll matches the next sounding pattern.
+            // Generator knobs rewrite the pattern. Toolkit knobs (complexity,
+            // swing, …) fall through and stamp only the selected notes.
             if (recordedClip.filePath.startsWith("generator://"))
             {
                 if (lastGeneratedPart < 0)
@@ -990,7 +1158,8 @@ MidiToolkitEditor::MidiToolkitEditor(MidiToolkitProcessor& p)
                     else if (path == "bass") lastGeneratedPart = (int) gen::Part::Bass;
                     else if (path == "drums") lastGeneratedPart = (int) gen::Part::Drums;
                 }
-                if (lastGeneratedPart >= 0)
+                if (lastGeneratedPart >= 0
+                    && generatorContentChanged(rollEditor.currentGroove(), k, lastGeneratedPart))
                 {
                     regenerateGeneratedClip(k);
                     return;
@@ -1905,7 +2074,10 @@ void MidiToolkitEditor::rescanFolder(bool keepSelection, const juce::String& pre
                 }
                 while (done.load() < total)
                     juce::Thread::sleep(5);
-                FolderIndex::fromClips(dir, recursive, found).save();
+                auto idx = FolderIndex::fromClips(dir, recursive, found);
+                if (auto previous = FolderIndex::load(dir, recursive))
+                    idx.retainPinnedFrom(*previous);
+                idx.save();
             }
         }
         catch (...)
@@ -2650,6 +2822,8 @@ void MidiToolkitEditor::rebuildEntries()
                     e.kind = *tagged;
                 else if (auto tagged = kindKeywordFromFileName(e.name))
                     e.kind = *tagged;
+                else
+                    e.kind = ClipKind::Unsure;
             }
             entries.push_back(std::move(e));
             displayRows.push_back({ false, clipIdx, f });
@@ -2923,7 +3097,9 @@ void MidiToolkitEditor::regenerateGeneratedClip(const GrooveParams& groove)
     const bool firstGenerate = !hasRecording
         || !recordedClip.filePath.startsWith("generator://");
     const auto part = (gen::Part) juce::jlimit(0, (int) gen::Part::Count - 1, lastGeneratedPart);
-    const auto edit = effectsInspector.getEdit();
+    auto edit = effectsInspector.getEdit();
+    const StepClip previous = recordedClip;
+    const auto oldSel = rollEditor.selectedNoteIds();
     int keyRoot = edit.root >= 0 ? edit.root : 0;
     if (const auto* clip = selectedClip(); clip != nullptr && clip->root >= 0 && edit.root < 0)
         keyRoot = clip->root;
@@ -2942,9 +3118,15 @@ void MidiToolkitEditor::regenerateGeneratedClip(const GrooveParams& groove)
     const double prevBpm = recordedClip.bpm;
     recordedClip = gen::renderPartClip(part, groove, keyRoot, edit.mode,
                                        chordCount > 0 ? chordBuf : nullptr, chordCount);
+    std::set<int> newSel;
+    const bool spliced = !firstGenerate && !oldSel.empty()
+        && spliceGeneratedSelection(recordedClip, previous, oldSel, newSel, edit, groove);
+    if (spliced)
+        effectsInspector.setEdit(edit, juce::dontSendNotification);
     const double bpm = processorRef.hostBpm.load();
-    recordedClip.bpm = prevBpm > 0.0 ? prevBpm
-                     : (bpm > 0.0 ? bpm : processorRef.freeBpm.load());
+    if (recordedClip.bpm <= 0.0)
+        recordedClip.bpm = prevBpm > 0.0 ? prevBpm
+                         : (bpm > 0.0 ? bpm : processorRef.freeBpm.load());
     hasRecording = true;
     selectedIdx = -1;
     fileList.setSelectedIndex(-1, juce::dontSendNotification);
@@ -2980,6 +3162,9 @@ void MidiToolkitEditor::regenerateGeneratedClip(const GrooveParams& groove)
         applyLayoutState();
     if (!recordedClip.notes.empty())
         rollEditor.setClip(recordedClip, effectsInspector.getEdit(), effectsInspector.getGroove());
+    // Restore after the roll is built so the highlight doesn't scope this pass.
+    if (spliced && !newSel.empty())
+        rollEditor.setSelectedNoteIds(std::move(newSel));
 }
 
 void MidiToolkitEditor::selectIndex(int index)

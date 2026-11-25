@@ -3405,6 +3405,15 @@ void FileListPanel::ListContent::mouseDown(const juce::MouseEvent& e)
                 m.addItem(100 + i, "Show in Finder Location " + juce::String(i + 1));
         }
         m.addItem(2, "Copy to Folder...");
+        juce::PopupMenu kinds;
+        for (int i = 0; i < kNumClipKinds; ++i)
+        {
+            const auto k = (ClipKind) i;
+            if (k == ClipKind::Unsure)
+                continue;
+            kinds.addItem(20 + i, clipKindName(k));
+        }
+        m.addSubMenu("Set Kind", kinds);
         m.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(this)
                              .withMousePosition(),
             [this, locs, file = entry.file](int result)
@@ -3415,6 +3424,8 @@ void FileListPanel::ListContent::mouseDown(const juce::MouseEvent& e)
                     owner.onRevealFile(juce::File(locs[result - 100]));
                 else if (result == 2 && owner.onCopyFileToFolder)
                     owner.onCopyFileToFolder(file);
+                else if (result >= 20 && result < 20 + kNumClipKinds && owner.onSetKind)
+                    owner.onSetKind(file, (ClipKind) (result - 20));
             });
         return;
     }

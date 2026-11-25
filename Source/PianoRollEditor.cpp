@@ -538,14 +538,22 @@ std::vector<int> PianoRollEditor::noteIdsInScope() const
     std::vector<int> ids;
     if (!hasClip)
         return ids;
-    const bool selected = !selection.empty();
-    for (const auto& n : resolved.notes)
+    if (!selection.empty())
     {
-        if (selected && selection.count(n.id) == 0)
-            continue;
-        ids.push_back(n.id);
+        ids.assign(selection.begin(), selection.end());
+        return ids;
     }
+    for (const auto& n : resolved.notes)
+        ids.push_back(n.id);
     return ids;
+}
+
+void PianoRollEditor::setSelectedNoteIds(std::set<int> ids)
+{
+    selection = std::move(ids);
+    rollContent.repaint();
+    velocityLane.repaint();
+    gutter.repaint();
 }
 
 void PianoRollEditor::selectNotesInLoop()

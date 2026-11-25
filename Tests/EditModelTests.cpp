@@ -1,6 +1,7 @@
 #include "EditModel.h"
 #include "TestHelpers.h"
 #include <catch2/catch_approx.hpp>
+#include <cstdlib>
 
 using namespace pflow;
 using Catch::Approx;
@@ -798,4 +799,141 @@ TEST_CASE("C1 kick pattern classifies as Drums without drum filename", "[editmod
     };
     const auto s = makeStepClip(clip);
     CHECK(s.kind == ClipKind::Drums);
+}
+
+TEST_CASE("short chord stabs are Keys even when the notes are brief", "[editmodel][kind]")
+{
+    MidiClip clip;
+    clip.name = "Untitled_Stab";
+    clip.lengthBeats = 4.0;
+    for (double t : { 0.0, 2.0 })
+    {
+        clip.notes.push_back({ 60, 90, t, 0.15, 1 });
+        clip.notes.push_back({ 64, 85, t, 0.15, 1 });
+        clip.notes.push_back({ 67, 85, t, 0.15, 1 });
+    }
+    const auto s = makeStepClip(clip);
+    CHECK(s.kind == ClipKind::Keys);
+    CHECK(s.kindConfidence >= kKindConfidenceThreshold);
+}
+
+TEST_CASE("long pads are Keys", "[editmodel][kind]")
+{
+    MidiClip clip = test::makeClipWithNotes({
+        { 60, 80, 0.0, 4.0, 1 },
+        { 64, 75, 0.0, 4.0, 1 },
+        { 67, 75, 0.0, 4.0, 1 },
+    }, 4.0);
+    clip.name = "Untitled_Pad";
+    const auto s = makeStepClip(clip);
+    CHECK(s.kind == ClipKind::Keys);
+}
+
+TEST_CASE("low repeating chord cycle is Arp not Bass", "[editmodel][kind]")
+{
+    MidiClip clip;
+    clip.name = "Untitled_LowArp";
+    clip.lengthBeats = 4.0;
+    const int cycle[] = { 48, 52, 55 };
+    for (int i = 0; i < 12; ++i)
+        clip.notes.push_back({ cycle[i % 3], 90, i * 0.25, 0.2, 1 });
+    const auto s = makeStepClip(clip);
+    CHECK(s.kind == ClipKind::Arp);
+    CHECK(s.kindConfidence >= kKindConfidenceThreshold);
+}
+
+TEST_CASE("octave jumping bass without a chord cycle stays Bass", "[editmodel][kind]")
+{
+    MidiClip clip;
+    clip.name = "Untitled_Octave";
+    clip.lengthBeats = 4.0;
+    for (int i = 0; i < 8; ++i)
+        clip.notes.push_back({ (i % 2) == 0 ? 36 : 48, 100, i * 0.5, 0.4, 1 });
+    const auto s = makeStepClip(clip);
+    CHECK(s.kind == ClipKind::Bass);
+}
+
+TEST_CASE("irregular high stepwise line is Lead", "[editmodel][kind]")
+{
+    MidiClip clip;
+    clip.name = "Untitled_Topline";
+    clip.lengthBeats = 4.0;
+    const int pitches[] = { 72, 74, 76, 74, 77, 79, 76 };
+    const double starts[] = { 0.0, 0.4, 1.1, 1.35, 2.2, 2.9, 3.4 };
+    const double lens[] = { 0.3, 0.55, 0.2, 0.7, 0.4, 0.25, 0.5 };
+    for (int i = 0; i < 7; ++i)
+        clip.notes.push_back({ pitches[i], 96, starts[i], lens[i], 1 });
+    const auto s = makeStepClip(clip);
+    CHECK(s.kind == ClipKind::Lead);
+}
+
+TEST_CASE("a mixed clip with no clear role is Unsure", "[editmodel][kind]")
+{
+    MidiClip clip = test::makeClipWithNotes({
+        { 60, 80, 0.0, 0.5, 1 },
+        { 72, 80, 2.0, 0.5, 1 },
+    }, 4.0);
+    clip.name = "Untitled_Mixed";
+    const auto s = makeStepClip(clip);
+    CHECK(s.kind == ClipKind::Unsure);
+    CHECK(s.kindConfidence < kKindConfidenceThreshold);
+}
+
+TEST_CASE("optional local kind corpus prints a confusion matrix", "[kind][corpus]")
+{
+    juce::File root;
+    if (const char* env = std::getenv("MIDITOOLKIT_KIND_CORPUS"))
+        root = juce::File(env);
+    if (!root.isDirectory())
+        root = juce::File::getCurrentWorkingDirectory().getChildFile("Tests/fixtures/kind-corpus");
+    if (!root.isDirectory())
+        SKIP("No kind corpus. Set MIDITOOLKIT_KIND_CORPUS to a folder with Drums, Keys, Arp, Lead, and Bass.");
+
+    const ClipKind expectedKinds[] = {
+        ClipKind::Drums, ClipKind::Keys, ClipKind::Arp, ClipKind::Lead, ClipKind::Bass
+    };
+    int confusion[kNumClipKinds][kNumClipKinds] = {};
+    int seen = 0;
+    for (ClipKind expected : expectedKinds)
+    {
+        const auto dir = root.getChildFile(clipKindName(expected));
+        if (!dir.isDirectory())
+            continue;
+        for (const auto& file : dir.findChildFiles(juce::File::findFiles, false, "*.mid"))
+        {
+            StepClip clip;
+            try
+            {
+                clip = makeStepClip(parseMidiFile(file));
+            }
+            catch (...)
+            {
+                continue;
+            }
+            const int got = juce::jlimit(0, kNumClipKinds - 1, (int) clip.kind);
+            ++confusion[(int) expected][got];
+            ++seen;
+        }
+    }
+    if (seen == 0)
+        SKIP("Kind corpus folders are empty");
+
+    juce::String report = "kind confusion (row = expected):\n";
+    for (ClipKind expected : expectedKinds)
+    {
+        report += clipKindName(expected);
+        report += ":";
+        for (int got = 0; got < kNumClipKinds; ++got)
+        {
+            if (confusion[(int) expected][got] == 0)
+                continue;
+            report += " ";
+            report += clipKindName((ClipKind) got);
+            report += "=";
+            report += juce::String(confusion[(int) expected][got]);
+        }
+        report += "\n";
+    }
+    WARN(report);
+    CHECK(seen > 0);
 }

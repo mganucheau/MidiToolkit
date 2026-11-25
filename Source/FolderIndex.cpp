@@ -56,6 +56,7 @@ FolderIndexEntry clipToEntry(const StepClip& clip)
     e.name = clip.name;
     e.kind = (int) clip.kind;
     e.kindConfidence = clip.kindConfidence;
+    e.kindPinned = clip.kindPinned;
     e.hasDrumContent = clip.hasDrumContent;
     e.tagMask = clip.tagMask;
     e.root = clip.root;
@@ -285,6 +286,44 @@ FolderIndex FolderIndex::fromClips(const juce::File& root, bool recursive,
     return idx;
 }
 
+void FolderIndex::retainPinnedFrom(const FolderIndex& previous)
+{
+    if (previous.files.empty())
+        return;
+    for (auto& file : files)
+    {
+        for (const auto& old : previous.files)
+        {
+            if (!old.kindPinned || old.path != file.path)
+                continue;
+            file.kind = old.kind;
+            file.kindConfidence = juce::jmax(old.kindConfidence, 100);
+            file.kindPinned = true;
+            break;
+        }
+    }
+}
+
+void FolderIndex::pinKind(const juce::String& path, ClipKind kind)
+{
+    for (auto& file : files)
+    {
+        if (file.path != path)
+            continue;
+        file.kind = (int) kind;
+        file.kindConfidence = 100;
+        file.kindPinned = true;
+        return;
+    }
+    FolderIndexEntry e;
+    e.path = path;
+    e.name = juce::File(path).getFileNameWithoutExtension();
+    e.kind = (int) kind;
+    e.kindConfidence = 100;
+    e.kindPinned = true;
+    files.push_back(std::move(e));
+}
+
 StepClip FolderIndex::entryToClip(const FolderIndexEntry& e)
 {
     StepClip c;
@@ -295,8 +334,12 @@ StepClip FolderIndex::entryToClip(const FolderIndexEntry& e)
     if (kind < 0 || kind >= kNumClipKinds)
         kind = (int) ClipKind::Lead;
     c.kind = (ClipKind) kind;
-    applyFilenameKindTag(c);
+    c.kindPinned = e.kindPinned;
     c.kindConfidence = juce::jlimit(0, 100, e.kindConfidence);
+    if (e.kindPinned)
+        c.kindConfidence = juce::jmax(c.kindConfidence, 100);
+    else
+        applyFilenameKindTag(c);
     c.hasDrumContent = e.hasDrumContent;
     c.tagMask = e.tagMask;
     c.root = e.root;
@@ -323,7 +366,7 @@ bool FolderIndex::save() const
 {
     juce::MemoryOutputStream out;
     out.writeInt((int) 0x4D424958);
-    out.writeInt(3); // v3: Keys/Arp kinds + keyword-first tagging
+    out.writeInt(4); // v4: kindPinned per file
     writeString(out, rootPath);
     out.writeBool(recursive);
     out.writeInt64(scannedAtMs);
@@ -349,6 +392,7 @@ bool FolderIndex::save() const
         out.writeInt(f.noteCount);
         out.writeInt(f.difNotes);
         out.writeInt(f.complexity);
+        out.writeBool(f.kindPinned);
     }
     return indexFileFor(juce::File(rootPath), recursive)
         .replaceWithData(out.getData(), out.getDataSize());
@@ -369,7 +413,7 @@ std::optional<FolderIndex> FolderIndex::load(const juce::File& root, bool recurs
         return std::nullopt;
     const int version = in.readInt();
     // v3 remapped kinds (Piano→Keys, added Arp). Older caches still load; keywords re-tag on read.
-    if (version != 1 && version != 2 && version != 3)
+    if (version != 1 && version != 2 && version != 3 && version != 4)
         return std::nullopt;
 
     FolderIndex idx;
@@ -411,6 +455,8 @@ std::optional<FolderIndex> FolderIndex::load(const juce::File& root, bool recurs
         e.noteCount = in.readInt();
         e.difNotes = in.readInt();
         e.complexity = in.readInt();
+        if (version >= 4)
+            e.kindPinned = in.readBool();
         if (e.path.isNotEmpty())
             idx.files.push_back(std::move(e));
     }

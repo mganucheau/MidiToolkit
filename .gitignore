@@ -8,6 +8,9 @@ cmake-build-*/
 *~
 .DS_Store
 
+# Optional local MIDI used to score kind detection. Not part of the repo.
+Tests/fixtures/kind-corpus/
+
 # Local plugin bundles (build outputs; do not commit)
 *.vst3/
 *.component/

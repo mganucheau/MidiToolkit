@@ -16,6 +16,7 @@ struct FolderIndexEntry
     juce::int64 sizeBytes = 0;
     int kind = (int) ClipKind::Lead;
     int kindConfidence = 50;
+    bool kindPinned = false;
     bool hasDrumContent = false;
     uint16_t tagMask = 0;
     int root = -1;
@@ -61,6 +62,10 @@ struct FolderIndex
 
     static FolderIndex fromClips(const juce::File& root, bool recursive,
                                  const std::vector<StepClip>& clips);
+    /** Copy user-pinned kinds from a previous index onto matching paths. */
+    void retainPinnedFrom(const FolderIndex& previous);
+    /** Remember a user kind for one file. */
+    void pinKind(const juce::String& path, ClipKind kind);
     static StepClip entryToClip(const FolderIndexEntry& e);
     static std::vector<StepClip> toClips(const FolderIndex& idx);
 

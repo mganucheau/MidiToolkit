@@ -31,7 +31,7 @@ EffectsInspector::EffectsInspector()
     , arpFormRow("Form", arpFormPopup)
     , arpShapeRow("Type", arpShapePopup)
     , arpStyleRow("Style", arpStylePopup)
-    , arpGenreRow("Genre", arpGenrePopup)
+    , arpGenreRow("Style", arpGenrePopup)
     , arpRateRow("Speed", arpRatePopup)
     , arpMotionRow("Motion", arpMotionPopup)
     , arpDensitySl("Density", 0, 100, 100, false)
@@ -41,7 +41,7 @@ EffectsInspector::EffectsInspector()
     , melodyLengthRow("Length", melodyLengthPopup)
     , melodyFormRow("Form", melodyFormPopup)
     , melodyStyleRow("Style", melodyStylePopup)
-    , melodyGenreRow("Genre", melodyGenrePopup)
+    , melodyGenreRow("Style", melodyGenrePopup)
     , melodyContourRow("Motion", melodyContourPopup)
     , melodySpeedRow("Speed", melodySpeedPopup)
     , chordsGenerateRow({}, chordsGenerateBtn)
@@ -53,13 +53,13 @@ EffectsInspector::EffectsInspector()
     , chordFormRow("Form", chordFormPopup)
     , chordVoicingRow("Voicing", chordVoicingPopup)
     , chordColorRow("Style", chordColorPopup)
-    , chordGenreRow("Genre", chordGenrePopup)
+    , chordGenreRow("Style", chordGenrePopup)
     , chordRhythmRow("Rhythm", chordRhythmPopup)
     , bassGenerateRow({}, bassGenerateBtn)
     , bassInputRow("Input", bassInputSwitch)
     , bassTypeRow("Type", bassTypePopup)
     , bassStyleRow("Style", bassStylePopup)
-    , bassGenreRow("Genre", bassGenrePopup)
+    , bassGenreRow("Style", bassGenrePopup)
     , bassSpeedRow("Speed", bassSpeedPopup)
     , bassLengthRow("Length", bassLengthPopup)
     , bassFormRow("Form", bassFormPopup)
@@ -640,33 +640,17 @@ EffectsInspector::EffectsInspector()
             notifyGroove();
         };
         arpDensitySl.setTooltip("How many notes in the 16-step pattern, spaced evenly on the Speed grid");
-        arpGenerateBtn.setTooltip("Roll a new pattern into the piano roll");
+        arpGenerateBtn.setTooltip("Roll a new pattern with the current settings");
         arpGenerateBtn.onClick = [this, rollGenerateSeed]
         {
             groove.arpEnabled = true;
             groove.melodyEnabled = groove.chordsEnabled = groove.bassEnabled = groove.drumsEnabled = false;
-            auto& rng = juce::Random::getSystemRandom();
             rollGenerateSeed(groove.arpVariation, groove.arpNonce);
-            groove.arpStyleIndex = rng.nextInt((int) MelodyStyle::Count);
-            groove.arpMotionIndex = rng.nextInt((int) MelodyContour::Count);
-            groove.arpShapeIndex = rng.nextInt((int) ArpShape::Count);
-            // Prefer straight grids so Generate still feels like an arp.
-            static constexpr int kArpRates[] = {
-                (int) DelayTime::Quarter,
-                (int) DelayTime::Eighth,
-                (int) DelayTime::Sixteenth,
-                (int) DelayTime::ThirtySecond
-            };
-            groove.arpRateIndex = kArpRates[rng.nextInt(4)];
-            groove.arpFormIndex = (int) GeneratorForm::Auto;
-            groove.arpDensity = 50 + rng.nextInt(51); // 8..16 of 16 steps
             setGroove(groove);
             notifyGroove();
             if (onGeneratorGenerated) onGeneratorGenerated(0);
         };
         arpSec.addRow(&arpInputRow, kRowMinH, [this] { return groove.arpInput; });
-        arpSec.addRow(&arpShapeRow, kRowMinH, [this] { return groove.arpEnabled; });
-        arpSec.addRow(&arpStyleRow, kRowMinH, [this] { return groove.arpEnabled; });
         arpSec.addRow(&arpGenreRow, kRowMinH, [this] { return groove.arpEnabled; });
         arpSec.addRow(&arpRateRow, kRowMinH, [this] { return groove.arpEnabled; });
         arpSec.addRow(&arpMotionRow, kRowMinH, [this] { return groove.arpEnabled; });
@@ -738,25 +722,17 @@ EffectsInspector::EffectsInspector()
             groove.melodyInput = melodyInputSwitch.getToggleState();
             notifyGroove();
         };
-        melodyGenerateBtn.setTooltip("Roll a new melody into the piano roll");
+        melodyGenerateBtn.setTooltip("Roll a new melody with the current settings");
         melodyGenerateBtn.onClick = [this, rollGenerateSeed]
         {
             groove.melodyEnabled = true;
             groove.arpEnabled = groove.chordsEnabled = groove.bassEnabled = groove.drumsEnabled = false;
-            auto& rng = juce::Random::getSystemRandom();
             rollGenerateSeed(groove.melodyVariation, groove.melodyNonce);
-            groove.melodyStyleIndex = rng.nextInt((int) MelodyStyle::Count);
-            groove.melodyContourIndex = rng.nextInt((int) MelodyContour::Count);
-            groove.melodySpeedIndex = rng.nextInt((int) MelodySpeed::Count);
-            groove.melodyTypeIndex = rng.nextInt((int) PhraseType::Count);
-            groove.melodyFormIndex = (int) GeneratorForm::Auto;
             setGroove(groove);
             notifyGroove();
             if (onGeneratorGenerated) onGeneratorGenerated(1);
         };
         melodySec.addRow(&melodyInputRow, kRowMinH, [this] { return groove.melodyInput; });
-        melodySec.addRow(&melodyTypeRow, kRowMinH, [this] { return groove.melodyEnabled; });
-        melodySec.addRow(&melodyStyleRow, kRowMinH, [this] { return groove.melodyEnabled; });
         melodySec.addRow(&melodyGenreRow, kRowMinH, [this] { return groove.melodyEnabled; });
         melodySec.addRow(&melodySpeedRow, kRowMinH, [this] { return groove.melodyEnabled; });
         melodySec.addRow(&melodyContourRow, kRowMinH, [this] { return groove.melodyEnabled; });
@@ -836,26 +812,17 @@ EffectsInspector::EffectsInspector()
             groove.chordsInput = chordsInputSwitch.getToggleState();
             notifyGroove();
         };
-        chordsGenerateBtn.setTooltip("Roll a new chord pattern into the piano roll");
+        chordsGenerateBtn.setTooltip("Roll a new chord pattern with the current settings");
         chordsGenerateBtn.onClick = [this, rollGenerateSeed]
         {
             groove.chordsEnabled = true;
             groove.arpEnabled = groove.melodyEnabled = groove.bassEnabled = groove.drumsEnabled = false;
-            auto& rng = juce::Random::getSystemRandom();
             rollGenerateSeed(groove.chordVariation, groove.chordNonce);
-            groove.chordColorIndex = rng.nextInt((int) ChordColor::Count);
-            groove.chordVoicingIndex = rng.nextInt((int) ChordVoicing::Count);
-            groove.chordRhythmIndex = rng.nextInt((int) ChordRhythm::Count);
-            groove.chordMotionIndex = rng.nextInt((int) MelodyContour::Count);
-            groove.chordSpeedIndex = rng.nextInt((int) MelodySpeed::Count);
-            groove.chordFormIndex = (int) GeneratorForm::Auto;
             setGroove(groove);
             notifyGroove();
             if (onGeneratorGenerated) onGeneratorGenerated(2);
         };
         chordsSec.addRow(&chordsInputRow, kRowMinH, [this] { return groove.chordsInput; });
-        chordsSec.addRow(&chordTypeRow, kRowMinH, [this] { return groove.chordsEnabled; });
-        chordsSec.addRow(&chordColorRow, kRowMinH, [this] { return groove.chordsEnabled; });
         chordsSec.addRow(&chordGenreRow, kRowMinH, [this] { return groove.chordsEnabled; });
         chordsSec.addRow(&chordSpeedRow, kRowMinH, [this] { return groove.chordsEnabled; });
         chordsSec.addRow(&chordMotionRow, kRowMinH, [this] { return groove.chordsEnabled; });
@@ -919,25 +886,17 @@ EffectsInspector::EffectsInspector()
             groove.bassInput = bassInputSwitch.getToggleState();
             notifyGroove();
         };
-        bassGenerateBtn.setTooltip("Roll a new bass pattern into the piano roll");
+        bassGenerateBtn.setTooltip("Roll a new bass pattern with the current settings");
         bassGenerateBtn.onClick = [this, rollGenerateSeed]
         {
             groove.bassEnabled = true;
             groove.arpEnabled = groove.melodyEnabled = groove.chordsEnabled = groove.drumsEnabled = false;
-            auto& rng = juce::Random::getSystemRandom();
             rollGenerateSeed(groove.bassVariation, groove.bassNonce);
-            groove.bassStyleIndex = rng.nextInt((int) MelodyStyle::Count);
-            groove.bassMotionIndex = rng.nextInt((int) BassMotion::Count);
-            groove.bassSpeedIndex = rng.nextInt((int) MelodySpeed::Count);
-            groove.bassTypeIndex = rng.nextInt((int) PhraseType::Count);
-            groove.bassFormIndex = (int) GeneratorForm::Auto;
             setGroove(groove);
             notifyGroove();
             if (onGeneratorGenerated) onGeneratorGenerated(3);
         };
         bassSec.addRow(&bassInputRow, kRowMinH, [this] { return groove.bassInput; });
-        bassSec.addRow(&bassTypeRow, kRowMinH, [this] { return groove.bassEnabled; });
-        bassSec.addRow(&bassStyleRow, kRowMinH, [this] { return groove.bassEnabled; });
         bassSec.addRow(&bassGenreRow, kRowMinH, [this] { return groove.bassEnabled; });
         bassSec.addRow(&bassSpeedRow, kRowMinH, [this] { return groove.bassEnabled; });
         bassSec.addRow(&bassMotionRow, kRowMinH, [this] { return groove.bassEnabled; });
@@ -973,17 +932,12 @@ EffectsInspector::EffectsInspector()
             groove.drumFormIndex = juce::jlimit(0, (int) GeneratorForm::Count - 1, idx);
             notifyGroove();
         };
-        drumGenerateBtn.setTooltip("Roll a new drum groove into the piano roll");
+        drumGenerateBtn.setTooltip("Roll a new drum groove with the current settings");
         drumGenerateBtn.onClick = [this, rollGenerateSeed]
         {
             groove.drumsEnabled = true;
             groove.arpEnabled = groove.melodyEnabled = groove.chordsEnabled = groove.bassEnabled = false;
-            auto& rng = juce::Random::getSystemRandom();
             rollGenerateSeed(groove.drumVariation, groove.drumNonce);
-            groove.drumSpeedIndex = rng.nextInt((int) MelodySpeed::Count);
-            groove.drumFormIndex = (int) GeneratorForm::Auto;
-            groove.drumDensity = 30 + rng.nextInt(61);
-            groove.drumFill = 15 + rng.nextInt(56);
             setGroove(groove);
             notifyGroove();
             if (onGeneratorGenerated) onGeneratorGenerated(4);

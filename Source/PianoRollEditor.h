@@ -113,6 +113,7 @@ public:
     void setScalePlacement(ScalePlacement placement);
     bool hasSelection() const { return !selection.empty(); }
     const std::set<int>& selectedNoteIds() const { return selection; }
+    void setSelectedNoteIds(std::set<int> ids);
     double loopStart() const { return loopStartStep; }
     double loopEnd() const { return loopEndStep; }
     const GrooveParams& currentGroove() const { return groove; }

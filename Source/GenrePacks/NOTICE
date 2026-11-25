@@ -1,0 +1,14 @@
+MidiToolkit genre packs were written for this project.
+
+beat-gen (https://github.com/glebis/beat-gen) is MIT-licensed and was read
+as a reference for house, techno, breakbeat, and dnb drum roles. The step
+grids in these JSON files were rewritten for MidiToolkit and are not a copy
+of genre-templates.js. Attribution for that reference:
+
+  Copyright (c) beat-gen contributors
+  Licensed under the MIT License.
+
+The drum patterns in gvellut/dmp_midi come from published books and are not
+included here.
+
+TwDover/GenreGrid is GPL-3.0. None of its code or JSON is included here.

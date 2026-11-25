@@ -131,6 +131,14 @@ juce_add_binary_data(MidiToolkitAssets
         Resources/Fonts/Inter-Bold.ttf
         Resources/Fonts/JetBrainsMono-Regular.ttf
         Resources/Fonts/JetBrainsMono-Medium.ttf
+        Source/GenrePacks/house.json
+        Source/GenrePacks/breakbeat.json
+        Source/GenrePacks/dub.json
+        Source/GenrePacks/techno.json
+        Source/GenrePacks/funk.json
+        Source/GenrePacks/reggae.json
+        Source/GenrePacks/dubtechno.json
+        Source/GenrePacks/dnb.json
 )
 
 set(MIDITOOLKIT_SOURCES
@@ -141,6 +149,7 @@ set(MIDITOOLKIT_SOURCES
     Source/EditModel.cpp
     Source/GrooveEngine.cpp
     Source/GeneratorEngines.cpp
+    Source/GenrePacks.cpp
     Source/LiveMidiFx.cpp
     Source/UiAtoms.cpp
     Source/TransportBar.cpp
@@ -227,6 +236,7 @@ if(MIDITOOLKIT_BUILD_TESTS)
         Tests/FolderIndexTests.cpp
         Tests/ScanEfficiencyTests.cpp
         Tests/SnapshotTests.cpp
+        Tests/GenrePackTests.cpp
     )
     target_link_libraries(MidiToolkitTests PRIVATE
         MidiToolkit
