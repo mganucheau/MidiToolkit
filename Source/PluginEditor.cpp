@@ -2024,9 +2024,7 @@ void MidiToolkitEditor::rescanFolder(bool keepSelection, const juce::String& pre
                 // Always enumerate first, then parse in parallel. Recursive "Scan all"
                 // on Midi_Parsed (~411k) is still heavy — progress keeps UI alive.
                 auto files = collectMidiFiles(dir, recursive);
-                int total = files.size();
-                if (total < 0)
-                    total = 0;
+                const int total = files.size();
                 found.resize((size_t) total);
                 if (safe != nullptr)
                 {
@@ -3093,14 +3091,8 @@ GrooveParams MidiToolkitEditor::selectedGroove() const
 
 void MidiToolkitEditor::regenerateGeneratedClip(const GrooveParams& groove)
 {
-    if (recording || lastGeneratedPart < 0 || regeneratingClip)
+    if (recording || lastGeneratedPart < 0)
         return;
-    regeneratingClip = true;
-    struct ResetFlag
-    {
-        bool& flag;
-        ~ResetFlag() { flag = false; }
-    } reset { regeneratingClip };
 
     const bool firstGenerate = !hasRecording
         || !recordedClip.filePath.startsWith("generator://");

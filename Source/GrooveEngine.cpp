@@ -1348,10 +1348,7 @@ std::vector<RollNote> applyGroove(const std::vector<RollNote>& notes, const Groo
         rest.insert(rest.end(), processed.begin(), processed.end());
         std::stable_sort(rest.begin(), rest.end(), [](const RollNote& a, const RollNote& b)
         {
-            const bool aFin = std::isfinite(a.start);
-            const bool bFin = std::isfinite(b.start);
-            if (aFin != bFin) return aFin;
-            if (aFin && std::abs(a.start - b.start) > 1.0e-9) return a.start < b.start;
+            if (std::abs(a.start - b.start) > 1.0e-9) return a.start < b.start;
             if (a.pitch != b.pitch) return a.pitch < b.pitch;
             return a.id < b.id;
         });

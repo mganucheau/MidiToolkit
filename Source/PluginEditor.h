@@ -421,7 +421,6 @@ private:
     StepClip recordedClip;
     /** Part index from the last Generate; -1 = take/import (do not live-regenerate). */
     int lastGeneratedPart = -1;
-    bool regeneratingClip = false;
     void regenerateGeneratedClip(const GrooveParams& groove);
     int savedNonPassW = 0;
     int savedNonPassH = 0;
