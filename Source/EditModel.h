@@ -71,6 +71,10 @@ struct StepClip
 {
     juce::String name;
     juce::String filePath;
+    /** Size and mtime captured while scanning, so later passes don't stat the file again. */
+    bool   fileMetaKnown = false;
+    juce::int64 fileBytes = 0;
+    juce::int64 fileModMs = 0;
     ClipKind kind = ClipKind::Lead;
     /** 0..100 confidence in `kind`. Low values mean the nearest label is a guess. */
     int    kindConfidence = 50;
@@ -342,7 +346,7 @@ struct ClipEdit
     Mode mode      = Mode::Ionian;  // displayed as "Major"
     /** Bit i set = pitch-class i is kept (default: all 12 on). */
     uint16_t noteFilterMask = 0x0FFF;
-    NoteFilterType noteFilterType = NoteFilterType::Mute;
+    NoteFilterType noteFilterType = NoteFilterType::Fold;
     std::map<int, NoteMove> moves;  // per-note manual moves keyed by note id
     /** Empty bars removed by Trim (any position, including middle gaps).
         Sorted ascending. Legacy trimLead/trimTail are migrated on load. */

@@ -347,7 +347,7 @@ void HostParams::create(juce::AudioProcessor& owner)
     }
     {
         auto* p = new juce::AudioParameterChoice(pid("tk_filter_type"), "Filter Type",
-                                                 juce::StringArray { "Mute", "Fold" }, 0);
+                                                 juce::StringArray { "Mute", "Fold" }, 1);
         owner.addParameter(p);
         add(p, Target::Edit,
             [](const GrooveParams&, const ClipEdit& e, double)
@@ -466,6 +466,9 @@ void HostParams::create(juce::AudioProcessor& owner)
                     (int) GeneratorForm::Auto, &GrooveParams::drumFormIndex);
     addGrooveInt(owner, "gen_drums_density", "Drums Density", 0, 100, 50, &GrooveParams::drumDensity);
     addGrooveInt(owner, "gen_drums_fill", "Drums Fill", 0, 100, 35, &GrooveParams::drumFill);
+    addGrooveInt(owner, "gen_melody_density", "Melody Density", 0, 100, 100, &GrooveParams::melodyDensity);
+    addGrooveInt(owner, "gen_chords_density", "Chords Density", 0, 100, 100, &GrooveParams::chordDensity);
+    addGrooveInt(owner, "gen_bass_density", "Bass Density", 0, 100, 100, &GrooveParams::bassDensity);
 
     // Listen only after everything exists so construction never self-triggers.
     dirtyCount_ = (int) bindings_.size() + 1;

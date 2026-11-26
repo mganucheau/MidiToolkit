@@ -115,6 +115,7 @@ public:
     BrowserSearch getFilter() const;
     void setCriteria(const BrowserSearch&);
 
+    std::function<void()> onClaimKeys;
     std::function<void()> onOpenFolder;
     std::function<void(const juce::String&)> onPickDir;
     std::function<void(const juce::String&)> onRemoveDir;
@@ -133,6 +134,8 @@ public:
     void setCurrentClipCount(int n);
     void setStarredCount(int n);
     void setScanning(bool on);
+    /** Shown on the refresh tooltip while a scan or a saved-listing load is in progress. */
+    void setScanPhase(const juce::String& phase);
     /** True after a Scan (or a valid folder index) so the action reads Update. */
     void setScanFinished(bool finished);
     /** Optional "42/200" progress while a folder scan runs. */
@@ -280,6 +283,7 @@ private:
     bool scanning = false;
     bool scanFinished = false;
     int scanProgressDone = 0;
+    juce::String scanPhase;
     int scanProgressTotal = 0;
     bool filterOpen = false;
     bool filterApplyPending = false;
@@ -497,6 +501,8 @@ public:
     void setSearching(bool searching);
     /** Shown on the scanning overlay. `total <= 0` hides the bar. */
     void setScanProgress(int done, int total);
+    /** Replaces the ANALYZING title. Empty restores it. */
+    void setScanPhase(const juce::String& phase);
 
     void selectAdjacent(int direction);
     void grabBrowseFocus();
@@ -637,6 +643,7 @@ private:
     bool searching = false;
     int scanDone = 0;
     int scanTotal = 0;
+    juce::String scanPhase;
     double searchAnimT = 0.0;
     int lastViewX = 0;
 

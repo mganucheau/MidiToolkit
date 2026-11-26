@@ -35,6 +35,9 @@ EffectsInspector::EffectsInspector()
     , arpRateRow("Speed", arpRatePopup)
     , arpMotionRow("Motion", arpMotionPopup)
     , arpDensitySl("Density", 0, 100, 100, false)
+    , melodyDensitySl("Density", 0, 100, 100, false)
+    , chordDensitySl("Density", 0, 100, 100, false)
+    , bassDensitySl("Density", 0, 100, 100, false)
     , melodyGenerateRow({}, melodyGenerateBtn)
     , melodyInputRow("Input", melodyInputSwitch)
     , melodyTypeRow("Type", melodyTypePopup)
@@ -154,9 +157,9 @@ EffectsInspector::EffectsInspector()
     articulationStrengthSl.setTooltip("How strongly articulation reshapes phrasing");
     velocityRangeSl.setTooltip("Compress clip velocities into this MIDI range");
     sustainPopup.setTooltip("Generate sustain-pedal automation for preview and export");
-    complexitySl.setTooltip("Simplify or enrich the clip relative to its baseline complexity");
+    complexitySl.setTooltip("Simplify or enrich the line: passing tones and syncopation, or fewer of them. Stays in the same register");
     variationsSl.setTooltip("Cycle alternate slight takes of the clip");
-    revoiceSl.setTooltip("Revoice the notes being played: third in the bass, fifth in the bass, then an open voicing (Off = original)");
+    revoiceSl.setTooltip("Reorder the scale degrees across the same rhythms. Off keeps the original notes");
     tempoPopup.setTooltip("Halve or double playback tempo vs the clip / host");
     delayTimePopup.setTooltip("Delay tap spacing");
     delayAmountSl.setTooltip("How loud delayed repeats are");
@@ -505,7 +508,7 @@ EffectsInspector::EffectsInspector()
                     [this] { return edit.hasNoteFilter(); });
     pitchSec.addRow(&pitchRangeSl, [this] { return pitchRangeSl.idealHeight(); },
                     [this] { return edit.hasPitchRange(); });
-    pitchSec.addRow(&filterTypeRow, kRowMinH, [this] { return edit.hasNoteFilter(); });
+    pitchSec.addRow(&filterTypeRow, kRowMinH, [] { return true; });
 
     formSec.addRow(&complexitySl, kSliderRowH, [this] { return groove.complexityTarget >= 0; });
     formSec.addRow(&variationsSl, kSliderRowH, [this] { return groove.variationIndex > 0; });
@@ -653,7 +656,6 @@ EffectsInspector::EffectsInspector()
         arpSec.addRow(&arpInputRow, kRowMinH, [this] { return groove.arpInput; });
         arpSec.addRow(&arpGenreRow, kRowMinH, [this] { return groove.arpEnabled; });
         arpSec.addRow(&arpRateRow, kRowMinH, [this] { return groove.arpEnabled; });
-        arpSec.addRow(&arpMotionRow, kRowMinH, [this] { return groove.arpEnabled; });
         arpSec.addRow(&arpLengthRow, kRowMinH, [this] { return groove.arpEnabled; });
         arpSec.addRow(&arpFormRow, kRowMinH, [this] {
             // Visible when folded if Form is non-Auto or length is long enough for tiling.
@@ -734,8 +736,18 @@ EffectsInspector::EffectsInspector()
         };
         melodySec.addRow(&melodyInputRow, kRowMinH, [this] { return groove.melodyInput; });
         melodySec.addRow(&melodyGenreRow, kRowMinH, [this] { return groove.melodyEnabled; });
+        melodyDensitySl.onChange = [this](int v)
+        {
+            groove.melodyDensity = v;
+            const int notes = juce::jlimit(1, 16, 1 + juce::roundToInt((v / 100.0) * 15.0));
+            melodyDensitySl.valueText = juce::String(notes) + "/16";
+            notifyGroove();
+        };
+        melodyDensitySl.setTooltip("How many steps of the melody rhythm play, spaced evenly");
         melodySec.addRow(&melodySpeedRow, kRowMinH, [this] { return groove.melodyEnabled; });
-        melodySec.addRow(&melodyContourRow, kRowMinH, [this] { return groove.melodyEnabled; });
+        melodySec.addRow(&melodyDensitySl, kSliderRowH, [this] {
+            return groove.melodyEnabled && groove.melodyDensity != 100;
+        });
         melodySec.addRow(&melodyLengthRow, kRowMinH, [this] { return groove.melodyEnabled; });
         melodySec.addRow(&melodyFormRow, kRowMinH, [this] {
             return groove.melodyEnabled
@@ -824,8 +836,18 @@ EffectsInspector::EffectsInspector()
         };
         chordsSec.addRow(&chordsInputRow, kRowMinH, [this] { return groove.chordsInput; });
         chordsSec.addRow(&chordGenreRow, kRowMinH, [this] { return groove.chordsEnabled; });
+        chordDensitySl.onChange = [this](int v)
+        {
+            groove.chordDensity = v;
+            const int notes = juce::jlimit(1, 16, 1 + juce::roundToInt((v / 100.0) * 15.0));
+            chordDensitySl.valueText = juce::String(notes) + "/16";
+            notifyGroove();
+        };
+        chordDensitySl.setTooltip("How many steps of the chord rhythm play, spaced evenly");
         chordsSec.addRow(&chordSpeedRow, kRowMinH, [this] { return groove.chordsEnabled; });
-        chordsSec.addRow(&chordMotionRow, kRowMinH, [this] { return groove.chordsEnabled; });
+        chordsSec.addRow(&chordDensitySl, kSliderRowH, [this] {
+            return groove.chordsEnabled && groove.chordDensity != 100;
+        });
         chordsSec.addRow(&chordLengthRow, kRowMinH, [this] { return groove.chordsEnabled; });
         chordsSec.addRow(&chordFormRow, kRowMinH, [this] {
             return groove.chordsEnabled
@@ -898,8 +920,18 @@ EffectsInspector::EffectsInspector()
         };
         bassSec.addRow(&bassInputRow, kRowMinH, [this] { return groove.bassInput; });
         bassSec.addRow(&bassGenreRow, kRowMinH, [this] { return groove.bassEnabled; });
+        bassDensitySl.onChange = [this](int v)
+        {
+            groove.bassDensity = v;
+            const int notes = juce::jlimit(1, 16, 1 + juce::roundToInt((v / 100.0) * 15.0));
+            bassDensitySl.valueText = juce::String(notes) + "/16";
+            notifyGroove();
+        };
+        bassDensitySl.setTooltip("How many steps of the bass rhythm play, spaced evenly");
         bassSec.addRow(&bassSpeedRow, kRowMinH, [this] { return groove.bassEnabled; });
-        bassSec.addRow(&bassMotionRow, kRowMinH, [this] { return groove.bassEnabled; });
+        bassSec.addRow(&bassDensitySl, kSliderRowH, [this] {
+            return groove.bassEnabled && groove.bassDensity != 100;
+        });
         bassSec.addRow(&bassLengthRow, kRowMinH, [this] { return groove.bassEnabled; });
         bassSec.addRow(&bassFormRow, kRowMinH, [this] {
             return groove.bassEnabled
@@ -1099,7 +1131,7 @@ void EffectsInspector::resetPitchEditFields()
     edit.root = -1;
     edit.mode = Mode::Ionian;
     edit.noteFilterMask = 0x0FFF;
-    edit.noteFilterType = NoteFilterType::Mute;
+    edit.noteFilterType = NoteFilterType::Fold;
 }
 
 void EffectsInspector::resetPlaybackSection()
@@ -1270,10 +1302,9 @@ void EffectsInspector::refreshDependentEnables()
     delayFeedbackSl.setEnabled(delayOn);
     delayFeedbackSl.setAlpha(delayOn ? 1.0f : 0.38f);
 
-    const bool filterOn = edit.hasNoteFilter();
-    filterTypeRow.setEnabled(filterOn);
-    filterTypePopup.setEnabled(filterOn);
-    filterTypeRow.setAlpha(filterOn ? 1.0f : 0.38f);
+    filterTypeRow.setEnabled(true);
+    filterTypePopup.setEnabled(true);
+    filterTypeRow.setAlpha(1.0f);
 
     // Form tiles four sections — hide below 4 bars even when the section is open.
     const int four = (int) GeneratorLength::FourBars;
@@ -1464,6 +1495,17 @@ void EffectsInspector::setGroove(const GrooveParams& g, juce::NotificationType)
         const int notes = juce::jlimit(1, 16, 1 + juce::roundToInt((g.arpDensity / 100.0) * 15.0));
         arpDensitySl.valueText = juce::String(notes) + "/16";
     }
+    auto densityText = [](int v)
+    {
+        const int notes = juce::jlimit(1, 16, 1 + juce::roundToInt((v / 100.0) * 15.0));
+        return juce::String(notes) + "/16";
+    };
+    melodyDensitySl.setValue(g.melodyDensity, juce::dontSendNotification);
+    melodyDensitySl.valueText = densityText(g.melodyDensity);
+    chordDensitySl.setValue(g.chordDensity, juce::dontSendNotification);
+    chordDensitySl.valueText = densityText(g.chordDensity);
+    bassDensitySl.setValue(g.bassDensity, juce::dontSendNotification);
+    bassDensitySl.valueText = densityText(g.bassDensity);
     melodyInputSwitch.setToggleState(g.melodyInput, juce::dontSendNotification);
     melodyTypePopup.setIndex(juce::jlimit(0, (int) PhraseType::Count - 1, g.melodyTypeIndex),
                              juce::dontSendNotification);
@@ -2003,6 +2045,9 @@ void EffectsInspector::resized()
     drumGenerateRow.setFillWidth(true);
     pitchInputRow.setControlWidth(pitchInputSwitch.idealWidth());
     arpDensitySl.setSize(arpDensitySl.getWidth(), kControlH);
+    melodyDensitySl.setSize(melodyDensitySl.getWidth(), kControlH);
+    chordDensitySl.setSize(chordDensitySl.getWidth(), kControlH);
+    bassDensitySl.setSize(bassDensitySl.getWidth(), kControlH);
     drumDensitySl.setSize(drumDensitySl.getWidth(), kControlH);
     drumFillSl.setSize(drumFillSl.getWidth(), kControlH);
 

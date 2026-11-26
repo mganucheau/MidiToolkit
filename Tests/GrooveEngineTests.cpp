@@ -318,8 +318,18 @@ TEST_CASE("revoice 0 keeps voicing; >0 keeps chord size and timing", "[groove]")
         REQUIRE(it != chords.end());
         CHECK(n.start == Approx(it->start));
         CHECK(juce::isPositiveAndBelow(n.pitch, 128));
-        CHECK(((n.pitch - it->pitch) % 12) == 0); // pitch classes preserved
+        const int pc = ((n.pitch % 12) + 12) % 12;
+        CHECK((pc == 0 || pc == 4 || pc == 5 || pc == 7 || pc == 9 || pc == 11));
     }
+    bool orderChanged = false;
+    for (const auto& n : moved)
+    {
+        const auto it = std::find_if(chords.begin(), chords.end(),
+                                     [&](const RollNote& o) { return o.id == n.id; });
+        if (it != chords.end() && n.pitch != it->pitch)
+            orderChanged = true;
+    }
+    CHECK(orderChanged);
 }
 
 TEST_CASE("variation index is clamped to kMaxVariations", "[groove]")

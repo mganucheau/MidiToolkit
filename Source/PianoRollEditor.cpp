@@ -408,7 +408,7 @@ void PianoRollEditor::setClip(const StepClip& c, const ClipEdit& e, const Groove
     {
         if (!sameClip)
             selection.clear();
-        if (!sameClip)
+        if (!sameClip || resolved.bars != prevBars)
             resetLoopToClip();
         else
             setLoopSteps(loopStartStep, loopEndStep, false);

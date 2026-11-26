@@ -1819,6 +1819,9 @@ StepClip scanMidiBrowseMeta(const juce::File& file)
     StepClip s;
     s.name = file.getFileNameWithoutExtension();
     s.filePath = file.getFullPathName();
+    s.fileBytes = file.getSize();
+    s.fileModMs = file.getLastModificationTime().toMilliseconds();
+    s.fileMetaKnown = true;
     s.notesResident = false;
 
     juce::FileInputStream stream(file);

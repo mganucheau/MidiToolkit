@@ -54,7 +54,8 @@ public:
 private:
     void applyNativeWindowChrome();
     /** Async folder scan — never parses MIDI on the message thread. */
-    void rescanFolder(bool keepSelection, const juce::String& preferredPath = {});
+    void rescanFolder(bool keepSelection, const juce::String& preferredPath = {},
+                      bool forceRescan = false);
     /** Load every MIDI file under the current folder tree (flat list). */
     void scanAllFolders();
     void chooseFolder();
@@ -216,7 +217,7 @@ private:
                              const BrowserSearch& criteria, int savedIdx,
                              const juce::String& rootPath, bool showSearching);
 
-    enum class KeyNavTarget { Browser, Editor, Effects };
+    enum class KeyNavTarget { Browser, Editor, Effects, Sidebar };
     void claimKeyNav(KeyNavTarget target);
 
     const StepClip* selectedClip() const;
@@ -333,6 +334,22 @@ private:
     std::vector<juce::File> cachedMidiFiles;
     /** True after Scan has parsed this folder's MIDI into `clips`. */
     bool folderScanned = false;
+    /** Folder whose analyzed listing is currently in `clips`. */
+    juce::String listingRoot;
+    bool listingRecursive = false;
+    struct CachedFolderListing
+    {
+        std::vector<StepClip> clips;
+        std::vector<juce::File> subdirs;
+    };
+    /** Analyzed listings kept for this session so favorite folders reopen without a rescan. */
+    std::map<juce::String, CachedFolderListing> listingCache;
+    std::atomic<int> listingApplyEpoch { 0 };
+    static juce::String listingCacheKey(const juce::String& path, bool recursive);
+    void stashCurrentListing();
+    void applyLoadedListing(std::vector<StepClip> loaded, std::vector<juce::File> subdirs,
+                            const juce::File& dir, bool recursive, const juce::String& previousPath);
+    void setBrowseScanPhase(const juce::String& phase);
     /** True after "Scan all folders" — flat recursive MIDI list, no subfolder rows. */
     bool recursiveBrowse = false;
     struct DisplayRow

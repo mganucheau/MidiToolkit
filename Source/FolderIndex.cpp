@@ -1,6 +1,7 @@
 #include "FolderIndex.h"
 #include <cstring>
 #include <algorithm>
+#include <unordered_map>
 
 #if JUCE_WINDOWS
  #include <windows.h>
@@ -68,13 +69,21 @@ FolderIndexEntry clipToEntry(const StepClip& clip)
     e.difNotes = clip.difNotes;
     e.complexity = clip.complexity;
 
-    const juce::File f(clip.filePath);
-    if (f.existsAsFile())
+    if (clip.fileMetaKnown)
     {
-        e.modMs = f.getLastModificationTime().toMilliseconds();
-        e.sizeBytes = f.getSize();
-        if (e.name.isEmpty())
-            e.name = f.getFileNameWithoutExtension();
+        e.modMs = clip.fileModMs;
+        e.sizeBytes = clip.fileBytes;
+    }
+    else
+    {
+        const juce::File f(clip.filePath);
+        if (f.existsAsFile())
+        {
+            e.modMs = f.getLastModificationTime().toMilliseconds();
+            e.sizeBytes = f.getSize();
+            if (e.name.isEmpty())
+                e.name = f.getFileNameWithoutExtension();
+        }
     }
     return e;
 }
@@ -290,17 +299,24 @@ void FolderIndex::retainPinnedFrom(const FolderIndex& previous)
 {
     if (previous.files.empty())
         return;
+    std::unordered_map<std::string, const FolderIndexEntry*> pinned;
+    pinned.reserve(previous.files.size());
+    for (const auto& old : previous.files)
+    {
+        if (!old.kindPinned || old.path.isEmpty())
+            continue;
+        pinned.emplace(old.path.toStdString(), &old);
+    }
+    if (pinned.empty())
+        return;
     for (auto& file : files)
     {
-        for (const auto& old : previous.files)
-        {
-            if (!old.kindPinned || old.path != file.path)
-                continue;
-            file.kind = old.kind;
-            file.kindConfidence = juce::jmax(old.kindConfidence, 100);
-            file.kindPinned = true;
-            break;
-        }
+        const auto it = pinned.find(file.path.toStdString());
+        if (it == pinned.end())
+            continue;
+        file.kind = it->second->kind;
+        file.kindConfidence = juce::jmax(it->second->kindConfidence, 100);
+        file.kindPinned = true;
     }
 }
 
@@ -350,6 +366,9 @@ StepClip FolderIndex::entryToClip(const FolderIndexEntry& e)
     c.noteCount = juce::jmax(0, e.noteCount);
     c.difNotes = juce::jmax(0, e.difNotes);
     c.complexity = juce::jlimit(1, 100, e.complexity);
+    c.fileBytes = e.sizeBytes;
+    c.fileModMs = e.modMs;
+    c.fileMetaKnown = true;
     return c;
 }
 

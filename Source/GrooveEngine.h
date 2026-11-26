@@ -566,6 +566,8 @@ struct GrooveParams
     int melodyGenreIndex = (int) GeneratorGenre::House;
     int melodyContourIndex = (int) MelodyContour::Even;
     int melodySpeedIndex = (int) MelodySpeed::Medium;
+    /** 0..100 → how many of the 16 steps may play, spaced evenly. 100 keeps the style. */
+    int melodyDensity = 100;
     int melodyPhraseIndex = (int) MelodyPhrase::FourBars;
     int melodyLengthIndex = (int) GeneratorLength::FourBars;
     int melodyFormIndex = (int) GeneratorForm::Auto;
@@ -580,6 +582,8 @@ struct GrooveParams
     int chordGenreIndex = (int) GeneratorGenre::House;
     int chordTypeIndex = (int) PhraseType::Chord;
     int chordSpeedIndex = (int) MelodySpeed::Medium;
+    /** 0..100 → how many of the 16 steps may play, spaced evenly. 100 keeps the style. */
+    int chordDensity = 100;
     int chordMotionIndex = (int) MelodyContour::Even;
     int chordRhythmIndex = (int) ChordRhythm::Block;
     int chordLengthIndex = (int) GeneratorLength::FourBars;
@@ -593,6 +597,8 @@ struct GrooveParams
     int bassStyleIndex = (int) MelodyStyle::March;
     int bassGenreIndex = (int) GeneratorGenre::House;
     int bassSpeedIndex = (int) MelodySpeed::Medium;
+    /** 0..100 → how many of the 16 steps may play, spaced evenly. 100 keeps the style. */
+    int bassDensity = 100;
     int bassMotionIndex = (int) BassMotion::Pulse;
     int bassLengthIndex = (int) GeneratorLength::FourBars;
     int bassFormIndex = (int) GeneratorForm::Auto;

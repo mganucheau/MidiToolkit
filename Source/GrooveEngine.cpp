@@ -150,6 +150,7 @@ void applyGrooveSectionLock(const GrooveParams& locked, GrooveParams& target, ui
         target.melodyGenreIndex = locked.melodyGenreIndex;
         target.melodyContourIndex = locked.melodyContourIndex;
         target.melodySpeedIndex = locked.melodySpeedIndex;
+        target.melodyDensity = locked.melodyDensity;
         target.melodyPhraseIndex = locked.melodyPhraseIndex;
         target.melodyLengthIndex = locked.melodyLengthIndex;
         target.melodyFormIndex = locked.melodyFormIndex;
@@ -160,6 +161,7 @@ void applyGrooveSectionLock(const GrooveParams& locked, GrooveParams& target, ui
         target.chordVoicingIndex = locked.chordVoicingIndex;
         target.chordColorIndex = locked.chordColorIndex;
         target.chordGenreIndex = locked.chordGenreIndex;
+        target.chordDensity = locked.chordDensity;
         target.chordRhythmIndex = locked.chordRhythmIndex;
         target.chordLengthIndex = locked.chordLengthIndex;
         target.chordFormIndex = locked.chordFormIndex;
@@ -170,6 +172,7 @@ void applyGrooveSectionLock(const GrooveParams& locked, GrooveParams& target, ui
         target.bassMotionIndex = locked.bassMotionIndex;
         target.bassStyleIndex = locked.bassStyleIndex;
         target.bassGenreIndex = locked.bassGenreIndex;
+        target.bassDensity = locked.bassDensity;
         target.bassLengthIndex = locked.bassLengthIndex;
         target.bassFormIndex = locked.bassFormIndex;
         target.bassVariation = locked.bassVariation;
@@ -790,9 +793,10 @@ std::vector<RollNote> morphPianoOnce(const std::vector<RollNote>& notes, double 
                 if (wrap < best) { best = wrap; bassDeg = d; }
             }
         }
-        tryAddDegree(bassDeg + 6, top, 0.25 + 0.55 * amt); // 7th-ish
+        const int midReg = (bass + top) / 2;
+        tryAddDegree(bassDeg + 6, midReg, 0.25 + 0.55 * amt); // 7th, same register
         if (amt > 0.4)
-            tryAddDegree(bassDeg + 1, top + 4, 0.15 + 0.40 * amt); // 9th-ish
+            tryAddDegree(bassDeg + 1, midReg, 0.15 + 0.40 * amt); // 9th, same register
 
         // Anticipate a chord attack (syncopation).
         if ((h % 100u) < (uint32_t) (amt * 40.0) && g.start >= 1.0)
@@ -832,25 +836,55 @@ std::vector<RollNote> morphLineOnce(const std::vector<RollNote>& notes, double a
     const int root = rootPc >= 0 ? rootPc : 0;
     const int baseId = nextGeneratedId(notes, seed);
     int gen = 0;
-    for (const auto& n : notes)
+    std::vector<size_t> order(notes.size());
+    for (size_t i = 0; i < notes.size(); ++i)
+        order[i] = i;
+    std::sort(order.begin(), order.end(), [&](size_t a, size_t b)
     {
-        if (metricWeight(n.start) < 0.72)
+        return notes[a].start < notes[b].start;
+    });
+
+    for (size_t i = 0; i + 1 < order.size(); ++i)
+    {
+        const auto& a = notes[order[i]];
+        const auto& b = notes[order[i + 1]];
+        const double gap = b.start - a.start;
+        if (gap < 1.5 || gap > 8.0)
             continue;
-        const uint32_t h = knuthHash(n.id * 23 + seed);
-        if ((h % 100u) >= (uint32_t) (amt * 55.0))
+        const uint32_t h = knuthHash(a.id * 23 + seed + (int) i);
+        if ((h % 100u) >= (uint32_t) (amt * 70.0))
             continue;
-        // Approach note a scale step below, one 16th early.
-        int approach = n.pitch - 1;
-        if (rootPc >= 0)
-            approach = fitToScale(n.pitch - 2, root, mode);
-        RollNote a = n;
-        a.id = baseId + gen++;
-        a.pitch = juce::jlimit(0, 127, approach);
-        a.start = std::max(0.0, n.start - 1.0);
-        a.len = 0.75;
-        a.fileVelocity = juce::jmax(1, (int) std::lround(n.fileVelocity * 0.55));
-        a.moved = true;
-        out.push_back(a);
+        // Passing tone between two pitches, on the scale, in the same register.
+        const int mid = (a.pitch + b.pitch) / 2;
+        const int pass = rootPc >= 0 ? fitToScale(mid, root, mode) : mid;
+        if (pass == a.pitch || pass == b.pitch)
+            continue;
+        RollNote n = a;
+        n.id = baseId + gen++;
+        n.pitch = juce::jlimit(0, 127, pass);
+        n.start = a.start + gap * 0.5;
+        n.len = std::max(0.5, gap * 0.4);
+        n.fileVelocity = juce::jmax(1, (int) std::lround(a.fileVelocity * 0.6));
+        n.moved = true;
+        out.push_back(n);
+    }
+
+    // A few weak attacks move onto the offbeat. Pitches stay put.
+    for (auto& n : out)
+    {
+        if (n.id >= baseId)
+            continue;
+        if (metricWeight(n.start) >= 0.72)
+            continue;
+        const uint32_t h = knuthHash(n.id * 11 + seed);
+        if ((h % 100u) >= (uint32_t) (amt * 35.0))
+            continue;
+        const double nudged = std::max(0.0, n.start - 0.5);
+        if (std::abs(nudged - n.start) > 0.1)
+        {
+            n.start = nudged;
+            n.moved = true;
+        }
     }
     return out;
 }
@@ -1144,25 +1178,22 @@ std::vector<RollNote> applyMusicalVariation(std::vector<RollNote> notes, int var
     return found ? best : notes;
 }
 
-/** Revoice: each note keeps its pitch class and only moves by octaves.
-    amount 0 = original. Low values put the third in the bass (raise the root).
-    Mid values put the fifth in the bass. High values open the chord by an octave.
-    Run before timing transforms so swing cannot split a chord. */
-std::vector<RollNote> applyRevoice(const std::vector<RollNote>& notes, int amount)
+/** Revoice: keep each note's rhythm and register, and play the scale degrees
+    in a new order. amount 0 is the original line. */
+std::vector<RollNote> applyRevoice(const std::vector<RollNote>& notes, int amount,
+                                     int rootPc, Mode scaleMode)
 {
     amount = juce::jlimit(0, kMaxRevoice, amount);
     if (amount <= 0 || notes.empty())
         return notes;
 
-    // 1 = third in the bass, 2 = fifth in the bass. The top third also opens the voicing.
-    const int inversion = amount <= kMaxRevoice / 3 ? 1
-                         : amount <= (2 * kMaxRevoice) / 3 ? 2
-                         : 1;
-    const bool open = amount > (2 * kMaxRevoice) / 3;
+    const int root = rootPc >= 0 ? ((rootPc % 12) + 12) % 12
+                                 : ((notes.front().pitch % 12) + 12) % 12;
+    const Mode mode = scaleMode;
 
-    // Notes that start together, with a slightly wide window so a rolled chord still groups.
     std::vector<size_t> order(notes.size());
-    for (size_t i = 0; i < notes.size(); ++i) order[i] = i;
+    for (size_t i = 0; i < notes.size(); ++i)
+        order[i] = i;
     std::sort(order.begin(), order.end(), [&](size_t a, size_t b)
     {
         if (notes[a].start < notes[b].start) return true;
@@ -1170,62 +1201,48 @@ std::vector<RollNote> applyRevoice(const std::vector<RollNote>& notes, int amoun
         return notes[a].pitch < notes[b].pitch;
     });
 
-    struct Group { double start = 0.0; std::vector<size_t> indices; };
-    std::vector<Group> groups;
-    for (size_t idx : order)
+    auto degreeOf = [&](int pitch) -> int
     {
-        if (!groups.empty() && std::abs(notes[idx].start - groups.back().start) < 0.75)
-            groups.back().indices.push_back(idx);
-        else
-            groups.push_back({ notes[idx].start, { idx } });
-    }
-
-    std::vector<RollNote> out = notes;
-    auto shiftOctave = [](RollNote& note, int octaves)
-    {
-        const int p = juce::jlimit(0, 127, note.pitch + 12 * octaves);
-        if (p == note.pitch)
-            return;
-        note.pitch = p;
-        note.moved = true;
+        const int pc = ((pitch % 12) + 12) % 12;
+        const auto& iv = modeIntervals(mode);
+        int best = 0;
+        int bestDist = 99;
+        for (int d = 0; d < 7; ++d)
+        {
+            const int tone = (root + iv[(size_t) d]) % 12;
+            const int dist = std::min(std::abs(tone - pc), 12 - std::abs(tone - pc));
+            if (dist < bestDist)
+            {
+                bestDist = dist;
+                best = d;
+            }
+        }
+        return best;
     };
 
-    for (const auto& g : groups)
+    std::vector<int> degrees(order.size());
+    for (size_t i = 0; i < order.size(); ++i)
+        degrees[i] = degreeOf(notes[order[i]].pitch);
+
+    const int n = (int) degrees.size();
+    int shift = juce::jmax(1, (amount * juce::jmax(1, n - 1)) / juce::jmax(1, kMaxRevoice));
+    if (n > 0)
+        shift %= n;
+    if (shift == 0)
+        shift = 1;
+    std::vector<int> spun(n);
+    for (int i = 0; i < n; ++i)
+        spun[(size_t) i] = degrees[(size_t) ((i + shift) % n)];
+
+    std::vector<RollNote> out = notes;
+    for (int i = 0; i < n; ++i)
     {
-        std::vector<size_t> idx = g.indices;
-        std::sort(idx.begin(), idx.end(), [&](size_t a, size_t b)
-        {
-            return notes[a].pitch < notes[b].pitch;
-        });
-
-        if (idx.size() < 2)
-        {
-            // A single line has no chord to invert. Move it an octave so the slider is audible.
-            shiftOctave(out[idx.front()], open ? -1 : 1);
+        auto& note = out[order[(size_t) i]];
+        const int placed = scaleDegreePitch(root, mode, spun[(size_t) i], note.pitch);
+        if (placed == note.pitch)
             continue;
-        }
-
-        const int n = (int) idx.size();
-        const int lift = juce::jmin(inversion, n - 1);
-        for (int i = 0; i < lift; ++i)
-            shiftOctave(out[idx[(size_t) i]], 1);
-
-        if (open)
-        {
-            // Drop the new bass and raise the top so the chord opens.
-            size_t bass = idx.front();
-            size_t top = idx.front();
-            for (size_t i : idx)
-            {
-                if (out[i].pitch < out[bass].pitch) bass = i;
-                if (out[i].pitch > out[top].pitch) top = i;
-            }
-            if (bass != top)
-            {
-                shiftOctave(out[bass], -1);
-                shiftOctave(out[top], 1);
-            }
-        }
+        note.pitch = placed;
+        note.moved = true;
     }
     return out;
 }
@@ -1375,7 +1392,7 @@ std::vector<RollNote> applyGroove(const std::vector<RollNote>& notes, const Groo
     const auto art = k.articulation();
 
     std::vector<RollNote> sorted = (k.revoice > 0 && kind != ClipKind::Drums)
-                                       ? applyRevoice(notes, k.revoice)
+                                       ? applyRevoice(notes, k.revoice, rootPc, mode)
                                        : notes;
     std::stable_sort(sorted.begin(), sorted.end(),
                      [](const RollNote& a, const RollNote& b) { return a.start < b.start; });

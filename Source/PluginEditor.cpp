@@ -155,8 +155,15 @@ computeDedupeLocations(const std::vector<StepClip>& clips,
     if (clips.empty())
         return locationsByPrimary;
 
-    auto contentKey = [](const juce::File& f) -> juce::String
+    auto contentKey = [](const StepClip& clip) -> juce::String
     {
+        if (clip.filePath.isEmpty())
+            return {};
+        if (clip.fileMetaKnown)
+            return juce::File(clip.filePath).getFileName().toLowerCase()
+                 + "|" + juce::String(clip.fileBytes)
+                 + "|" + juce::String(clip.fileModMs);
+        const juce::File f(clip.filePath);
         if (!f.existsAsFile())
             return {};
         return f.getFileName().toLowerCase()
@@ -167,8 +174,7 @@ computeDedupeLocations(const std::vector<StepClip>& clips,
     std::map<juce::String, juce::String> keyToPrimary;
     for (const auto& clip : clips)
     {
-        const juce::File f(clip.filePath);
-        const juce::String key = contentKey(f);
+        const juce::String key = contentKey(clip);
         if (key.isEmpty())
             continue;
 
@@ -322,6 +328,7 @@ bool generatorContentChanged(const GrooveParams& a, const GrooveParams& b, int p
                 || a.melodyGenreIndex != b.melodyGenreIndex
                 || a.melodyContourIndex != b.melodyContourIndex
                 || a.melodySpeedIndex != b.melodySpeedIndex
+                || a.melodyDensity != b.melodyDensity
                 || a.melodyLengthIndex != b.melodyLengthIndex
                 || a.melodyFormIndex != b.melodyFormIndex
                 || a.melodyVariation != b.melodyVariation
@@ -335,6 +342,7 @@ bool generatorContentChanged(const GrooveParams& a, const GrooveParams& b, int p
                 || a.chordGenreIndex != b.chordGenreIndex
                 || a.chordMotionIndex != b.chordMotionIndex
                 || a.chordSpeedIndex != b.chordSpeedIndex
+                || a.chordDensity != b.chordDensity
                 || a.chordLengthIndex != b.chordLengthIndex
                 || a.chordFormIndex != b.chordFormIndex
                 || a.chordVariation != b.chordVariation
@@ -346,6 +354,7 @@ bool generatorContentChanged(const GrooveParams& a, const GrooveParams& b, int p
                 || a.bassGenreIndex != b.bassGenreIndex
                 || a.bassMotionIndex != b.bassMotionIndex
                 || a.bassSpeedIndex != b.bassSpeedIndex
+                || a.bassDensity != b.bassDensity
                 || a.bassLengthIndex != b.bassLengthIndex
                 || a.bassFormIndex != b.bassFormIndex
                 || a.bassVariation != b.bassVariation
@@ -506,6 +515,7 @@ MidiToolkitEditor::MidiToolkitEditor(MidiToolkitProcessor& p)
     content.addAndMakeVisible(transport);
 
     // ── Sidebar ──
+    sidebar.onClaimKeys = [this] { claimKeyNav(KeyNavTarget::Sidebar); };
     sidebar.onOpenFolder = [this] { chooseFolder(); };
     sidebar.onPickDir = [this](const juce::String& path)
     {
@@ -563,7 +573,7 @@ MidiToolkitEditor::MidiToolkitEditor(MidiToolkitProcessor& p)
             rootDir = juce::File(processorRef.lastBrowserDir);
         if (!rootDir.isDirectory() || sidebarScanning)
             return;
-        rescanFolder(true);
+        rescanFolder(true, {}, true);
     };
     sidebar.onScanSubdirs = [this]
     {
@@ -1339,7 +1349,7 @@ MidiToolkitEditor::MidiToolkitEditor(MidiToolkitProcessor& p)
                 e.root = -1;
                 e.mode = Mode::Ionian;
                 e.noteFilterMask = 0x0FFF;
-                e.noteFilterType = NoteFilterType::Mute;
+                e.noteFilterType = NoteFilterType::Fold;
             }
             if ((locks & toolkitLock::Playback) == 0)
                 e.extendMult = 1;
@@ -1664,7 +1674,7 @@ void MidiToolkitEditor::setRootDirectory(const juce::File& dir, bool keepSelecti
     refreshSidebar();
     // Scan this folder immediately. Subdirectories are included only when asked.
     rescanFolder(keepSelection);
-    fileList.grabBrowseFocus();
+    claimKeyNav(KeyNavTarget::Browser);
 }
 
 void MidiToolkitEditor::refreshBrowseListingAsync(const juce::String& selectPath,
@@ -1972,7 +1982,69 @@ void MidiToolkitEditor::restoreBrowserSession()
         processorRef.selectedClipPath = wantPath;
 }
 
-void MidiToolkitEditor::rescanFolder(bool keepSelection, const juce::String& preferredPath)
+juce::String MidiToolkitEditor::listingCacheKey(const juce::String& path, bool recursive)
+{
+    return path + (recursive ? "\n1" : "\n0");
+}
+
+void MidiToolkitEditor::setBrowseScanPhase(const juce::String& phase)
+{
+    fileList.setScanPhase(phase);
+    sidebar.setScanPhase(phase);
+}
+
+void MidiToolkitEditor::stashCurrentListing()
+{
+    if (!folderScanned || clips.empty() || listingRoot.isEmpty())
+        return;
+    CachedFolderListing cached;
+    cached.clips = std::move(clips);
+    cached.subdirs = std::move(cachedSubdirs);
+    clips.clear();
+    cachedSubdirs.clear();
+    folderScanned = false;
+    listingCache[listingCacheKey(listingRoot, listingRecursive)] = std::move(cached);
+}
+
+void MidiToolkitEditor::applyLoadedListing(std::vector<StepClip> loaded,
+                                           std::vector<juce::File> subdirs,
+                                           const juce::File& dir, bool recursive,
+                                           const juce::String& previousPath)
+{
+    if (!rootDir.isDirectory() || rootDir.getFullPathName() != dir.getFullPathName())
+        return;
+
+    sidebarScanning = false;
+    sidebar.setScanning(false);
+    fileList.setSearching(false);
+    clips = std::move(loaded);
+    folderScanned = true;
+    listingRoot = dir.getFullPathName();
+    listingRecursive = recursive;
+    sidebar.setScanFinished(true);
+    cachedMidiFiles.clear();
+    cachedSubdirs = std::move(subdirs);
+    auto folderName = dir.getFileName();
+    if (folderName.isEmpty()) folderName = dir.getFullPathName();
+    fileList.setFolderName(folderName);
+    fileList.setEmptyHint(clips.empty() ? "No files" : juce::String());
+
+    // Let the overlay paint away before sorting a huge listing on this thread.
+    const int epoch = ++listingApplyEpoch;
+    juce::Component::SafePointer<MidiToolkitEditor> safe(this);
+    juce::MessageManager::callAsync([safe, epoch, previousPath]()
+    {
+        if (safe == nullptr || epoch != safe->listingApplyEpoch.load())
+            return;
+        safe->rebuildEntries();
+        safe->selectPathOrFirst(previousPath);
+        safe->refreshSidebar();
+        safe->persistBrowserSession();
+    });
+}
+
+void MidiToolkitEditor::rescanFolder(bool keepSelection, const juce::String& preferredPath,
+                                     bool forceRescan)
 {
     if (!rootDir.isDirectory() && processorRef.lastBrowserDir.isNotEmpty())
         rootDir = juce::File(processorRef.lastBrowserDir);
@@ -1995,6 +2067,44 @@ void MidiToolkitEditor::rescanFolder(bool keepSelection, const juce::String& pre
     auto name = dir.getFileName();
     if (name.isEmpty()) name = dir.getFullPathName();
     fileList.setFolderName(name);
+
+    ++listingApplyEpoch;
+    const auto newKey = listingCacheKey(dir.getFullPathName(), recursive);
+    const bool alreadyShowing = folderScanned && !clips.empty()
+                                && listingRoot == dir.getFullPathName()
+                                && listingRecursive == recursive;
+    if (!forceRescan && alreadyShowing)
+    {
+        fileList.setSearching(false);
+        sidebarScanning = false;
+        sidebar.setScanning(false);
+        fileList.setEmptyHint(clips.empty() ? "No files" : juce::String());
+        rebuildEntries();
+        if (previousPath.isNotEmpty())
+            selectPathOrFirst(previousPath);
+        return;
+    }
+
+    if (forceRescan)
+        listingCache.erase(newKey);
+    else if (auto it = listingCache.find(newKey); it != listingCache.end())
+    {
+        auto cached = std::move(it->second);
+        listingCache.erase(it);
+        if (listingRoot != dir.getFullPathName() || listingRecursive != recursive)
+            stashCurrentListing();
+        selectedIdx = -1;
+        rollEditor.clearClip();
+        syncEffectsInspector();
+        processorRef.setPreviewState({}, false, false, false);
+        applyLoadedListing(std::move(cached.clips), std::move(cached.subdirs),
+                           dir, recursive, previousPath);
+        return;
+    }
+
+    if (listingRoot != dir.getFullPathName() || listingRecursive != recursive)
+        stashCurrentListing();
+
     fileList.setEmptyHint("Scanning...");
 
     // Drop the previous folder's rows. A stale subdirectory cache used to skip
@@ -2012,14 +2122,48 @@ void MidiToolkitEditor::rescanFolder(bool keepSelection, const juce::String& pre
     syncEffectsInspector();
     processorRef.setPreviewState({}, false, false, false);
 
-    // Metadata scan stays in the background. Names from the listing stay visible.
-    const int gen = beginBackgroundClipLoad(false);
+    // Metadata scan stays in the background. A saved listing is shown first.
+    const int gen = beginBackgroundClipLoad(true);
+    if (!forceRescan)
+        setBrowseScanPhase("LOADING SAVED LISTING");
     juce::Component::SafePointer<MidiToolkitEditor> safe(this);
-    juce::Thread::launch([safe, dir, recursive, gen, previousPath]()
+    juce::Thread::launch([safe, dir, recursive, gen, previousPath, forceRescan]()
     {
         std::vector<StepClip> found;
         try
         {
+            if (!forceRescan)
+            {
+                if (auto idx = FolderIndex::load(dir, recursive); idx && !idx->files.empty())
+                {
+                    auto loaded = FolderIndex::toClips(*idx);
+                    std::vector<juce::File> childDirs;
+                    if (!recursive)
+                        childDirs = listDirectoryQuick(dir, 0).directories;
+                    juce::MessageManager::callAsync([safe, gen, loaded = std::move(loaded),
+                                                     childDirs = std::move(childDirs), dir,
+                                                     recursive, previousPath]() mutable
+                    {
+                        if (safe == nullptr || gen != safe->folderScanGeneration.load())
+                            return;
+                        if (!safe->rootDir.isDirectory()
+                            || safe->rootDir.getFullPathName() != dir.getFullPathName())
+                            return;
+                        safe->applyLoadedListing(std::move(loaded), std::move(childDirs),
+                                                 dir, recursive, previousPath);
+                    });
+                    return;
+                }
+                if (safe != nullptr)
+                {
+                    juce::MessageManager::callAsync([safe, gen]()
+                    {
+                        if (safe == nullptr || gen != safe->folderScanGeneration.load())
+                            return;
+                        safe->setBrowseScanPhase({});
+                    });
+                }
+            }
             {
                 // Always enumerate first, then parse in parallel. Recursive "Scan all"
                 // on Midi_Parsed (~411k) is still heavy — progress keeps UI alive.
@@ -2054,6 +2198,9 @@ void MidiToolkitEditor::rescanFolder(bool keepSelection, const juce::String& pre
                             StepClip stub;
                             stub.filePath = file.getFullPathName();
                             stub.name = file.getFileNameWithoutExtension();
+                            stub.fileBytes = file.getSize();
+                            stub.fileModMs = file.getLastModificationTime().toMilliseconds();
+                            stub.fileMetaKnown = true;
                             applyFilenameKindTag(stub);
                             found[(size_t) i] = std::move(stub);
                         }
@@ -2074,6 +2221,17 @@ void MidiToolkitEditor::rescanFolder(bool keepSelection, const juce::String& pre
                 }
                 while (done.load() < total)
                     juce::Thread::sleep(5);
+                if (safe != nullptr)
+                {
+                    juce::MessageManager::callAsync([safe, gen, total]()
+                    {
+                        if (safe == nullptr || gen != safe->folderScanGeneration.load())
+                            return;
+                        safe->setBrowseScanPhase("SAVING LISTING");
+                        safe->sidebar.setScanProgress(total, total);
+                        safe->fileList.setScanProgress(total, total);
+                    });
+                }
                 auto idx = FolderIndex::fromClips(dir, recursive, found);
                 if (auto previous = FolderIndex::load(dir, recursive))
                     idx.retainPinnedFrom(*previous);
@@ -2085,14 +2243,16 @@ void MidiToolkitEditor::rescanFolder(bool keepSelection, const juce::String& pre
             found.clear();
         }
 
-        juce::MessageManager::callAsync([safe, results = std::move(found), gen, previousPath,
-                                         dir]() mutable
+        std::vector<juce::File> childDirs;
+        if (!recursive && !found.empty())
+            childDirs = listDirectoryQuick(dir, 0).directories;
+
+        juce::MessageManager::callAsync([safe, results = std::move(found),
+                                         childDirs = std::move(childDirs), gen, previousPath,
+                                         dir, recursive]() mutable
         {
             if (safe == nullptr || gen != safe->folderScanGeneration.load())
                 return;
-            safe->sidebarScanning = false;
-            safe->sidebar.setScanning(false);
-            safe->fileList.setSearching(false);
             if (!safe->rootDir.isDirectory()
                 || safe->rootDir.getFullPathName() != dir.getFullPathName())
                 return;
@@ -2101,24 +2261,17 @@ void MidiToolkitEditor::rescanFolder(bool keepSelection, const juce::String& pre
             {
                 // The directory listing already has MIDI names. An empty parse
                 // must not replace that list with a blank browser.
+                safe->sidebarScanning = false;
+                safe->sidebar.setScanning(false);
+                safe->fileList.setSearching(false);
                 safe->folderScanned = false;
                 safe->rebuildEntries();
                 safe->refreshSidebar();
                 return;
             }
 
-            safe->clips = std::move(results);
-            safe->folderScanned = true;
-            safe->sidebar.setScanFinished(true);
-            safe->cachedMidiFiles.clear();
-            auto folderName = dir.getFileName();
-            if (folderName.isEmpty()) folderName = dir.getFullPathName();
-            safe->fileList.setFolderName(folderName);
-            safe->fileList.setEmptyHint("No files");
-            safe->rebuildEntries();
-            safe->selectPathOrFirst(previousPath);
-            safe->refreshSidebar();
-            safe->persistBrowserSession();
+            safe->applyLoadedListing(std::move(results), std::move(childDirs),
+                                     dir, recursive, previousPath);
         });
     });
 }
@@ -3118,6 +3271,11 @@ void MidiToolkitEditor::regenerateGeneratedClip(const GrooveParams& groove)
     const double prevBpm = recordedClip.bpm;
     recordedClip = gen::renderPartClip(part, groove, keyRoot, edit.mode,
                                        chordCount > 0 ? chordBuf : nullptr, chordCount);
+    if (part != gen::Part::Drums && edit.root >= 0)
+    {
+        for (auto& n : recordedClip.notes)
+            n.pitch = fitToScale(n.pitch, edit.root, edit.mode);
+    }
     std::set<int> newSel;
     const bool spliced = !firstGenerate && !oldSel.empty()
         && spliceGeneratedSelection(recordedClip, previous, oldSel, newSel, edit, groove);
@@ -5463,6 +5621,8 @@ bool MidiToolkitEditor::keyPressed(const juce::KeyPress& key)
         }
         if (keyNavTarget == KeyNavTarget::Effects)
             return true;   // effects are mouse-driven; don't steal browser rows
+        if (keyNavTarget == KeyNavTarget::Sidebar)
+            return sidebar.keyPressed(key);
 
         if (gridView)
         {
@@ -5511,6 +5671,8 @@ void MidiToolkitEditor::claimKeyNav(KeyNavTarget target)
     }
     else if (target == KeyNavTarget::Editor && rollEditor.isVisible())
         rollEditor.grabKeyboardFocus();
+    else if (target == KeyNavTarget::Sidebar)
+        sidebar.grabKeyboardFocus();
 }
 
 void MidiToolkitEditor::syncTooltipHighlight()

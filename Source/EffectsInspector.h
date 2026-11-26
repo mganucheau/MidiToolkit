@@ -227,6 +227,9 @@ private:
     fx::FlatPopup arpMotionPopup;
     fx::InlineRow arpMotionRow;
     fx::FlatSliderRow arpDensitySl;
+    fx::FlatSliderRow melodyDensitySl;
+    fx::FlatSliderRow chordDensitySl;
+    fx::FlatSliderRow bassDensitySl;
 
     fx::FlatTextButton melodyGenerateBtn { "Generate" };
     fx::InlineRow melodyGenerateRow;

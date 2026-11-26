@@ -498,6 +498,18 @@ void buildEvenDensityMask(int densityPct, bool* active /*[kArpPatternSteps]*/)
     active[0] = true; // always land on the first step of the cycle
 }
 
+/** Density 100 keeps every step the part already chose. Lower values keep an
+    even subset of the 16-step bar so the rhythm stays on the grid. */
+bool stepInDensity(int densityPct, int step)
+{
+    if (densityPct >= 100)
+        return true;
+    bool active[kArpPatternSteps];
+    buildEvenDensityMask(densityPct, active);
+    const int s = ((step % kArpPatternSteps) + kArpPatternSteps) % kArpPatternSteps;
+    return active[s];
+}
+
 void renderArp(const GrooveParams& g, double startPpq, double endPpq,
                const int* chordNotes, int chordCount, int keyRoot, Mode mode,
                std::vector<Event>& out)
@@ -519,15 +531,8 @@ void renderArp(const GrooveParams& g, double startPpq, double endPpq,
 
     bool active[kArpPatternSteps];
     buildEvenDensityMask(g.arpDensity, active);
-    {
-        const auto& pack = genrePack(g.arpGenre());
-        if (pack.anyArp())
-        {
-            for (int i = 0; i < kArpPatternSteps; ++i)
-                if (pack.arp[(size_t) i].velocity <= 0)
-                    active[i] = false;
-        }
-    }
+    // Genre colours the line through the seed. It does not punch holes in the
+    // Speed grid — an arpeggio stays even.
 
     // Prebuild orders for form letters A/B/C.
     std::vector<int> orders[3];
@@ -718,6 +723,7 @@ void renderMelody(const GrooveParams& g, double startPpq, double endPpq,
         const int bar = index / 16;
         const int step = index % 16;
         if (bar < 0) continue;
+        if (!stepInDensity(g.melodyDensity, step)) continue;
 
         int letter = 0, localBar = 0;
         mapFormBar(phraseBars, form, wrapBar(bar, phraseBars), letter, localBar);
@@ -730,6 +736,9 @@ void renderMelody(const GrooveParams& g, double startPpq, double endPpq,
             ? harmonyFromHeld(chordNotes, chordCount, keyRoot, mode, bar)
             : progressionHarmony(keyRoot, mode, bar);
         int note = melodyNote(motif, harmony, phraseBar, step, keyRoot, mode);
+        if (g.melodyNonce != 0)
+            note += (g.melodyNonce % 5) - 2;
+        note = fitToScale(note, juce::jlimit(0, 11, keyRoot), mode);
         if (g.melodyType() == PhraseType::Pentatonic || g.melodyType() == PhraseType::Chord)
         {
             const int root = ((keyRoot % 12) + 12) % 12;
@@ -934,11 +943,20 @@ void renderChords(const GrooveParams& g, double startPpq, double endPpq,
             }
             length = juce::jmax(0.2, length + (double) feel.sustainBias * 0.6);
         }
+        if (fire && !stepInDensity(g.chordDensity, step))
+            fire = false;
         if (!fire) continue;
 
         const Harmony harmony = chordHarmony(g, chordNotes, chordCount, keyRoot, mode, bar + letter);
         std::vector<int> pitches;
         chordVoices(g, harmony, pitches);
+        if (g.chordNonce != 0 && pitches.size() > 1)
+        {
+            const int rot = std::abs(g.chordNonce) % (int) pitches.size();
+            std::rotate(pitches.begin(), pitches.begin() + rot, pitches.end());
+        }
+        for (int& p : pitches)
+            p = fitToScale(p, juce::jlimit(0, 11, keyRoot), mode);
         const double swing = (step % 4) == 2 ? chordPack.swing * 0.25 : 0.0;
         const double onBase = bar * 4.0 + step * 0.25 + tick + swing;
         for (size_t i = 0; i < pitches.size(); ++i)
@@ -985,12 +1003,15 @@ void renderBass(const GrooveParams& g, double startPpq, double endPpq,
     auto emit = [&](int bar, int step, int letter, int degree, int prefer, float chance, int vel, double len)
     {
         const std::uint32_t motifSeed = seed ^ (std::uint32_t) (letter * 29u);
+        if (!stepInDensity(g.bassDensity, step))
+            return;
         if (chance < 0.999f && unit(motifSeed, bar, step, degree + 20) >= chance)
             return;
         const Harmony harmony = g.bassInput
             ? harmonyFromHeld(chordNotes, chordCount, keyRoot, mode, bar)
             : progressionHarmony(keyRoot, mode, bar + letter);
-        const int note = pitchInRange(toneOf(harmony, degree), 28, 52, prefer + preferShift);
+        const int note = fitToScale(pitchInRange(toneOf(harmony, degree), 28, 52, prefer + preferShift),
+                                    juce::jlimit(0, 11, keyRoot), mode);
         const double onPpq = bar * 4.0 + step * 0.25;
         const double offPpq = onPpq + len;
         if (onPpq >= startPpq && onPpq < endPpq)
@@ -1013,10 +1034,16 @@ void renderBass(const GrooveParams& g, double startPpq, double endPpq,
             const auto& st = bassPack.bass[(size_t) step];
             if (st.velocity <= 0)
                 continue;
+            if (!stepInDensity(g.bassDensity, step))
+                continue;
             const Harmony harmony = g.bassInput
                 ? harmonyFromHeld(chordNotes, chordCount, keyRoot, mode, bar)
                 : progressionHarmony(keyRoot, mode, bar + letter);
-            const int note = pitchInRange(toneOf(harmony, 0), 28, 52, 40);
+            int degree = 0;
+            if (g.bassNonce != 0)
+                degree = ((step + g.bassNonce) % 3 == 1) ? 2 : (((step + g.bassNonce) % 3 == 2) ? 4 : 0);
+            const int note = fitToScale(pitchInRange(toneOf(harmony, degree), 28, 52, 40),
+                                        juce::jlimit(0, 11, keyRoot), mode);
             const double swing = (step % 4) == 2 ? bassPack.swing * 0.25 : 0.0;
             const double onPpq = bar * 4.0 + step * 0.25 + st.ticks / 480.0 + swing;
             const double offPpq = onPpq + bassPack.bassGate;
@@ -1198,6 +1225,33 @@ void renderDrums(const GrooveParams& g, double startPpq, double endPpq, std::vec
                 continue;
             drumHitsForStep(g.drumStyle(), step, dens, (float) g.drumFill, fillBar, motifSeed,
                             letter, hits);
+            if (g.drumNonce != 0)
+            {
+                std::vector<DrumHit> varied;
+                varied.reserve(hits.size() + 1);
+                for (auto hit : hits)
+                {
+                    const float roll = unit(motifSeed, absBar, step, hit.note + 80);
+                    if (hit.note == 36)
+                    {
+                        varied.push_back(hit);
+                        continue;
+                    }
+                    if (hit.note == 38 && hit.velocity >= 80)
+                    {
+                        hit.velocity = juce::jlimit(1, 127, hit.velocity + (int) std::lround((roll - 0.5f) * 10.0f));
+                        varied.push_back(hit);
+                        continue;
+                    }
+                    if (roll < 0.22f)
+                        continue;
+                    hit.velocity = juce::jlimit(1, 127, hit.velocity + (int) std::lround((roll - 0.5f) * 24.0f));
+                    varied.push_back(hit);
+                }
+                if (unit(motifSeed, absBar, step, 99) < 0.16f && (step % 2) == 1)
+                    varied.push_back({ 38, 1.0f, 34, 0 });
+                hits.swap(varied);
+            }
             if (drumSpeed == MelodySpeed::Fast && (step % 2) == 1)
             {
                 bool hasHat = false;

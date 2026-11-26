@@ -1032,6 +1032,11 @@ void FavoritesSidebar::setStarredCount(int n)
     repaint();
 }
 
+void FavoritesSidebar::setScanPhase(const juce::String& phase)
+{
+    scanPhase = phase;
+}
+
 void FavoritesSidebar::setScanning(bool on)
 {
     if (scanning == on) return;
@@ -1040,6 +1045,7 @@ void FavoritesSidebar::setScanning(bool on)
     {
         scanProgressDone = 0;
         scanProgressTotal = 0;
+        scanPhase.clear();
     }
     if (scanning)
     {
@@ -1450,10 +1456,12 @@ void FavoritesSidebar::updateTooltipForPos(juce::Point<int> pos)
     if (refreshBtnBounds.contains(pos))
     {
         setTooltip(scanning
-                       ? (scanProgressTotal > 0
-                              ? ("Scanning " + juce::String(scanProgressDone) + "/"
-                                 + juce::String(scanProgressTotal))
-                              : juce::String("Scanning..."))
+                       ? (scanPhase.isNotEmpty()
+                              ? scanPhase
+                              : (scanProgressTotal > 0
+                                     ? ("Scanning " + juce::String(scanProgressDone) + "/"
+                                        + juce::String(scanProgressTotal))
+                                     : juce::String("Scanning...")))
                        : juce::String("Refresh this folder"));
         return;
     }
@@ -1715,6 +1723,8 @@ void FavoritesSidebar::mouseDown(const juce::MouseEvent& e)
     if (btnToggle.isVisible() && btnToggle.getBounds().contains(e.getPosition()))
         return;
 
+    if (onClaimKeys)
+        onClaimKeys();
     if (! hasKeyboardFocus(true) && ! searchQuery.isQueryFocused())
         grabKeyboardFocus();
 
@@ -1823,17 +1833,23 @@ bool FavoritesSidebar::keyPressed(const juce::KeyPress& key)
     if (navItems.empty())
         rebuildNavItems();
 
-    if (key == juce::KeyPress::upKey || key == juce::KeyPress::leftKey)
+    if (key == juce::KeyPress::upKey)
     {
         moveNav(-1);
         return true;
     }
-    if (key == juce::KeyPress::downKey || key == juce::KeyPress::rightKey)
+    if (key == juce::KeyPress::downKey)
     {
         moveNav(1);
         return true;
     }
-    if (key == juce::KeyPress::returnKey || key == juce::KeyPress::spaceKey)
+    if (key == juce::KeyPress::leftKey)
+    {
+        moveNav(-1);
+        return true;
+    }
+    if (key == juce::KeyPress::rightKey || key == juce::KeyPress::returnKey
+        || key == juce::KeyPress::spaceKey)
     {
         if (juce::isPositiveAndBelow(navIndex, (int) navItems.size()))
             activateNavItem(navItems[(size_t) navIndex]);
@@ -2256,8 +2272,15 @@ void FileListPanel::setScanProgress(int done, int total)
 {
     scanDone = juce::jmax(0, done);
     scanTotal = juce::jmax(0, total);
-    if (searching)
-        repaint();
+    repaint();
+}
+
+void FileListPanel::setScanPhase(const juce::String& phase)
+{
+    if (scanPhase == phase)
+        return;
+    scanPhase = phase;
+    repaint();
 }
 
 void FileListPanel::setSearching(bool isSearch)
@@ -2267,6 +2290,7 @@ void FileListPanel::setSearching(bool isSearch)
     {
         scanDone = 0;
         scanTotal = 0;
+        scanPhase.clear();
     }
     // Hide the list under the scanning overlay so progress paints on top.
     viewport.setVisible(!searching);
@@ -2926,16 +2950,32 @@ void FileListPanel::paint(juce::Graphics& g)
             return s;
         };
 
-        auto block = area.withSizeKeepingCentre(juce::jmin(320, area.getWidth() - 48), 88);
+        auto block = area.withSizeKeepingCentre(juce::jmin(320, area.getWidth() - 48), 140);
         // uiFontFixed avoids missing-glyph boxes from the scaled display face.
+        const float spin = (float) std::fmod(searchAnimT * 4.0, juce::MathConstants<double>::twoPi);
+        auto dial = juce::Rectangle<float>(36.0f, 36.0f)
+                        .withCentre({ (float) area.getCentreX(), (float) block.getY() + 18.0f });
+        g.setColour(colours::line());
+        g.drawEllipse(dial, 2.0f);
+        juce::Path arc;
+        arc.addCentredArc(dial.getCentreX(), dial.getCentreY(), 16.0f, 16.0f,
+                          0.0f, spin, spin + 1.7f, true);
+        g.setColour(colours::accent());
+        g.strokePath(arc, juce::PathStrokeType(2.4f, juce::PathStrokeType::curved,
+                                                juce::PathStrokeType::rounded));
+        block.removeFromTop(44);
+
         g.setFont(uiFontFixed(11.0f, true));
         g.setColour(colours::text2());
-        g.drawText("SEARCHING", block.removeFromTop(16), juce::Justification::centred, false);
+        g.drawText(scanPhase.isNotEmpty() ? scanPhase : juce::String("ANALYZING"),
+                   block.removeFromTop(16), juce::Justification::centred, false);
         block.removeFromTop(4);
 
         juce::String count;
         if (scanTotal > 0)
             count = grouped(scanDone) + "  of  " + grouped(scanTotal);
+        else if (scanPhase.isNotEmpty())
+            count = "Using the saved folder listing";
         else
         {
             const int dots = 1 + (int) std::fmod(searchAnimT * 2.0, 3.0);
@@ -4507,7 +4547,9 @@ void KindGridView::mouseDown(const juce::MouseEvent& e)
         menu.addSubMenu("Sort by", sort);
         menu.addSeparator();
         menu.addItem(100, "Hide column");
-        menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(this),
+        const auto screenPos = e.getScreenPosition();
+        menu.showMenuAsync(juce::PopupMenu::Options().withTargetScreenArea(
+                               { screenPos.x, screenPos.y, 1, 1 }),
                            [this, kind](int result)
                            {
                                if (result == 100)

@@ -446,6 +446,8 @@ void LiveMidiFx::runGenerators(juce::MidiBuffer& out, const LiveFxState& snap, d
     const int genSig = snap.groove.arpEnabled
         * (1 + snap.groove.arpShapeIndex * 17 + snap.groove.arpRateIndex * 31
            + snap.groove.arpDensity * 13 + snap.groove.arpNonce * 97
+           + snap.groove.melodyDensity * 3 + snap.groove.chordDensity * 5
+           + snap.groove.bassDensity * 7
            + snap.groove.arpStyleIndex * 7 + snap.groove.arpMotionIndex * 11
            + snap.groove.arpGenreIndex * 19 + snap.groove.arpVariation * 23)
         + snap.groove.melodyEnabled * (10007 + snap.groove.melodyNonce)
