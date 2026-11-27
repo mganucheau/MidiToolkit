@@ -379,3 +379,39 @@ TEST_CASE("a generate nonce rolls a different in-style groove", "[genre][generat
         return hitKeys(ev);
     }));
 }
+
+TEST_CASE("funk drums keep a syncopated backbeat pocket", "[genre][funk]")
+{
+    auto check = [](int nonce)
+    {
+        auto g = drums(DrumStyle::Funk);
+        g.drumNonce = nonce;
+        g.drumVariation = 4;
+        std::vector<Event> ev;
+        renderDrums(g, 0.0, 4.0, ev);
+        const auto ons = noteOns(ev, 0.0, 4.0);
+        CHECK(countNear(ons, 38, 1.0, 0.12) >= 1);
+        CHECK(countNear(ons, 38, 3.0, 0.12) >= 1);
+        CHECK(downbeatKicks(ev) < 4);
+
+        int loud = 0, quiet = 127, andHats = 0;
+        for (const auto& h : ons)
+        {
+            if (h.note == 38)
+            {
+                loud = std::max(loud, h.velocity);
+                quiet = std::min(quiet, h.velocity);
+            }
+            if (h.note != 42) continue;
+            const double frac = std::fmod(h.ppq, 1.0);
+            if (frac > 0.35 && frac < 0.75 && h.velocity >= 90)
+                ++andHats;
+        }
+        CHECK(loud >= 100);
+        CHECK(quiet < 70);
+        CHECK(andHats >= 2);
+    };
+    check(0);
+    check(1);
+    check(7);
+}

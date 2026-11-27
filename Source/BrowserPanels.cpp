@@ -2231,8 +2231,13 @@ void FileListPanel::setEntries(std::vector<FileListEntry> e)
     entries = std::move(e);
     metaWidthsDirty = true;
     selected = juce::jlimit(-1, (int) entries.size() - 1, selected);
+    selectedEntries.clear();
+    selectingRange = false;
     content.clearDragState();
     rebuildSortOrder();
+    if (selected >= 0 && !entries[(size_t) selected].isDirectory)
+        selectedEntries.insert(selected);
+    rangeAnchorDisplay = entryToDisplay(selected);
     if (getWidth() > 0 && getHeight() > 0)
         resized();
     else
@@ -2254,12 +2259,78 @@ void FileListPanel::updateEntry(int index, const FileListEntry& entry)
 
 void FileListPanel::setSelectedIndex(int index, juce::NotificationType notify)
 {
-    selected = juce::jlimit(-1, (int) entries.size() - 1, index);
+    const int next = juce::jlimit(-1, (int) entries.size() - 1, index);
+    // A browse into a row that is already part of a multi-selection keeps the
+    // rest of the selection. A click on a different row replaces it.
+    const bool keepMulti = selectedEntries.size() > 1 && next >= 0
+                           && selectedEntries.count(next) != 0;
+    selected = next;
+    selectingRange = false;
+    if (!keepMulti)
+    {
+        selectedEntries.clear();
+        if (selected >= 0 && !entries[(size_t) selected].isDirectory)
+            selectedEntries.insert(selected);
+    }
+    rangeAnchorDisplay = entryToDisplay(selected);
     ensureRowVisible(entryToDisplay(selected));
     content.repaint();
     // Callbacks use entry indices (parallel to MidiToolkitEditor::displayRows), not sort-order rows.
     if (notify != juce::dontSendNotification && onSelect && selected >= 0)
         onSelect(selected);
+}
+
+void FileListPanel::replaceSelectionWithRange(int displayA, int displayB)
+{
+    const int lo = juce::jmin(displayA, displayB);
+    const int hi = juce::jmax(displayA, displayB);
+    selectionDisplayLo = lo;
+    selectionDisplayHi = hi;
+    selectingRange = true;
+    selectedEntries.clear();
+    for (int d = lo; d <= hi; ++d)
+    {
+        const int entryIdx = displayToEntry(d);
+        if (entryIdx < 0 || entries[(size_t) entryIdx].isDirectory)
+            continue;
+        selectedEntries.insert(entryIdx);
+    }
+    const int endEntry = displayToEntry(displayB);
+    if (endEntry >= 0)
+        selected = endEntry;
+    content.repaint();
+}
+
+std::vector<juce::File> FileListPanel::selectedMidiFiles() const
+{
+    std::vector<juce::File> out;
+    for (int idx : selectedEntries)
+    {
+        if (!juce::isPositiveAndBelow(idx, (int) entries.size()))
+            continue;
+        const auto& e = entries[(size_t) idx];
+        if (!e.isDirectory && e.file.getFullPathName().isNotEmpty())
+            out.push_back(e.file);
+    }
+    return out;
+}
+
+std::vector<juce::File> FileListPanel::listedMidiFiles() const
+{
+    std::vector<juce::File> out;
+    out.reserve(entries.size());
+    for (const auto& e : entries)
+        if (!e.isDirectory && e.file.getFullPathName().isNotEmpty())
+            out.push_back(e.file);
+    return out;
+}
+
+bool FileListPanel::hasListedMidiFiles() const
+{
+    for (const auto& e : entries)
+        if (!e.isDirectory)
+            return true;
+    return false;
 }
 
 void FileListPanel::setPlaying(bool isPlaying)
@@ -2794,12 +2865,20 @@ void FileListPanel::showColumnVisibilityMenu()
     addToggle(6, "DifNotes", columnsVisible.difNotes);
     addToggle(7, "TimeSig", columnsVisible.timeSig);
     addToggle(8, "Notes", columnsVisible.notes);
+    m.addSeparator();
+    m.addItem(200, "Export as Zip", onExportListedAsZip != nullptr && hasListedMidiFiles());
 
     m.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(this)
                          .withMousePosition(),
         [this](int result)
         {
             if (result == 0) return;
+            if (result == 200)
+            {
+                if (onExportListedAsZip)
+                    onExportListedAsZip();
+                return;
+            }
             auto v = columnsVisible;
             if (result == 100)
             {
@@ -3185,7 +3264,12 @@ void FileListPanel::paintRow(juce::Graphics& g, int displayIdx, juce::Rectangle<
     const int entryIdx = displayToEntry(displayIdx);
     if (entryIdx < 0) return;
     const auto& e = entries[(size_t) entryIdx];
-    const bool isSelected = entryIdx == selected;
+    const bool inSet = selectedEntries.count(entryIdx) != 0;
+    const bool inDragBand = selectingRange && selectionDisplayLo >= 0
+                            && displayIdx >= selectionDisplayLo
+                            && displayIdx <= selectionDisplayHi;
+    const bool isPrimary = entryIdx == selected;
+    const bool isSelected = inSet || inDragBand || (isPrimary && e.isDirectory);
 
     // Groove list row: edge to edge, 1px line beneath. Selected = accent fill, on-accent text.
     // Folder rows get a slightly cooler wash so they read as containers.
@@ -3196,8 +3280,11 @@ void FileListPanel::paintRow(juce::Graphics& g, int displayIdx, juce::Rectangle<
         auto sel = r.toFloat().reduced(4.0f, 1.0f);
         g.setColour(ds::selsoft());
         g.fillRoundedRectangle(sel, ds::radius::sm);
-        g.setColour(ds::play());
-        g.fillRoundedRectangle(sel.getX() + 2.0f, sel.getCentreY() - 6.0f, 3.0f, 12.0f, 1.5f);
+        if (isPrimary && !e.isDirectory)
+        {
+            g.setColour(ds::play());
+            g.fillRoundedRectangle(sel.getX() + 2.0f, sel.getCentreY() - 6.0f, 3.0f, 12.0f, 1.5f);
+        }
     }
     else if (e.isDirectory)
     {
@@ -3410,6 +3497,7 @@ void FileListPanel::ListContent::mouseDown(const juce::MouseEvent& e)
 
     const int entryIdx = owner.displayToEntry(disp);
     if (entryIdx < 0) return;
+    rangeDragDisplay = -1;
     const auto& entry = owner.entries[(size_t) entryIdx];
     const auto cols = owner.splitRowColumns({ 0, 0, getWidth(), rowH });
     const int starLeft = cols.name.getX();
@@ -3430,6 +3518,12 @@ void FileListPanel::ListContent::mouseDown(const juce::MouseEvent& e)
 
     if (e.mods.isPopupMenu() && !entry.isDirectory && entry.file.existsAsFile())
     {
+        // Right-click inside the drag selection keeps it. Anywhere else, the
+        // menu applies to just that file.
+        if (owner.selectedEntries.count(entryIdx) == 0)
+            owner.setSelectedIndex(entryIdx, juce::dontSendNotification);
+        const auto zipFiles = owner.selectedMidiFiles();
+
         juce::PopupMenu m;
         juce::StringArray locs = entry.locations;
         if (locs.isEmpty())
@@ -3445,6 +3539,7 @@ void FileListPanel::ListContent::mouseDown(const juce::MouseEvent& e)
                 m.addItem(100 + i, "Show in Finder Location " + juce::String(i + 1));
         }
         m.addItem(2, "Copy to Folder...");
+        m.addItem(3, "Save as Zip", owner.onExportFilesAsZip != nullptr && !zipFiles.empty());
         juce::PopupMenu kinds;
         for (int i = 0; i < kNumClipKinds; ++i)
         {
@@ -3456,7 +3551,7 @@ void FileListPanel::ListContent::mouseDown(const juce::MouseEvent& e)
         m.addSubMenu("Set Kind", kinds);
         m.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(this)
                              .withMousePosition(),
-            [this, locs, file = entry.file](int result)
+            [this, locs, file = entry.file, zipFiles](int result)
             {
                 if (result == 1 && owner.onRevealFile)
                     owner.onRevealFile(file);
@@ -3464,6 +3559,8 @@ void FileListPanel::ListContent::mouseDown(const juce::MouseEvent& e)
                     owner.onRevealFile(juce::File(locs[result - 100]));
                 else if (result == 2 && owner.onCopyFileToFolder)
                     owner.onCopyFileToFolder(file);
+                else if (result == 3 && owner.onExportFilesAsZip)
+                    owner.onExportFilesAsZip(zipFiles);
                 else if (result >= 20 && result < 20 + kNumClipKinds && owner.onSetKind)
                     owner.onSetKind(file, (ClipKind) (result - 20));
             });
@@ -3479,15 +3576,57 @@ void FileListPanel::ListContent::mouseDown(const juce::MouseEvent& e)
         return;
     }
 
-    owner.setSelectedIndex(entryIdx);
-    if (!entry.isDirectory)
+    rangeDragDisplay = -1;
+    if (e.mods.isShiftDown() && owner.rangeAnchorDisplay >= 0)
     {
-        dragSourcePath = entry.file.getFullPathName();
-        if (dragSourcePath.isEmpty())
-            clearDragState();
+        owner.replaceSelectionWithRange(owner.rangeAnchorDisplay, disp);
+        owner.selectingRange = false;
+        clearDragState();
+        if (owner.onSelect && owner.selected >= 0)
+            owner.onSelect(owner.selected);
+    }
+    else if (e.mods.isCommandDown() && !entry.isDirectory)
+    {
+        if (owner.selectedEntries.count(entryIdx) != 0)
+        {
+            owner.selectedEntries.erase(entryIdx);
+            if (owner.selected == entryIdx)
+                owner.selected = owner.selectedEntries.empty() ? -1
+                                                              : *owner.selectedEntries.begin();
+        }
+        else
+        {
+            owner.selectedEntries.insert(entryIdx);
+            owner.selected = entryIdx;
+        }
+        owner.rangeAnchorDisplay = disp;
+        owner.selectingRange = false;
+        owner.content.repaint();
+        clearDragState();
+        if (owner.onSelect && owner.selected >= 0
+            && owner.selectedEntries.count(owner.selected) != 0)
+            owner.onSelect(owner.selected);
     }
     else
-        clearDragState();
+    {
+        const bool already = owner.selectedEntries.count(entryIdx) != 0;
+        if (!already || entry.isDirectory)
+            owner.setSelectedIndex(entryIdx);
+        else
+        {
+            owner.selected = entryIdx;
+            owner.rangeAnchorDisplay = disp;
+        }
+        rangeDragDisplay = disp;
+        if (!entry.isDirectory)
+        {
+            dragSourcePath = entry.file.getFullPathName();
+            if (dragSourcePath.isEmpty())
+                clearDragState();
+        }
+        else
+            clearDragState();
+    }
 
     if (entry.isDirectory && e.getNumberOfClicks() > 1 && owner.onEnterFolder)
         owner.onEnterFolder(entryIdx);
@@ -3512,6 +3651,7 @@ void FileListPanel::ListContent::mouseWheelMove(const juce::MouseEvent&,
 void FileListPanel::ListContent::clearDragState()
 {
     dragSourcePath.clear();
+    rangeDragDisplay = -1;
 }
 
 void FileListPanel::ListContent::mouseUp(const juce::MouseEvent&)
@@ -3521,7 +3661,26 @@ void FileListPanel::ListContent::mouseUp(const juce::MouseEvent&)
         owner.endNameColumnResize();
         return;
     }
+
+    const bool draggedRange = owner.selectingRange && owner.selectedEntries.size() > 1;
+    const bool clickInSelection = !owner.selectingRange && rangeDragDisplay >= 0
+                                  && owner.selectedEntries.size() > 1;
+    const int clicked = owner.selected;
+    owner.selectingRange = false;
     clearDragState();
+
+    if (draggedRange)
+    {
+        owner.content.repaint();
+        if (owner.onSelect && clicked >= 0)
+            owner.onSelect(clicked);
+    }
+    else if (clickInSelection && clicked >= 0)
+    {
+        // A click on a multi-selection, with no drag, collapses to that file.
+        owner.selectedEntries.clear();
+        owner.setSelectedIndex(clicked);
+    }
 }
 
 void FileListPanel::ListContent::mouseDrag(const juce::MouseEvent& e)
@@ -3530,6 +3689,26 @@ void FileListPanel::ListContent::mouseDrag(const juce::MouseEvent& e)
     {
         owner.dragNameColumnResize(e.getScreenX());
         return;
+    }
+
+    if (rangeDragDisplay >= 0)
+    {
+        const int dy = std::abs(e.getDistanceFromDragStartY());
+        const int dx = std::abs(e.getDistanceFromDragStartX());
+        if (dy >= 4 && dy >= dx)
+        {
+            const int edge = 8;
+            if (e.y >= getHeight() - edge)
+                owner.setScrollRow(owner.scrollRow + 1);
+            else if (e.y < edge)
+                owner.setScrollRow(owner.scrollRow - 1);
+            const int y = juce::jlimit(0, juce::jmax(0, getHeight() - 1), e.y);
+            const int disp = owner.displayIndexAtContentY(y);
+            if (disp >= 0)
+                owner.replaceSelectionWithRange(rangeDragDisplay, disp);
+            dragSourcePath.clear();
+            return;
+        }
     }
 
     if (dragSourcePath.isEmpty() || e.getDistanceFromDragStart() < 8)
@@ -3742,6 +3921,18 @@ void BrowserToolbar::resized()
 
 void BrowserToolbar::mouseDown(const juce::MouseEvent& e)
 {
+    if (e.mods.isPopupMenu() && countBounds.contains(e.getPosition()))
+    {
+        juce::PopupMenu m;
+        m.addItem(1, "Export as Zip", onExportListedFiles != nullptr && shownCount > 0);
+        m.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(this).withMousePosition(),
+                        [this](int result)
+                        {
+                            if (result == 1 && onExportListedFiles)
+                                onExportListedFiles();
+                        });
+        return;
+    }
     if (e.mods.isPopupMenu() && titleBounds.contains(e.getPosition()) && folderPath.isDirectory())
     {
         const juce::File folder = folderPath;
@@ -3768,9 +3959,11 @@ void BrowserToolbar::mouseMove(const juce::MouseEvent& e)
     if (over != resetHover)
     {
         resetHover = over;
-        setMouseCursor(over ? juce::MouseCursor::PointingHandCursor : juce::MouseCursor::NormalCursor);
         repaint(resetBounds.expanded(2));
     }
+    const bool overCount = countBounds.contains(e.getPosition());
+    setMouseCursor(over || overCount ? juce::MouseCursor::PointingHandCursor
+                                     : juce::MouseCursor::NormalCursor);
 }
 
 void BrowserToolbar::mouseExit(const juce::MouseEvent&)

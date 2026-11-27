@@ -1314,10 +1314,15 @@ static const std::uint8_t* drumGrooveCell(DrumStyle style, std::uint32_t seed)
         { kDk, 0, 0, 0, 0, 0, kDo, 0, kDs, 0, 0, 0, 0, 0, 0, 0 },
         { kDk, 0, 0, 0, 0, 0, 0, 0, 0, kDs, 0, 0, 0, 0, 0, 0 }
     };
-    static constexpr std::uint8_t kFunk[3][16] = {
-        { kDk|kDh, kDh, kDh, kDg, kDs|kDh, kDh, kDk|kDh, kDh, kDh, kDh, kDh, kDg, kDs|kDh, kDh, kDh, kDh },
-        { kDk|kDh, kDh, kDh, kDh, kDs|kDh, kDh, kDk|kDh, kDg, kDh, kDh, kDh, kDh, kDs|kDh, kDh, kDk|kDh, kDg },
-        { kDk|kDh, kDh, kDh, kDk, kDs|kDh, kDh, kDk|kDh, kDh, kDh, kDg, kDk|kDh, kDh, kDs|kDh, kDh, kDh, kDg }
+    static constexpr std::uint8_t kFunk[4][16] = {
+        // Swung 8ths. Kick on 1, the a of 1, the and of 2, the and of 3.
+        { kDk|kDh, 0, kDh, kDk, kDs|kDh, kDg, kDk|kDh, kDg, kDh, 0, kDk|kDh, 0, kDs|kDh, kDg, kDh, kDg },
+        // Kick pushes into beat 3. Open hat on the and of 4.
+        { kDk|kDh, 0, kDh, 0, kDs|kDh, kDg, kDh, kDk, kDh, 0, kDk|kDh, kDg, kDs|kDh, kDg, kDo, 0 },
+        // 16ths with a loud and and a quiet e/a. Same kick syncopation.
+        { kDk|kDh, kDh, kDh, kDk|kDh, kDs|kDh, kDg|kDh, kDk|kDh, kDh, kDh, kDh, kDk|kDh, kDh, kDs|kDh, kDg|kDh, kDh, kDh },
+        // Linear: hats only on the ands, ghosts fill the 16ths between the backbeats.
+        { kDk, kDg, kDh, kDk, kDs, kDg, kDh, kDg, 0, kDg, kDk|kDh, kDg, kDs, kDg, kDh, kDg }
     };
     static constexpr std::uint8_t kBreak[4][16] = {
         { kDk, 0, kDh, 0, kDs, 0, kDh, 0, 0, 0, kDk|kDh, 0, kDs, 0, kDh, 0 },
@@ -1341,7 +1346,7 @@ static const std::uint8_t* drumGrooveCell(DrumStyle style, std::uint32_t seed)
         case DrumStyle::DubTechno:  bank = kDubTechno[0]; break;
         case DrumStyle::Reggae:     bank = kReggae[0]; break;
         case DrumStyle::Dub:        bank = kDub[0]; break;
-        case DrumStyle::Funk:       bank = kFunk[0]; count = 3; break;
+        case DrumStyle::Funk:       bank = kFunk[0]; break;
         case DrumStyle::Breakbeat:  bank = kBreak[0]; break;
         case DrumStyle::Dnb:        bank = kDnb[0]; break;
         case DrumStyle::Count:      break;
@@ -1482,6 +1487,24 @@ void renderDrums(const GrooveParams& g, double startPpq, double endPpq, std::vec
             {
                 hits.clear();
                 hitsFromDrumCell(drumGrooveCell(g.drumStyle(), motifSeed)[step], hits);
+                if (g.drumStyle() == DrumStyle::Funk)
+                {
+                    // Accent the "and", keep the "e" and "a" quiet, and lay the
+                    // ghosts slightly behind the backbeat. Flat 16th hats read as a machine.
+                    for (auto& hit : hits)
+                    {
+                        if (hit.note == 42)
+                        {
+                            if ((step % 4) == 2) hit.velocity = 98;
+                            else if ((step % 4) == 0) hit.velocity = 66;
+                            else hit.velocity = 46;
+                        }
+                        else if (hit.note == 38 && hit.velocity < 80)
+                            hit.ticks = 12;
+                        else if (hit.note == 36 && (step % 4) == 3)
+                            hit.ticks = -8;
+                    }
+                }
                 const float fillAmt = clampf((float) g.drumFill / 100.0f, 0.0f, 1.0f);
                 if (fillBar && fillAmt > 0.05f && step >= 12)
                 {

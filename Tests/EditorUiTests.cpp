@@ -529,3 +529,62 @@ TEST_CASE("Header logo tracks the traffic-light zone and drops Toolkit before MI
     REQUIRE(sawMidi);
     REQUIRE(sawGlyph);
 }
+
+TEST_CASE("writeFilesToZip stores every file and renames duplicates", "[editorui]")
+{
+    auto root = juce::File::getSpecialLocation(juce::File::tempDirectory)
+                    .getChildFile("miditoolkit-zip-"
+                                  + juce::String(juce::Random::getSystemRandom().nextInt()));
+    root.createDirectory();
+    auto aDir = root.getChildFile("a");
+    auto bDir = root.getChildFile("b");
+    aDir.createDirectory();
+    bDir.createDirectory();
+    auto a = aDir.getChildFile("loop.mid");
+    auto b = bDir.getChildFile("loop.mid");
+    auto c = aDir.getChildFile("other.mid");
+    a.replaceWithText("aaa");
+    b.replaceWithText("bbb");
+    c.replaceWithText("ccc");
+
+    auto zip = root.getChildFile("out.zip");
+    REQUIRE(writeFilesToZip(zip, { a, b, c, root.getChildFile("missing.mid") }));
+    REQUIRE_FALSE(zip.getSiblingFile("out.tmp.zip").existsAsFile());
+
+    juce::ZipFile archive(zip);
+    REQUIRE(archive.getNumEntries() == 3);
+    auto read = [&](const juce::String& name)
+    {
+        const auto* entry = archive.getEntry(name);
+        REQUIRE(entry != nullptr);
+        std::unique_ptr<juce::InputStream> in(archive.createStreamForEntry(*entry));
+        REQUIRE(in != nullptr);
+        return in->readEntireStreamAsString();
+    };
+    REQUIRE(read("loop.mid") == "aaa");
+    REQUIRE(read("loop 2.mid") == "bbb");
+    REQUIRE(read("other.mid") == "ccc");
+    REQUIRE_FALSE(writeFilesToZip(zip, {}));
+
+    juce::ScopedJuceInitialiser_GUI gui;
+    FileListPanel list;
+    std::vector<FileListEntry> entries(2);
+    entries[0].file = aDir;
+    entries[0].name = "a";
+    entries[0].isDirectory = true;
+    entries[1].file = a;
+    entries[1].name = "loop";
+    list.setEntries(std::move(entries));
+    REQUIRE(list.hasListedMidiFiles());
+    auto listed = list.listedMidiFiles();
+    REQUIRE(listed.size() == 1);
+    REQUIRE(listed[0].getFullPathName() == a.getFullPathName());
+    list.setSelectedIndex(1, juce::dontSendNotification);
+    auto selected = list.selectedMidiFiles();
+    REQUIRE(selected.size() == 1);
+    REQUIRE(selected[0].getFullPathName() == a.getFullPathName());
+    list.setSelectedIndex(0, juce::dontSendNotification);
+    REQUIRE(list.selectedMidiFiles().empty());
+
+    root.deleteRecursively();
+}

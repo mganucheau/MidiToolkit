@@ -59,7 +59,7 @@ Do not copy another pack and rename it. These are the differences the tests chec
 - **Techno.** Kick on all four beats. Hats or riffs on most steps. Short gates.
 - **Dub Techno.** Same four-on-the-floor kick as Techno, with fewer hats, fewer chords, a longer bass note, and more empty steps. Not a beat-3 one-drop.
 - **DNB.** About 170–176 BPM. Snare on beats 2 and 4, syncopated kicks, at least one ghost snare, rolling 16th bass. The menu label is DNB.
-- **Funk.** Syncopated kick, ghost snares, swung hats.
+- **Funk.** Syncopated kick, not four-on-the-floor. Snare on beats 2 and 4. Ghost snares sit in the 16ths just after the backbeat, a little late. Hats accent the off-beat (louder "and", quieter "e" and "a") with a light layback. A flat 16th hat at one velocity, or a heavy shuffle on only those off-beats, is not funk.
 
 ## Adding a genre
 

@@ -17,6 +17,9 @@
 
 namespace pflow {
 
+/** Writes each existing file into dest. Duplicate filenames get a numeric suffix. */
+bool writeFilesToZip(const juce::File& dest, const std::vector<juce::File>& files);
+
 // Cupertino shell: toolbar / [sidebar | file table + preview | editor? | effects?]
 
 class MidiToolkitEditor : public juce::AudioProcessorEditor,
@@ -103,6 +106,8 @@ private:
     void copyFileToFolder(const juce::File& file);
     void copyStarredToFolder();
     void exportLibraryFolder();
+    void exportListedFilesAsZip();
+    void exportFilesAsZip(std::vector<juce::File> files, const juce::String& dialogTitle);
     void copyRenderedClipToFolder();
     void applyLayoutState();
     void updateWindowLimits();

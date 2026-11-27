@@ -797,6 +797,7 @@ MidiToolkitEditor::MidiToolkitEditor(MidiToolkitProcessor& p)
             rootDir.revealToUser();
     };
     browserBar.onExportLibraryFolder = [this] { exportLibraryFolder(); };
+    browserBar.onExportListedFiles = [this] { exportListedFilesAsZip(); };
     browserBar.onResetFilters = [this]
     {
         sidebar.resetFilters();
@@ -1009,6 +1010,11 @@ MidiToolkitEditor::MidiToolkitEditor(MidiToolkitProcessor& p)
     fileList.onActivated = [this] { claimKeyNav(KeyNavTarget::Browser); };
     fileList.onRevealFile = [](const juce::File& f) { f.revealToUser(); };
     fileList.onCopyFileToFolder = [this](const juce::File& f) { copyFileToFolder(f); };
+    fileList.onExportFilesAsZip = [this](std::vector<juce::File> files)
+    {
+        exportFilesAsZip(std::move(files), "Save as Zip");
+    };
+    fileList.onExportListedAsZip = [this] { exportListedFilesAsZip(); };
     fileList.onSetKind = [this](const juce::File& file, ClipKind kind)
     {
         const auto path = file.getFullPathName();
@@ -3946,6 +3952,113 @@ void MidiToolkitEditor::copyStarredToFolder()
                     dest.deleteFile();
                 src.copyFileTo(dest);
             }
+        });
+}
+
+bool writeFilesToZip(const juce::File& dest, const std::vector<juce::File>& files)
+{
+    if (files.empty())
+        return false;
+
+    auto parent = dest.getParentDirectory();
+    if (!parent.isDirectory())
+        parent.createDirectory();
+
+    // Write beside the destination, then swap, so a cancelled or failed export
+    // never leaves a half-written zip where the user asked to save.
+    const auto temp = dest.getSiblingFile(dest.getFileNameWithoutExtension() + ".tmp.zip");
+    if (temp.existsAsFile())
+        temp.deleteFile();
+
+    juce::ZipFile::Builder builder;
+    std::set<juce::String> used;
+    int added = 0;
+    for (const auto& file : files)
+    {
+        if (!file.existsAsFile())
+            continue;
+        auto name = file.getFileName();
+        if (name.isEmpty())
+            continue;
+        if (used.count(name) != 0)
+        {
+            const auto stem = file.getFileNameWithoutExtension();
+            const auto ext = file.getFileExtension();
+            int n = 2;
+            do
+                name = stem + " " + juce::String(n++) + ext;
+            while (used.count(name) != 0);
+        }
+        used.insert(name);
+        builder.addFile(file, 6, name);
+        ++added;
+    }
+    if (added == 0)
+        return false;
+
+    bool wrote = false;
+    {
+        std::unique_ptr<juce::FileOutputStream> out(temp.createOutputStream());
+        if (out == nullptr)
+            return false;
+        wrote = builder.writeToStream(*out, nullptr);
+        out.reset();
+    }
+    if (!wrote)
+    {
+        temp.deleteFile();
+        return false;
+    }
+    if (dest.existsAsFile())
+        dest.deleteFile();
+    if (!temp.moveFileTo(dest))
+    {
+        temp.deleteFile();
+        return false;
+    }
+    return true;
+}
+
+void MidiToolkitEditor::exportListedFilesAsZip()
+{
+    exportFilesAsZip(fileList.listedMidiFiles(), "Export as Zip");
+}
+
+void MidiToolkitEditor::exportFilesAsZip(std::vector<juce::File> files, const juce::String& dialogTitle)
+{
+    if (files.empty())
+        return;
+
+    juce::String leaf = "MIDI Files";
+    if (rootDir.isDirectory() && rootDir.getFileName().isNotEmpty())
+        leaf = rootDir.getFileName();
+    if (files.size() == 1)
+        leaf = files.front().getFileNameWithoutExtension();
+    leaf = juce::File::createLegalFileName(leaf);
+    if (leaf.isEmpty())
+        leaf = "MIDI Files";
+
+    auto startDir = rootDir.isDirectory() ? rootDir.getParentDirectory()
+                                          : juce::File::getSpecialLocation(juce::File::userDocumentsDirectory);
+    if (!startDir.isDirectory())
+        startDir = juce::File::getSpecialLocation(juce::File::userDocumentsDirectory);
+
+    auto chooser = std::make_shared<juce::FileChooser>(
+        dialogTitle, startDir.getChildFile(leaf + ".zip"), "*.zip");
+    chooser->launchAsync(juce::FileBrowserComponent::saveMode
+                             | juce::FileBrowserComponent::canSelectFiles
+                             | juce::FileBrowserComponent::warnAboutOverwriting,
+        [chooser, files](const juce::FileChooser& fc)
+        {
+            auto dest = fc.getResult();
+            if (dest.getFullPathName().isEmpty())
+                return;
+            if (!dest.hasFileExtension(".zip"))
+                dest = dest.withFileExtension(".zip");
+            juce::Thread::launch([dest, files]
+            {
+                writeFilesToZip(dest, files);
+            });
         });
 }
 

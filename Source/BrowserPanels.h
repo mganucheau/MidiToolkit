@@ -1,5 +1,6 @@
 #pragma once
 #include <juce_gui_basics/juce_gui_basics.h>
+#include <set>
 #include <vector>
 #include "EditModel.h"
 #include "UiAtoms.h"
@@ -538,6 +539,14 @@ public:
     std::function<void(const juce::File&)> onRevealFile;
     std::function<void(const juce::File&)> onCopyFileToFolder;
     std::function<void(const juce::File&, ClipKind)> onSetKind;
+    /** Right-click a file row: zip the current multi-selection, or that file. */
+    std::function<void(std::vector<juce::File>)> onExportFilesAsZip;
+    /** Right-click a column title: zip every file in the list. */
+    std::function<void()> onExportListedAsZip;
+
+    std::vector<juce::File> selectedMidiFiles() const;
+    std::vector<juce::File> listedMidiFiles() const;
+    bool hasListedMidiFiles() const;
 
     void setSort(SortColumn column, bool ascending);
 
@@ -565,6 +574,8 @@ private:
         int hoverRow = -1;
         bool hoverStar = false;
         juce::String dragSourcePath;
+        /** Display row where a click-drag selection started. -1 when idle. */
+        int rangeDragDisplay = -1;
     };
 
     struct ColumnRects
@@ -616,6 +627,7 @@ private:
     void scrollBarMoved(juce::ScrollBar*, double newRangeStart) override;
     int displayToEntry(int displayIdx) const;
     int entryToDisplay(int entryIdx) const;
+    void replaceSelectionWithRange(int displayA, int displayB);
     juce::Rectangle<int> headerColumnBounds(SortColumn col) const;
     ColumnRects splitRowColumns(juce::Rectangle<int> row) const;
     int totalContentWidth() const;
@@ -639,6 +651,14 @@ private:
     int nameResizeStartScreenX = 0;
     int nameResizeStartW = kNameWDefault;
     int selected = -1;
+    /** Entry indices in the click-drag (or shift/cmd) selection. Folders are omitted. */
+    std::set<int> selectedEntries;
+    /** Display row a shift-click extends from. */
+    int rangeAnchorDisplay = -1;
+    /** True while a drag is painting a contiguous row band. */
+    bool selectingRange = false;
+    int selectionDisplayLo = -1;
+    int selectionDisplayHi = -1;
     bool playing = false;
     bool searching = false;
     int scanDone = 0;
@@ -785,6 +805,8 @@ public:
     std::function<void()> onToggleStarFolder;
     std::function<void()> onRevealInFinder;
     std::function<void()> onExportLibraryFolder;
+    /** Right-click the file-count label: zip every file in the current listing. */
+    std::function<void()> onExportListedFiles;
 
 private:
     juce::String filterStripText() const;
