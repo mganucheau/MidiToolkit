@@ -44,6 +44,45 @@ TEST_CASE("writeMidiFile and parseMidiFile round-trip preserves note data", "[Mi
     REQUIRE(parsed.notes[1].channel == 2);
 }
 
+TEST_CASE("parseMidiFile keeps the beat grid when tempo is not on track 0", "[MidiFileData][qa]")
+{
+    juce::MidiFile mf;
+    constexpr int tpq = 480;
+    mf.setTicksPerQuarterNote(tpq);
+
+    juce::MidiMessageSequence notes;
+    notes.addEvent(juce::MidiMessage::noteOn(1, 36, (juce::uint8) 100), 0.0);
+    notes.addEvent(juce::MidiMessage::noteOff(1, 36), (double) tpq);
+    notes.addEvent(juce::MidiMessage::noteOn(1, 38, (juce::uint8) 100), (double) tpq);
+    notes.addEvent(juce::MidiMessage::noteOff(1, 38), (double) tpq * 2.0);
+    notes.updateMatchedPairs();
+
+    juce::MidiMessageSequence tempo;
+    tempo.addEvent(juce::MidiMessage::tempoMetaEvent((int) (60000000.0 / 90.0)), 0.0);
+
+    mf.addTrack(notes);
+    mf.addTrack(tempo); // type 1: tempo may live on a later track
+
+    const auto file = test::tempMidiFile("tempo-other-track.mid");
+    file.getParentDirectory().createDirectory();
+    file.deleteFile();
+    {
+        juce::FileOutputStream out(file);
+        REQUIRE(out.openedOk());
+        REQUIRE(mf.writeTo(out, 1));
+    }
+
+    const auto clip = parseMidiFile(file);
+    test::removeTempMidiFile(file);
+
+    CHECK(clip.bpm == Approx(90.0).margin(0.1));
+    REQUIRE(clip.notes.size() == 2);
+    CHECK(clip.notes[0].startBeat == Approx(0.0).margin(0.01));
+    CHECK(clip.notes[0].lengthBeats == Approx(1.0).margin(0.01));
+    CHECK(clip.notes[1].noteNumber == 38);
+    CHECK(clip.notes[1].startBeat == Approx(1.0).margin(0.01));
+}
+
 TEST_CASE("writeMidiFile rejects empty clips", "[MidiFileData][qa]")
 {
     MidiClip empty;

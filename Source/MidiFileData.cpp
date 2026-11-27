@@ -50,6 +50,60 @@ std::vector<int> MidiClip::getDistinctPitches() const
 
 // ── MIDI file parser ─────────────────────────────────────────────────────────
 
+MidiFileTiming inspectMidiTiming(juce::MidiFile& file)
+{
+    MidiFileTiming timing;
+    const int format = file.getTimeFormat();
+    timing.ticksPerBeat = format > 0 ? (double) format : 0.0;
+
+    bool foundTempo = false;
+    double tempoAt = 0.0;
+    bool foundSig = false;
+
+    for (int t = 0; t < file.getNumTracks(); ++t)
+    {
+        auto* track = file.getTrack(t);
+        if (track == nullptr)
+            continue;
+        for (int i = 0; i < track->getNumEvents(); ++i)
+        {
+            auto& ev = track->getEventPointer(i)->message;
+            if (ev.isTempoMetaEvent())
+            {
+                const double sec = ev.getTempoSecondsPerQuarterNote();
+                if (sec > 1.0e-9 && (!foundTempo || ev.getTimeStamp() < tempoAt))
+                {
+                    timing.bpm = 60.0 / sec;
+                    tempoAt = ev.getTimeStamp();
+                    foundTempo = true;
+                }
+            }
+            else if (!foundSig && ev.isTimeSignatureMetaEvent())
+            {
+                int num = 4, den = 4;
+                ev.getTimeSignatureInfo(num, den);
+                timing.timeSigNum = juce::jmax(1, num);
+                timing.timeSigDen = juce::jmax(1, den);
+                foundSig = true;
+            }
+        }
+    }
+
+    // SMPTE timestamps are not quarter-note ticks. Convert once, then divide
+    // by the tempo we just found. PPQ files stay in ticks.
+    if (timing.ticksPerBeat <= 0.0)
+        file.convertTimestampTicksToSeconds();
+    return timing;
+}
+
+double midiTimestampToBeats(double timestamp, const MidiFileTiming& timing)
+{
+    if (timing.ticksPerBeat > 0.0)
+        return timestamp / timing.ticksPerBeat;
+    const double secPerBeat = 60.0 / juce::jmax(1.0, timing.bpm);
+    return timestamp / secPerBeat;
+}
+
 MidiClip parseMidiFile(const juce::File& file)
 {
     MidiClip clip;
@@ -62,65 +116,10 @@ MidiClip parseMidiFile(const juce::File& file)
     juce::MidiFile midiFile;
     if (!midiFile.readFrom(stream)) return clip;
 
-    midiFile.convertTimestampTicksToSeconds();
-
-    double bpm = 120.0; // default
-    int timeSigNum = 4;
-    int timeSigDen = 4;
-    // Try to read tempo / time signature from the file
-    if (midiFile.getNumTracks() > 0)
-    {
-        auto* track = midiFile.getTrack(0);
-        for (int i = 0; i < track->getNumEvents(); ++i)
-        {
-            auto& ev = track->getEventPointer(i)->message;
-            if (ev.isTempoMetaEvent())
-            {
-                bpm = 60.0 / ev.getTempoSecondsPerQuarterNote();
-                break;
-            }
-        }
-        for (int i = 0; i < track->getNumEvents(); ++i)
-        {
-            auto& ev = track->getEventPointer(i)->message;
-            if (ev.isTimeSignatureMetaEvent())
-            {
-                int num = 4, den = 4;
-                ev.getTimeSignatureInfo(num, den);
-                timeSigNum = juce::jmax(1, num);
-                timeSigDen = juce::jmax(1, den);
-                break;
-            }
-        }
-        // Also scan other tracks for a time signature if track 0 had none.
-        if (timeSigNum == 4 && timeSigDen == 4)
-        {
-            for (int t = 0; t < midiFile.getNumTracks(); ++t)
-            {
-                auto* tr = midiFile.getTrack(t);
-                if (tr == nullptr) continue;
-                for (int i = 0; i < tr->getNumEvents(); ++i)
-                {
-                    auto& ev = tr->getEventPointer(i)->message;
-                    if (ev.isTimeSignatureMetaEvent())
-                    {
-                        int num = 4, den = 4;
-                        ev.getTimeSignatureInfo(num, den);
-                        timeSigNum = juce::jmax(1, num);
-                        timeSigDen = juce::jmax(1, den);
-                        break;
-                    }
-                }
-                if (timeSigNum != 4 || timeSigDen != 4)
-                    break;
-            }
-        }
-    }
-
-    clip.bpm = bpm;
-    clip.timeSigNum = timeSigNum;
-    clip.timeSigDen = timeSigDen;
-    double secPerBeat = 60.0 / bpm;
+    const auto timing = inspectMidiTiming(midiFile);
+    clip.bpm = timing.bpm;
+    clip.timeSigNum = timing.timeSigNum;
+    clip.timeSigDen = timing.timeSigDen;
     double maxBeat = 0.0;
 
     for (int t = 0; t < midiFile.getNumTracks(); ++t)
@@ -143,10 +142,11 @@ MidiClip parseMidiFile(const juce::File& file)
                 ne.noteNumber = msg.getNoteNumber();
                 ne.velocity   = msg.getVelocity();
                 ne.channel    = msg.getChannel();
-                ne.startBeat  = msg.getTimeStamp() / secPerBeat;
+                ne.startBeat  = midiTimestampToBeats(msg.getTimeStamp(), timing);
 
                 if (evHolder->noteOffObject != nullptr)
-                    ne.lengthBeats = (evHolder->noteOffObject->message.getTimeStamp() - msg.getTimeStamp()) / secPerBeat;
+                    ne.lengthBeats = midiTimestampToBeats(
+                        evHolder->noteOffObject->message.getTimeStamp() - msg.getTimeStamp(), timing);
                 else
                     ne.lengthBeats = 0.25;
 
@@ -157,7 +157,7 @@ MidiClip parseMidiFile(const juce::File& file)
 
         // Honour the file's intended length (end-of-track marker), so loops
         // exported with trailing space keep their trimmable empty bars.
-        maxBeat = std::max(maxBeat, track.getEndTime() / secPerBeat);
+        maxBeat = std::max(maxBeat, midiTimestampToBeats(track.getEndTime(), timing));
     }
 
     // Clip length = actual content extent only (no bar quantisation or minimum bar padding).

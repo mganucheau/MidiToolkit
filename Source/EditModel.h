@@ -196,7 +196,7 @@ void refitNotesToScale(std::vector<RollNote>& notes, int rootPc, Mode mode,
                        const NoteProcessScope& scope = {});
 
 /** Note Filter: Mute drops filtered pitch-classes; Fold remaps to nearest kept class. */
-enum class NoteFilterType { Mute = 0, Fold = 1 };
+enum class NoteFilterType { Mute = 0, Fold = 1, Off = 2 };
 
 /** Snap midi to the nearest pitch-class allowed by `enabledMask` (bit = PC enabled).
     Prefers tones in scale(root, mode) when rootPc >= 0. */
@@ -304,7 +304,9 @@ struct NotePitchSettings
     int root = -1;
     Mode mode = Mode::Ionian;
     uint16_t noteFilterMask = 0x0FFF;
-    NoteFilterType noteFilterType = NoteFilterType::Mute;
+    NoteFilterType noteFilterType = NoteFilterType::Off;
+    /** Map the kit so the kick lands on C1. Pitch and scale are bypassed. */
+    bool drumMap = false;
 
     bool operator==(const NotePitchSettings& o) const
     {
@@ -314,7 +316,8 @@ struct NotePitchSettings
             && reverse == o.reverse && invert == o.invert
             && fitScale == o.fitScale && mapToRoot == o.mapToRoot
             && root == o.root && mode == o.mode
-            && noteFilterMask == o.noteFilterMask && noteFilterType == o.noteFilterType;
+            && noteFilterMask == o.noteFilterMask && noteFilterType == o.noteFilterType
+            && drumMap == o.drumMap;
     }
 };
 
@@ -346,7 +349,9 @@ struct ClipEdit
     Mode mode      = Mode::Ionian;  // displayed as "Major"
     /** Bit i set = pitch-class i is kept (default: all 12 on). */
     uint16_t noteFilterMask = 0x0FFF;
-    NoteFilterType noteFilterType = NoteFilterType::Fold;
+    NoteFilterType noteFilterType = NoteFilterType::Off;
+    /** Treat the clip as a drum kit: kick → C1, no key or scale filtering. */
+    bool drumMap = false;
     std::map<int, NoteMove> moves;  // per-note manual moves keyed by note id
     /** Empty bars removed by Trim (any position, including middle gaps).
         Sorted ascending. Legacy trimLead/trimTail are migrated on load. */
@@ -424,6 +429,7 @@ inline NotePitchSettings capturePitchSettings(const ClipEdit& e)
     s.mode = e.mode;
     s.noteFilterMask = e.noteFilterMask;
     s.noteFilterType = e.noteFilterType;
+    s.drumMap = e.drumMap;
     return s;
 }
 
@@ -443,6 +449,7 @@ inline void applyPitchSettings(ClipEdit& e, const NotePitchSettings& s)
     e.mode = s.mode;
     e.noteFilterMask = s.noteFilterMask;
     e.noteFilterType = s.noteFilterType;
+    e.drumMap = s.drumMap;
 }
 
 inline bool pitchSettingsActive(const NotePitchSettings& s)
@@ -451,6 +458,12 @@ inline bool pitchSettingsActive(const NotePitchSettings& s)
 }
 
 bool editIsClean(const ClipEdit& e);
+
+/** Browse seed for an unlocked clip. Octave range stays Off — the analyzed
+    span is not a fold. A drum clip also stays out of any guessed key so the
+    kit is not filtered or refit. A range the user set to something other than
+    that analyzed span is left alone. */
+void prepareBrowsePitchEdit(ClipEdit& e, const StepClip& clip);
 
 /** Copy pitch-shaping fields (octave, fit-to-scale, map-to-root, root, mode,
     note filter) from `locked` into `target`. Per-note moves, trim, and extend

@@ -288,6 +288,8 @@ private:
     bool wasSounding_ = false;
     bool wasHostPlaying_ = false;
     bool activeNotes_[16][128] = {};   // audio-thread ledger of held note-ons
+    /** Clip-local end beat of each held note. May sit past the loop when the note crosses it. */
+    double activeNoteEnd_[16][128] = {};
     /** Pitch Input shift (semitones) for this block; per-note ledger keeps note-offs paired. */
     int previewInputShift_ = 0;
     juce::int8 previewNoteShift_[16][128] = {};

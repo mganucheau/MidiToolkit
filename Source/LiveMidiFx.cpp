@@ -141,7 +141,7 @@ int transformLivePitch(int midi, const ClipEdit& edit, int sourceRoot, int sourc
                        bool drumChannel, int pitchInputMidi)
 {
     int pitch = juce::jlimit(0, 127, midi);
-    if (drumChannel)
+    if (drumChannel || edit.drumMap)
         return pitch;
 
     const int srcOct = juce::jlimit(0, 6, sourceOctave);
@@ -175,7 +175,7 @@ int transformLivePitch(int midi, const ClipEdit& edit, int sourceRoot, int sourc
     if (edit.fitScale && edit.root >= 0)
         pitch = fitToScale(pitch, edit.root, edit.mode);
 
-    if (edit.hasNoteFilter() && edit.noteFilterType == NoteFilterType::Fold)
+    if (edit.noteFilterType == NoteFilterType::Fold && edit.hasNoteFilter())
         pitch = foldToEnabledPitchClasses(pitch, edit.noteFilterMask, edit.root, edit.mode);
 
     return juce::jlimit(0, 127, pitch);
@@ -183,8 +183,9 @@ int transformLivePitch(int midi, const ClipEdit& edit, int sourceRoot, int sourc
 
 bool liveNoteMuted(int midi, const ClipEdit& edit)
 {
-    return edit.hasNoteFilter()
+    return !edit.drumMap
         && edit.noteFilterType == NoteFilterType::Mute
+        && edit.hasNoteFilter()
         && !edit.isNoteFilterEnabled(midi);
 }
 

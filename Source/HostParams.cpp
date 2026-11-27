@@ -347,16 +347,20 @@ void HostParams::create(juce::AudioProcessor& owner)
     }
     {
         auto* p = new juce::AudioParameterChoice(pid("tk_filter_type"), "Filter Type",
-                                                 juce::StringArray { "Mute", "Fold" }, 1);
+                                                 juce::StringArray { "Mute", "Fold", "Off" }, 2);
         owner.addParameter(p);
         add(p, Target::Edit,
             [](const GrooveParams&, const ClipEdit& e, double)
             {
-                return e.noteFilterType == NoteFilterType::Fold ? 1 : 0;
+                if (e.noteFilterType == NoteFilterType::Fold) return 1;
+                if (e.noteFilterType == NoteFilterType::Off) return 2;
+                return 0;
             },
             [](GrooveParams&, ClipEdit& e, double&, int v)
             {
-                e.noteFilterType = v == 1 ? NoteFilterType::Fold : NoteFilterType::Mute;
+                e.noteFilterType = v == 1 ? NoteFilterType::Fold
+                                 : v == 2 ? NoteFilterType::Off
+                                          : NoteFilterType::Mute;
             });
     }
     {
@@ -469,6 +473,7 @@ void HostParams::create(juce::AudioProcessor& owner)
     addGrooveInt(owner, "gen_melody_density", "Melody Density", 0, 100, 100, &GrooveParams::melodyDensity);
     addGrooveInt(owner, "gen_chords_density", "Chords Density", 0, 100, 100, &GrooveParams::chordDensity);
     addGrooveInt(owner, "gen_bass_density", "Bass Density", 0, 100, 100, &GrooveParams::bassDensity);
+    addEditBool(owner, "tk_drum_map", "Drums", false, &ClipEdit::drumMap);
 
     // Listen only after everything exists so construction never self-triggers.
     dirtyCount_ = (int) bindings_.size() + 1;

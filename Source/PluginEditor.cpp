@@ -1349,7 +1349,8 @@ MidiToolkitEditor::MidiToolkitEditor(MidiToolkitProcessor& p)
                 e.root = -1;
                 e.mode = Mode::Ionian;
                 e.noteFilterMask = 0x0FFF;
-                e.noteFilterType = NoteFilterType::Fold;
+                e.noteFilterType = NoteFilterType::Off;
+                e.drumMap = false;
             }
             if ((locks & toolkitLock::Playback) == 0)
                 e.extendMult = 1;
@@ -3269,16 +3270,42 @@ void MidiToolkitEditor::regenerateGeneratedClip(const GrooveParams& groove)
     }
 
     const double prevBpm = recordedClip.bpm;
-    recordedClip = gen::renderPartClip(part, groove, keyRoot, edit.mode,
-                                       chordCount > 0 ? chordBuf : nullptr, chordCount);
-    if (part != gen::Part::Drums && edit.root >= 0)
+    auto signatureOf = [](const StepClip& clip)
     {
-        for (auto& n : recordedClip.notes)
-            n.pitch = fitToScale(n.pitch, edit.root, edit.mode);
+        std::set<std::pair<int, int>> keys;
+        for (const auto& n : clip.notes)
+            keys.insert({ (int) std::lround(n.start), n.pitch });
+        return keys;
+    };
+    const bool compareToPrevious = !firstGenerate && previous.filePath.startsWith("generator://");
+    const auto previousKeys = compareToPrevious ? signatureOf(previous) : std::set<std::pair<int, int>>{};
+    GrooveParams rolling = groove;
+    bool bumpedSeed = false;
+    for (int attempt = 0; attempt < 8; ++attempt)
+    {
+        recordedClip = gen::renderPartClip(part, rolling, keyRoot, edit.mode,
+                                           chordCount > 0 ? chordBuf : nullptr, chordCount);
+        if (part != gen::Part::Drums && edit.root >= 0)
+            for (auto& n : recordedClip.notes)
+                n.pitch = fitToScale(n.pitch, edit.root, edit.mode);
+        if (!compareToPrevious || signatureOf(recordedClip) != previousKeys)
+            break;
+        bumpedSeed = true;
+        switch (part)
+        {
+            case gen::Part::Arp:    rolling.arpNonce += 997; break;
+            case gen::Part::Melody: rolling.melodyNonce += 997; break;
+            case gen::Part::Chords: rolling.chordNonce += 997; break;
+            case gen::Part::Bass:   rolling.bassNonce += 997; break;
+            case gen::Part::Drums:  rolling.drumNonce += 997; break;
+            case gen::Part::Count:  break;
+        }
     }
+    if (bumpedSeed)
+        effectsInspector.setGroove(rolling, juce::dontSendNotification);
     std::set<int> newSel;
     const bool spliced = !firstGenerate && !oldSel.empty()
-        && spliceGeneratedSelection(recordedClip, previous, oldSel, newSel, edit, groove);
+        && spliceGeneratedSelection(recordedClip, previous, oldSel, newSel, edit, rolling);
     if (spliced)
         effectsInspector.setEdit(edit, juce::dontSendNotification);
     const double bpm = processorRef.hostBpm.load();
@@ -3405,17 +3432,12 @@ void MidiToolkitEditor::finishClipSelection()
 
     if ((locks & (toolkitLock::Pitch | toolkitLock::Playback)) == 0)
     {
-        // Unlocked: seed octave / range / key / mode from clip analysis.
+        // Unlocked: remember the analyzed key for melodic clips. Octave range
+        // stays Off, and a drum clip is not given a key — both of those were
+        // turning filters on and moving kit notes.
         auto& e = processorRef.editFor(clip.filePath);
-        if (editIsClean(e) || e.root < 0)
-        {
-            const auto analysis = analyseClipScale(clip);
-            e.octave = -1;
-            e.octaveRange = analysis.octaveRange;
-            e.root = analysis.primaryRoot;
-            e.mode = analysis.primaryMode;
-        }
-        if (haveCarriedScale)
+        prepareBrowsePitchEdit(e, clip);
+        if (haveCarriedScale && clip.kind != ClipKind::Drums)
         {
             e.fitScale = carriedScale.fitScale;
             e.mapToRoot = carriedScale.mapToRoot;
@@ -3485,7 +3507,14 @@ void MidiToolkitEditor::stampLockedSections(bool resetUnlockedGroove)
     {
         auto& e = processorRef.editFor(clip.filePath);
         if ((locks & toolkitLock::Pitch) != 0)
+        {
             applyPitchLock(processorRef.lockedEdit, e);
+            // Per-note stamps can still say "native octave" (-1) and then follow
+            // each file. The locked section is one value until it is unlocked.
+            const auto stamped = capturePitchSettings(e);
+            for (auto& entry : e.notePitch)
+                entry.second = stamped;
+        }
         if ((locks & toolkitLock::Playback) != 0)
             applyPlaybackLock(processorRef.lockedEdit, e, processorRef.lockAutoTrim, clip);
         refreshEntryMeta(index);
@@ -3504,6 +3533,11 @@ void MidiToolkitEditor::stampLockedSections(bool resetUnlockedGroove)
         {
             applyGrooveSectionLock(processorRef.lockedGroove, g, locks);
         }
+        // Same rule as pitch: a locked knob is one value, not each file's stamp.
+        auto& pitched = processorRef.editFor(clip.filePath);
+        const auto stamped = noteGrooveFrom(g);
+        for (auto& entry : pitched.noteGroove)
+            entry.second = stamped;
     }
 }
 
@@ -3601,7 +3635,7 @@ void MidiToolkitEditor::showScopeSettings()
         effectsInspector.setGroove(view, juce::dontSendNotification);
     }
 
-    if (!edit.notePitch.empty())
+    if (!edit.notePitch.empty() && (processorRef.sectionLocks & toolkitLock::Pitch) == 0)
     {
         NotePitchSettings shown{};
         bool first = true;

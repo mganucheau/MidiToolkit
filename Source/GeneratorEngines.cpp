@@ -475,6 +475,29 @@ void buildArpOrder(const GrooveParams& g, const std::vector<int>& pool,
         std::rotate(order.begin(), order.begin() + (order.size() / 2), order.end());
     else if (formLetter >= 2)
         std::reverse(order.begin(), order.end());
+
+    // Generate: move the same chord tones into other octaves and start the
+    // walk on a different one, so the figure is not the previous cycle.
+    if (g.arpNonce != 0 && !order.empty())
+    {
+        bool moved = false;
+        for (size_t i = 0; i < order.size(); ++i)
+        {
+            const float r = unit(seed, (int) i, 90, g.arpNonce);
+            const int before = order[i];
+            if (r < 0.5f)
+                order[i] = juce::jlimit(0, 127, order[i] + 12);
+            else if (r > 0.85f)
+                order[i] = juce::jlimit(0, 127, order[i] - 12);
+            if (order[i] != before)
+                moved = true;
+        }
+        if (!moved)
+            order[0] = juce::jlimit(0, 127, order[0] + 12);
+        const int rot = (int) (mix(seed ^ (std::uint32_t) g.arpNonce) % (std::uint32_t) order.size());
+        if (rot > 0)
+            std::rotate(order.begin(), order.begin() + rot, order.end());
+    }
 }
 
 /** Sting Density: 0% → 1 note, 100% → all 16 pattern steps, spaced evenly. */
@@ -612,6 +635,22 @@ void renderArp(const GrooveParams& g, double startPpq, double endPpq,
 
 // ── Melody ───────────────────────────────────────────────────────────────────
 
+static bool melodyCellStep(std::uint32_t seed, int styleIndex, int step)
+{
+    // Distinct 16-step rhythms. Bit 0 is step 0. Generate picks one of these
+    // instead of nudging the same downbeat grid.
+    static constexpr std::uint16_t kCells[] = {
+        (1u << 0) | (1u << 3) | (1u << 6) | (1u << 8) | (1u << 11) | (1u << 14),
+        (1u << 0) | (1u << 2) | (1u << 5) | (1u << 8) | (1u << 10) | (1u << 13),
+        (1u << 1) | (1u << 4) | (1u << 7) | (1u << 9) | (1u << 12) | (1u << 15),
+        (1u << 0) | (1u << 4) | (1u << 7) | (1u << 8) | (1u << 12) | (1u << 15),
+        (1u << 2) | (1u << 6) | (1u << 10) | (1u << 12) | (1u << 14),
+        (1u << 0) | (1u << 3) | (1u << 4) | (1u << 8) | (1u << 10) | (1u << 12) | (1u << 15)
+    };
+    const int idx = (int) ((mix(seed) + (std::uint32_t) styleIndex) % (std::uint32_t) (sizeof kCells / sizeof kCells[0]));
+    return (kCells[idx] & (std::uint16_t) (1u << (step & 15))) != 0;
+}
+
 bool melodyStepPlays(const GrooveParams& g, int phraseBar, int step)
 {
     const auto style = g.melodyStyle();
@@ -619,6 +658,15 @@ bool melodyStepPlays(const GrooveParams& g, int phraseBar, int step)
     const std::uint32_t seed = partSeed(g.melodyVariation, g.melodyNonce, g.melodyGenreIndex, 21);
     const auto feel = genreFeel(g.melodyGenre());
     const float roll = unit(seed, phraseBar, step, 8);
+
+    if (g.melodyNonce != 0)
+    {
+        if (!melodyCellStep(seed, g.melodyStyleIndex, step))
+            return false;
+        if (speed == MelodySpeed::Slow && (step % 2) == 1) return false;
+        if (speed == MelodySpeed::Medium && (step % 4) == 1) return false;
+        return true;
+    }
 
     if (speed == MelodySpeed::Slow && (step % 2) == 1) return false;
     if (speed == MelodySpeed::Medium && (step % 4) == 1) return false;
@@ -676,6 +724,22 @@ int melodyNote(const GrooveParams& g, const Harmony& harmony, int phraseBar, int
     const int low = std::max(36, center - 12);
     const int high = std::min(96, center + 12);
     const bool downbeat = step == 0 || step == 8;
+
+    if (g.melodyNonce != 0)
+    {
+        int index = 0;
+        for (int i = 0; i < count; ++i)
+            if ((keyRoot + deg[i]) % 12 == harmony.root) { index = i; break; }
+        const float amount = unit(seed, phraseBar, step, 13);
+        const int hops = 1 + (int) (amount * 6.0f);
+        const int direction = unit(seed, phraseBar, step, 17) < 0.5f ? -1 : 1;
+        int at = index + direction * hops;
+        int octShift = unit(seed, phraseBar, step, 19) < 0.4f ? (direction > 0 ? 1 : -1) : 0;
+        while (at < 0) { at += count; --octShift; }
+        while (at >= count) { at -= count; ++octShift; }
+        const int pc = (keyRoot + deg[at]) % 12;
+        return pitchInRange(pc, 48, 96, center + octShift * 12);
+    }
 
     if (downbeat || g.melodyContour() != MelodyContour::Leap)
     {
@@ -736,8 +800,6 @@ void renderMelody(const GrooveParams& g, double startPpq, double endPpq,
             ? harmonyFromHeld(chordNotes, chordCount, keyRoot, mode, bar)
             : progressionHarmony(keyRoot, mode, bar);
         int note = melodyNote(motif, harmony, phraseBar, step, keyRoot, mode);
-        if (g.melodyNonce != 0)
-            note += (g.melodyNonce % 5) - 2;
         note = fitToScale(note, juce::jlimit(0, 11, keyRoot), mode);
         if (g.melodyType() == PhraseType::Pentatonic || g.melodyType() == PhraseType::Chord)
         {
@@ -863,6 +925,39 @@ Harmony chordHarmony(const GrooveParams& g, const int* chordNotes, int chordCoun
     return h;
 }
 
+static bool chordCellFires(const GrooveParams& g, std::uint32_t seed, int step)
+{
+    static constexpr std::uint16_t kBlock[] = {
+        (1u << 0) | (1u << 6) | (1u << 8) | (1u << 14),
+        (1u << 2) | (1u << 8) | (1u << 12),
+        (1u << 0) | (1u << 7) | (1u << 8) | (1u << 15),
+        (1u << 0) | (1u << 4) | (1u << 8) | (1u << 11)
+    };
+    static constexpr std::uint16_t kPulse[] = {
+        (1u << 0) | (1u << 3) | (1u << 6) | (1u << 8) | (1u << 11) | (1u << 14),
+        (1u << 2) | (1u << 6) | (1u << 10) | (1u << 14),
+        (1u << 0) | (1u << 4) | (1u << 7) | (1u << 8) | (1u << 12) | (1u << 15),
+        (1u << 0) | (1u << 5) | (1u << 8) | (1u << 10) | (1u << 13)
+    };
+    static constexpr std::uint16_t kStrum[] = {
+        (1u << 0) | (1u << 6) | (1u << 8) | (1u << 14),
+        (1u << 2) | (1u << 8) | (1u << 12),
+        (1u << 0) | (1u << 4) | (1u << 8) | (1u << 11),
+        (1u << 4) | (1u << 6) | (1u << 12) | (1u << 14)
+    };
+    const std::uint16_t* bank = kBlock;
+    int count = 4;
+    switch (g.chordRhythm())
+    {
+        case ChordRhythm::Pulse: bank = kPulse; break;
+        case ChordRhythm::Strum: bank = kStrum; break;
+        case ChordRhythm::Block:
+        case ChordRhythm::Count: break;
+    }
+    const int idx = (int) ((mix(seed) + (std::uint32_t) g.chordGenreIndex) % (std::uint32_t) count);
+    return (bank[idx] & (std::uint16_t) (1u << (step & 15))) != 0;
+}
+
 void renderChords(const GrooveParams& g, double startPpq, double endPpq,
                   const int* chordNotes, int chordCount, int keyRoot, Mode mode,
                   std::vector<Event>& out)
@@ -943,6 +1038,20 @@ void renderChords(const GrooveParams& g, double startPpq, double endPpq,
             }
             length = juce::jmax(0.2, length + (double) feel.sustainBias * 0.6);
         }
+        if (g.chordNonce != 0)
+        {
+            fire = chordCellFires(g, seed, step);
+            if (g.chordSpeed() == MelodySpeed::Slow)
+                fire = fire && (step % 4) == 0;
+            else if (g.chordSpeed() == MelodySpeed::Fast && (step % 4) == 2)
+                fire = true;
+            if (g.chordRhythm() == ChordRhythm::Strum)
+                length = 0.35;
+            else if (g.chordRhythm() == ChordRhythm::Pulse)
+                length = 0.55;
+            else
+                length = 1.1;
+        }
         if (fire && !stepInDensity(g.chordDensity, step))
             fire = false;
         if (!fire) continue;
@@ -950,10 +1059,15 @@ void renderChords(const GrooveParams& g, double startPpq, double endPpq,
         const Harmony harmony = chordHarmony(g, chordNotes, chordCount, keyRoot, mode, bar + letter);
         std::vector<int> pitches;
         chordVoices(g, harmony, pitches);
-        if (g.chordNonce != 0 && pitches.size() > 1)
+        if (g.chordNonce != 0 && !pitches.empty())
         {
-            const int rot = std::abs(g.chordNonce) % (int) pitches.size();
-            std::rotate(pitches.begin(), pitches.begin() + rot, pitches.end());
+            if (pitches.size() > 1)
+            {
+                const int rot = (int) (mix(motifSeed ^ (std::uint32_t) (step * 17)) % (std::uint32_t) pitches.size());
+                std::rotate(pitches.begin(), pitches.begin() + rot, pitches.end());
+            }
+            const int leap = unit(motifSeed, bar, step, 19) < 0.5f ? 12 : -12;
+            pitches.back() = juce::jlimit(0, 127, pitches.back() + leap);
         }
         for (int& p : pitches)
             p = fitToScale(p, juce::jlimit(0, 11, keyRoot), mode);
@@ -978,6 +1092,52 @@ void renderChords(const GrooveParams& g, double startPpq, double endPpq,
 }
 
 // ── Bass ─────────────────────────────────────────────────────────────────────
+
+static bool bassCellStep(const GrooveParams& g, std::uint32_t seed, int step,
+                          int& degree, int& prefer, double& len)
+{
+    static constexpr std::uint16_t kPulse[] = {
+        (1u << 0) | (1u << 3) | (1u << 6) | (1u << 8) | (1u << 10) | (1u << 14),
+        (1u << 0) | (1u << 4) | (1u << 7) | (1u << 8) | (1u << 12) | (1u << 15),
+        (1u << 2) | (1u << 6) | (1u << 8) | (1u << 11) | (1u << 14),
+        (1u << 0) | (1u << 5) | (1u << 8) | (1u << 10) | (1u << 13)
+    };
+    static constexpr std::uint16_t kHalf[] = {
+        (1u << 0) | (1u << 10),
+        (1u << 4) | (1u << 12),
+        (1u << 0) | (1u << 6) | (1u << 12),
+        (1u << 2) | (1u << 8)
+    };
+    static constexpr std::uint16_t kShuffle[] = {
+        (1u << 0) | (1u << 3) | (1u << 6) | (1u << 10) | (1u << 12),
+        (1u << 0) | (1u << 5) | (1u << 8) | (1u << 11) | (1u << 14),
+        (1u << 2) | (1u << 6) | (1u << 8) | (1u << 10) | (1u << 15)
+    };
+    static constexpr std::uint16_t kSparse[] = {
+        (1u << 0) | (1u << 7),
+        (1u << 4) | (1u << 14),
+        (1u << 2) | (1u << 8) | (1u << 12),
+        (1u << 0) | (1u << 11)
+    };
+    const std::uint16_t* bank = kPulse;
+    int count = 4;
+    len = 0.45;
+    switch (g.bassMotion())
+    {
+        case BassMotion::Half:    bank = kHalf; len = 1.2; break;
+        case BassMotion::Shuffle: bank = kShuffle; count = 3; len = 0.35; break;
+        case BassMotion::Sparse:  bank = kSparse; len = 0.9; break;
+        case BassMotion::Pulse:
+        case BassMotion::Count:   break;
+    }
+    const int idx = (int) ((mix(seed) + (std::uint32_t) g.bassGenreIndex) % (std::uint32_t) count);
+    if ((bank[idx] & (std::uint16_t) (1u << (step & 15))) == 0)
+        return false;
+    const int pick = (step + idx * 3) % 5;
+    degree = pick == 1 ? 2 : (pick == 2 ? 1 : (pick == 4 ? 4 : 0));
+    prefer = 36 + ((idx + step / 4) % 3) * 6;
+    return true;
+}
 
 void renderBass(const GrooveParams& g, double startPpq, double endPpq,
                 const int* chordNotes, int chordCount, int keyRoot, Mode mode,
@@ -1029,6 +1189,14 @@ void renderBass(const GrooveParams& g, double startPpq, double endPpq,
         int letter = 0, localBar = 0;
         mapFormBar(phraseBars, form, wrapBar(bar, phraseBars), letter, localBar);
         juce::ignoreUnused(localBar);
+        if (g.bassNonce != 0)
+        {
+            int degree = 0, prefer = 40;
+            double len = 0.45;
+            if (bassCellStep(g, seed, step, degree, prefer, len))
+                emit(bar, step, letter, degree, prefer, 1.0f, 104, len);
+            continue;
+        }
         if (packedBass)
         {
             const auto& st = bassPack.bass[(size_t) step];
@@ -1039,9 +1207,7 @@ void renderBass(const GrooveParams& g, double startPpq, double endPpq,
             const Harmony harmony = g.bassInput
                 ? harmonyFromHeld(chordNotes, chordCount, keyRoot, mode, bar)
                 : progressionHarmony(keyRoot, mode, bar + letter);
-            int degree = 0;
-            if (g.bassNonce != 0)
-                degree = ((step + g.bassNonce) % 3 == 1) ? 2 : (((step + g.bassNonce) % 3 == 2) ? 4 : 0);
+            const int degree = 0;
             const int note = fitToScale(pitchInRange(toneOf(harmony, degree), 28, 52, 40),
                                         juce::jlimit(0, 11, keyRoot), mode);
             const double swing = (step % 4) == 2 ? bassPack.swing * 0.25 : 0.0;
@@ -1112,6 +1278,93 @@ void renderBass(const GrooveParams& g, double startPpq, double endPpq,
 // 43 low tom, 47 mid tom, 50 high tom.
 
 struct DrumHit { int note; float chance; int velocity; int ticks = 0; };
+
+// One bar of a genre groove. Bits: kick, snare, closed hat, open hat, clap, ghost, rim.
+static constexpr std::uint8_t kDk = 1, kDs = 2, kDh = 4, kDo = 8, kDc = 16, kDg = 32, kDr = 64;
+
+static const std::uint8_t* drumGrooveCell(DrumStyle style, std::uint32_t seed)
+{
+    static constexpr std::uint8_t kHouse[4][16] = {
+        { kDk, 0, kDh, 0, kDk|kDc, 0, kDh, 0, kDk, 0, kDh, 0, kDk|kDc, 0, kDo, 0 },
+        { kDk|kDh, kDh, kDh, kDh, kDk|kDc|kDh, kDh, kDh|kDo, kDh, kDk|kDh, kDh, kDh, kDh, kDk|kDc|kDh, kDh, kDh, kDh },
+        { kDk|kDh, 0, kDh, 0, kDk|kDr|kDh, 0, kDh, 0, kDk|kDh, 0, kDh|kDo, 0, kDk|kDr|kDh, 0, kDh, 0 },
+        { kDk, 0, kDh, 0, kDk|kDc, 0, kDo, 0, kDk, 0, kDh, 0, kDk|kDc, 0, kDh, kDk }
+    };
+    static constexpr std::uint8_t kTechno[4][16] = {
+        { kDk, 0, kDh, 0, kDk, 0, kDh, 0, kDk, 0, kDh, 0, kDk|kDc, 0, kDo, 0 },
+        { kDk|kDh, kDh, kDh, kDh, kDk|kDc|kDh, kDh, kDh, kDh, kDk|kDh, kDh, kDh, kDh, kDk|kDc|kDh, kDh, kDh, kDh },
+        { kDk, 0, kDh, 0, kDk, 0, kDo, 0, kDk, 0, kDh, 0, kDk, 0, kDo, 0 },
+        { kDk|kDh, kDh, kDh, kDh, kDk|kDh, kDh, kDh, kDh, kDk|kDh, kDh, kDh, kDh, kDk|kDc|kDh, kDh, kDh, kDk|kDh }
+    };
+    static constexpr std::uint8_t kDubTechno[4][16] = {
+        { kDk, 0, 0, 0, 0, 0, 0, 0, kDk, 0, kDh, 0, kDr, 0, 0, 0 },
+        { kDk, 0, 0, 0, 0, 0, kDk, 0, 0, 0, kDr, 0, 0, 0, 0, 0 },
+        { kDk, 0, 0, 0, 0, 0, 0, 0, kDk, 0, 0, 0, 0, kDr, 0, 0 },
+        { kDk, 0, 0, 0, kDh, 0, 0, 0, 0, 0, kDk, 0, 0, 0, kDr, 0 }
+    };
+    static constexpr std::uint8_t kReggae[4][16] = {
+        { 0, 0, kDh, 0, 0, 0, kDh, 0, kDk|kDs, 0, kDh, 0, 0, 0, kDh, 0 },
+        { kDk|kDh, 0, kDh, 0, kDk|kDh, 0, kDh, 0, kDk|kDs|kDh, 0, kDh, 0, kDk|kDh, 0, kDh, 0 },
+        { kDk, 0, kDh, 0, kDs, 0, kDh, 0, kDk, 0, kDh, 0, kDs, 0, kDh, 0 },
+        { 0, 0, 0, 0, kDh, 0, 0, 0, kDk|kDs, 0, 0, 0, kDh, 0, 0, 0 }
+    };
+    static constexpr std::uint8_t kDub[4][16] = {
+        { kDk, 0, 0, 0, 0, 0, 0, 0, kDs, 0, kDh, 0, 0, 0, 0, 0 },
+        { kDk, 0, 0, 0, 0, 0, 0, 0, 0, 0, kDs, 0, 0, 0, kDh, 0 },
+        { kDk, 0, 0, 0, 0, 0, kDo, 0, kDs, 0, 0, 0, 0, 0, 0, 0 },
+        { kDk, 0, 0, 0, 0, 0, 0, 0, 0, kDs, 0, 0, 0, 0, 0, 0 }
+    };
+    static constexpr std::uint8_t kFunk[3][16] = {
+        { kDk|kDh, kDh, kDh, kDg, kDs|kDh, kDh, kDk|kDh, kDh, kDh, kDh, kDh, kDg, kDs|kDh, kDh, kDh, kDh },
+        { kDk|kDh, kDh, kDh, kDh, kDs|kDh, kDh, kDk|kDh, kDg, kDh, kDh, kDh, kDh, kDs|kDh, kDh, kDk|kDh, kDg },
+        { kDk|kDh, kDh, kDh, kDk, kDs|kDh, kDh, kDk|kDh, kDh, kDh, kDg, kDk|kDh, kDh, kDs|kDh, kDh, kDh, kDg }
+    };
+    static constexpr std::uint8_t kBreak[4][16] = {
+        { kDk, 0, kDh, 0, kDs, 0, kDh, 0, 0, 0, kDk|kDh, 0, kDs, 0, kDh, 0 },
+        { kDk|kDh, 0, kDh, 0, kDs|kDh, 0, kDh, 0, kDk|kDh, 0, kDh, kDk, kDh, kDs, kDh, 0 },
+        { kDk|kDh, 0, kDh, 0, kDs|kDh, 0, kDk|kDh, 0, kDh, kDk, kDh, 0, kDs|kDh, 0, kDh, kDs },
+        { kDk, 0, kDk|kDh, 0, kDs, 0, kDh, kDs, 0, 0, kDk|kDh, 0, kDs, 0, kDh, 0 }
+    };
+    static constexpr std::uint8_t kDnb[4][16] = {
+        { kDk, 0, kDh, 0, kDs, 0, kDh, 0, 0, 0, kDk|kDh, 0, kDs, 0, kDh, 0 },
+        { kDk|kDh, kDh, kDh, kDk|kDh, kDs|kDh, kDh, kDh, kDh, kDk|kDh, kDh, kDh, kDk|kDh, kDs|kDh, kDh, kDh, kDh },
+        { kDk, 0, kDh, 0, kDs, 0, kDh, kDk, 0, 0, kDh, 0, kDs, 0, kDh|kDg, 0 },
+        { kDk|kDh, 0, kDh, 0, kDs|kDh, 0, kDk|kDh, 0, kDh, 0, kDk|kDh, 0, kDs|kDh, 0, kDo, 0 }
+    };
+
+    const std::uint8_t* bank = kHouse[0];
+    int count = 4;
+    switch (style)
+    {
+        case DrumStyle::House:      bank = kHouse[0]; break;
+        case DrumStyle::Techno:     bank = kTechno[0]; break;
+        case DrumStyle::DubTechno:  bank = kDubTechno[0]; break;
+        case DrumStyle::Reggae:     bank = kReggae[0]; break;
+        case DrumStyle::Dub:        bank = kDub[0]; break;
+        case DrumStyle::Funk:       bank = kFunk[0]; count = 3; break;
+        case DrumStyle::Breakbeat:  bank = kBreak[0]; break;
+        case DrumStyle::Dnb:        bank = kDnb[0]; break;
+        case DrumStyle::Count:      break;
+    }
+    const int idx = (int) (mix(seed) % (std::uint32_t) count);
+    return bank + idx * 16;
+}
+
+static void hitsFromDrumCell(std::uint8_t mask, std::vector<DrumHit>& hits)
+{
+    auto put = [&](std::uint8_t bit, int note, int velocity)
+    {
+        if ((mask & bit) != 0)
+            hits.push_back({ note, 1.0f, velocity, 0 });
+    };
+    put(kDk, 36, 112);
+    put(kDs, 38, 116);
+    put(kDh, 42, 78);
+    put(kDo, 46, 96);
+    put(kDc, 39, 104);
+    put(kDg, 38, 40);
+    put(kDr, 37, 88);
+}
 
 void drumHitsForStep(DrumStyle style, int step, float /*density*/, float fill,
                      bool fillBar, std::uint32_t /*seed*/, int /*formLetter*/,
@@ -1227,30 +1480,16 @@ void renderDrums(const GrooveParams& g, double startPpq, double endPpq, std::vec
                             letter, hits);
             if (g.drumNonce != 0)
             {
-                std::vector<DrumHit> varied;
-                varied.reserve(hits.size() + 1);
-                for (auto hit : hits)
+                hits.clear();
+                hitsFromDrumCell(drumGrooveCell(g.drumStyle(), motifSeed)[step], hits);
+                const float fillAmt = clampf((float) g.drumFill / 100.0f, 0.0f, 1.0f);
+                if (fillBar && fillAmt > 0.05f && step >= 12)
                 {
-                    const float roll = unit(motifSeed, absBar, step, hit.note + 80);
-                    if (hit.note == 36)
-                    {
-                        varied.push_back(hit);
-                        continue;
-                    }
-                    if (hit.note == 38 && hit.velocity >= 80)
-                    {
-                        hit.velocity = juce::jlimit(1, 127, hit.velocity + (int) std::lround((roll - 0.5f) * 10.0f));
-                        varied.push_back(hit);
-                        continue;
-                    }
-                    if (roll < 0.22f)
-                        continue;
-                    hit.velocity = juce::jlimit(1, 127, hit.velocity + (int) std::lround((roll - 0.5f) * 24.0f));
-                    varied.push_back(hit);
+                    if (step == 12 || step == 14)
+                        hits.push_back({ 38, 0.45f * fillAmt, 96, 0 });
+                    if (step == 13 || step == 15)
+                        hits.push_back({ step == 15 ? 50 : 47, 0.4f * fillAmt, 84, 0 });
                 }
-                if (unit(motifSeed, absBar, step, 99) < 0.16f && (step % 2) == 1)
-                    varied.push_back({ 38, 1.0f, 34, 0 });
-                hits.swap(varied);
             }
             if (drumSpeed == MelodySpeed::Fast && (step % 2) == 1)
             {

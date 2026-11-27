@@ -937,3 +937,163 @@ TEST_CASE("optional local kind corpus prints a confusion matrix", "[kind][corpus
     WARN(report);
     CHECK(seen > 0);
 }
+
+TEST_CASE("drum map puts the kick on C1 and leaves a snare-hat break", "[editmodel]")
+{
+    ClipEdit drums;
+    drums.drumMap = true;
+    drums.fitScale = true;
+    drums.root = 0;
+    drums.octave = 1;
+    drums.noteFilterType = NoteFilterType::Mute;
+    drums.noteFilterMask = (uint16_t) ~(1u << 0);
+
+    // Already on the GM map: C1 kick, snare, hat. Fit and the key filter must not move them.
+    auto home = makeClip({
+        { 0, 36, 0.0, 1.0 },
+        { 1, 38, 4.0, 1.0 },
+        { 2, 42, 2.0, 0.5 },
+        { 3, 42, 6.0, 0.5 },
+        { 4, 42, 10.0, 0.5 },
+        { 5, 42, 14.0, 0.5 },
+    }, 1, -1);
+    const auto stayed = resolveClip(home, drums);
+    REQUIRE(stayed.notes.size() == 6);
+    CHECK(stayed.notes[0].pitch == 36);
+    CHECK(stayed.notes[1].pitch == 38);
+    CHECK(stayed.notes[2].pitch == 42);
+
+    // Kick an octave up, on the downbeats. Snare on the backbeat.
+    auto shifted = makeClip({
+        { 0, 48, 0.0, 1.0 },
+        { 1, 48, 8.0, 1.0 },
+        { 2, 50, 4.0, 1.0 },
+        { 3, 50, 12.0, 1.0 },
+        { 4, 54, 2.0, 0.5 },
+    }, 1, -1);
+    const auto mapped = resolveClip(shifted, drums);
+    CHECK(mapped.notes[0].pitch == 36);
+    CHECK(mapped.notes[2].pitch == 38);
+
+    // GM kick on B0 (35) steps up to C1. The hat moves with it.
+    auto acoustic = makeClip({
+        { 0, 35, 0.0, 1.0 },
+        { 1, 42, 2.0, 0.5 },
+        { 2, 42, 6.0, 0.5 },
+        { 3, 42, 10.0, 0.5 },
+        { 4, 42, 14.0, 0.5 },
+    }, 1, -1);
+    const auto toC1 = resolveClip(acoustic, drums);
+    CHECK(toC1.notes[0].pitch == 36);
+    CHECK(toC1.notes[1].pitch == 43);
+
+    // Kick is not the lowest note. Snare sits below it on the backbeat.
+    auto breakbeat = makeClip({
+        { 0, 43, 0.0, 1.0 },
+        { 1, 43, 8.0, 1.0 },
+        { 2, 38, 4.0, 1.0 },
+        { 3, 38, 12.0, 1.0 },
+        { 4, 42, 2.0, 0.5 },
+        { 5, 42, 6.0, 0.5 },
+        { 6, 42, 10.0, 0.5 },
+        { 7, 42, 14.0, 0.5 },
+    }, 1, -1);
+    const auto kickUp = resolveClip(breakbeat, drums);
+    CHECK(kickUp.notes[0].pitch == 36);
+    CHECK(kickUp.notes[2].pitch == 31);
+
+    // Snare and hat only. Nothing is moved onto C1.
+    auto hats = makeClip({
+        { 0, 38, 4.0, 1.0 },
+        { 1, 38, 12.0, 1.0 },
+        { 2, 42, 0.0, 0.5 },
+        { 3, 42, 2.0, 0.5 },
+        { 4, 42, 6.0, 0.5 },
+        { 5, 42, 8.0, 0.5 },
+        { 6, 42, 10.0, 0.5 },
+        { 7, 42, 14.0, 0.5 },
+    }, 1, -1);
+    const auto untouched = resolveClip(hats, drums);
+    CHECK(untouched.notes[0].pitch == 38);
+    CHECK(untouched.notes[2].pitch == 42);
+}
+
+TEST_CASE("filter type Off keeps every pitch class", "[editmodel]")
+{
+    auto clip = makeClip({ { 0, 60, 0.0, 1.0 }, { 1, 64, 1.0, 1.0 } }, 1, 0);
+    ClipEdit off;
+    off.noteFilterType = NoteFilterType::Off;
+    off.noteFilterMask = (uint16_t) ~(1u << 0); // C disabled, but Off ignores it
+    const auto kept = resolveClip(clip, off);
+    REQUIRE(kept.notes.size() == 2);
+    CHECK(kept.notes[0].pitch == 60);
+
+    ClipEdit mute;
+    mute.noteFilterType = NoteFilterType::Mute;
+    mute.noteFilterMask = off.noteFilterMask;
+    const auto dropped = resolveClip(clip, mute);
+    REQUIRE(dropped.notes.size() == 1);
+    CHECK(dropped.notes[0].pitch == 64);
+}
+
+TEST_CASE("browse leaves drum kits unfiltered and does not fold the octave span", "[editmodel]")
+{
+    auto kit = makeClip({
+        { 0, 36, 0.0, 1.0 },
+        { 1, 38, 4.0, 1.0 },
+        { 2, 42, 2.0, 0.5 },
+        { 3, 72, 8.0, 1.0 },
+    }, 1, -1);
+    kit.kind = ClipKind::Drums;
+
+    const int span = analyseClipScale(kit).octaveRange;
+    CHECK(span >= 2);
+
+    ClipEdit seeded;
+    seeded.octaveRange = span;
+    const auto folded = resolveClip(kit, seeded);
+    CHECK(folded.notes[3].pitch != 72);
+
+    seeded.root = 2;
+    seeded.mode = Mode::Aeolian;
+    seeded.notePitch[0] = capturePitchSettings(seeded);
+    prepareBrowsePitchEdit(seeded, kit);
+    CHECK(seeded.octaveRange == 0);
+    CHECK(seeded.root < 0);
+    CHECK(seeded.noteFilterType == NoteFilterType::Off);
+    CHECK(seeded.notePitch.empty());
+
+    const auto heard = resolveClip(kit, seeded);
+    CHECK(heard.notes[0].pitch == 36);
+    CHECK(heard.notes[1].pitch == 38);
+    CHECK(heard.notes[2].pitch == 42);
+    CHECK(heard.notes[3].pitch == 72);
+
+    ClipEdit chosen;
+    chosen.octaveRange = span == 1 ? 2 : 1;
+    prepareBrowsePitchEdit(chosen, kit);
+    CHECK(chosen.octaveRange == (span == 1 ? 2 : 1));
+}
+
+TEST_CASE("browse seeds a melodic key without turning octave range on", "[editmodel]")
+{
+    auto melody = makeClip({
+        { 0, 60, 0.0, 4.0 },
+        { 1, 64, 4.0, 4.0 },
+        { 2, 67, 8.0, 4.0 },
+        { 3, 84, 12.0, 4.0 },
+    }, 1, 0);
+    melody.kind = ClipKind::Lead;
+
+    ClipEdit seeded;
+    seeded.octaveRange = analyseClipScale(melody).octaveRange;
+    CHECK(seeded.octaveRange > 0);
+    prepareBrowsePitchEdit(seeded, melody);
+    CHECK(seeded.octaveRange == 0);
+    CHECK(seeded.root >= 0);
+    CHECK_FALSE(seeded.fitScale);
+
+    const auto heard = resolveClip(melody, seeded);
+    CHECK(heard.notes[0].pitch == 60);
+    CHECK(heard.notes[3].pitch == 84);
+}

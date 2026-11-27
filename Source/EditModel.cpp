@@ -581,6 +581,7 @@ void applyPitchLock(const ClipEdit& locked, ClipEdit& target)
     target.mode = locked.mode;
     target.noteFilterMask = locked.noteFilterMask;
     target.noteFilterType = locked.noteFilterType;
+    target.drumMap = locked.drumMap;
 }
 
 void applyPlaybackLock(const ClipEdit& locked, ClipEdit& target, bool autoTrim, const StepClip& clip)
@@ -606,7 +607,7 @@ bool editIsClean(const ClipEdit& e)
 {
     if (e.octave >= 0 || e.pitchShift != 0 || e.octaveRange != 0 || e.hasPitchRange()
         || e.extendMult > 1 || e.reverse || e.invert || e.selectedNotesOnly
-        || e.fitScale || e.mapToRoot || e.hasNoteFilter() || e.hasTrim()
+        || e.fitScale || e.mapToRoot || e.drumMap || e.hasNoteFilter() || e.hasTrim()
         || e.legacyTrimLead != 0 || e.legacyTrimTail != 0)
         return false;
     if (!e.velocities.empty() || !e.deleted.empty())
@@ -615,6 +616,74 @@ bool editIsClean(const ClipEdit& e)
         if (mv.dPitch != 0 || mv.dStep != 0 || mv.dLen != 0.0)
             return false;
     return true;
+}
+
+namespace {
+
+bool pitchStampIsAutomatic(const NotePitchSettings& s)
+{
+    return !s.fitScale && !s.mapToRoot && !s.drumMap
+        && s.pitchShift == 0 && s.octave < 0
+        && s.pitchMin <= 0 && s.pitchMax >= 127
+        && s.noteFilterType == NoteFilterType::Off
+        && (s.noteFilterMask & 0x0FFF) == 0x0FFF
+        && !s.reverse && !s.invert;
+}
+
+bool pitchEditIsUserSet(const ClipEdit& e)
+{
+    return e.fitScale || e.mapToRoot || e.drumMap || e.hasNoteFilter()
+        || e.noteFilterType != NoteFilterType::Off
+        || e.pitchShift != 0 || e.octave >= 0 || e.hasPitchRange()
+        || e.reverse || e.invert;
+}
+
+void clearAutomaticPitchStamps(ClipEdit& e)
+{
+    bool allAutomatic = !e.notePitch.empty();
+    for (const auto& entry : e.notePitch)
+    {
+        if (!pitchStampIsAutomatic(entry.second))
+        {
+            allAutomatic = false;
+            break;
+        }
+    }
+    if (allAutomatic)
+        e.notePitch.clear();
+}
+
+} // namespace
+
+void prepareBrowsePitchEdit(ClipEdit& e, const StepClip& clip)
+{
+    if (pitchEditIsUserSet(e))
+        return;
+
+    const int analyzedSpan = analyseClipScale(clip).octaveRange;
+    // The old browse seed copied that span into Octave Range, which turns Fold
+    // on. A kit wider than the 3-octave cap then wraps hats and cymbals onto
+    // kick and snare pitches. Off unless the user picked a different window.
+    if (e.octaveRange == 0 || e.octaveRange == analyzedSpan)
+        e.octaveRange = 0;
+
+    if (clip.kind == ClipKind::Drums)
+    {
+        e.octave = -1;
+        e.root = -1;
+        e.mode = Mode::Ionian;
+        clearAutomaticPitchStamps(e);
+        return;
+    }
+
+    if (e.root < 0)
+    {
+        const auto analysis = analyseClipScale(clip);
+        e.octave = -1;
+        e.root = analysis.primaryRoot;
+        e.mode = analysis.primaryMode;
+    }
+    clearAutomaticPitchStamps(e);
 }
 
 static std::vector<int> effectiveRemovedBars(const StepClip& clip, const ClipEdit& e)
@@ -634,6 +703,91 @@ static std::vector<int> effectiveRemovedBars(const StepClip& clip, const ClipEdi
     return removed;
 }
 
+/** Semitone shift that puts this clip's kick on C1 (MIDI 36). 0 when there is no kick. */
+static int drumKickToC1Shift(const std::vector<RollNote>& notes)
+{
+    if (notes.empty())
+        return 0;
+
+    struct Stat
+    {
+        int count = 0;
+        int kickW = 0;
+        int snareW = 0;
+        double lenSum = 0.0;
+    };
+    std::map<int, Stat> byPitch;
+    for (const auto& n : notes)
+    {
+        auto& s = byPitch[n.pitch];
+        ++s.count;
+        s.lenSum += n.len;
+        const int slot = ((int) std::lround(n.start) % kStepsPerBar + kStepsPerBar) % kStepsPerBar;
+        if (slot == 0) s.kickW += 2;
+        else if (slot == 8) s.kickW += 1;
+        else if (slot == 4 || slot == 12) s.snareW += 2;
+    }
+
+    const int gm35 = byPitch.count(35) ? byPitch[35].count : 0;
+    const int gm36 = byPitch.count(36) ? byPitch[36].count : 0;
+    // GM Bass Drum. C1 (36) wins a tie so a kit that is already home does not move.
+    if (gm35 + gm36 > 0)
+    {
+        const int kick = (gm36 >= gm35 && gm36 > 0) ? 36 : 35;
+        return 36 - kick;
+    }
+
+    int busiest = -1;
+    int busiestCount = 0;
+    int lowest = 127;
+    for (const auto& [pitch, s] : byPitch)
+    {
+        lowest = std::min(lowest, pitch);
+        if (s.count > busiestCount)
+        {
+            busiest = pitch;
+            busiestCount = s.count;
+        }
+    }
+
+    auto hatOrSnare = [&](int pitch, const Stat& s)
+    {
+        const double avgLen = s.lenSum / (double) std::max(1, s.count);
+        const double kickR = (double) s.kickW / (double) std::max(1, s.count);
+        const double snareR = (double) s.snareW / (double) std::max(1, s.count);
+        const bool gmHat = pitch == 42 || pitch == 44 || pitch == 46;
+        const bool gmSnare = pitch == 37 || pitch == 38 || pitch == 39 || pitch == 40;
+        const bool hatLike = gmHat
+            || (pitch == busiest && avgLen <= 1.5 && s.count >= 4 && kickR < 0.5)
+            || (avgLen <= 1.0 && s.count >= 4 && kickR < 0.35 && snareR < 0.35);
+        const bool snareLike = gmSnare || (snareR >= 0.5 && snareR > kickR);
+        return hatLike || snareLike;
+    };
+
+    int bestPitch = -1;
+    double best = 0.0;
+    for (const auto& [pitch, s] : byPitch)
+    {
+        if (s.count <= 0 || hatOrSnare(pitch, s))
+            continue;
+        const double kickR = (double) s.kickW / (double) s.count;
+        const double snareR = (double) s.snareW / (double) s.count;
+        const double score = kickR - snareR;
+        if (score > best)
+        {
+            best = score;
+            bestPitch = pitch;
+        }
+    }
+    if (bestPitch >= 0 && best >= 0.35)
+        return 36 - bestPitch;
+
+    // No clear downbeat kick. Use the lowest note only when it is not a snare or hat.
+    if (lowest < 127 && byPitch.count(lowest) && !hatOrSnare(lowest, byPitch[lowest]))
+        return 36 - lowest;
+    return 0;
+}
+
 ResolvedClip resolveClip(const StepClip& clip, const ClipEdit& e,
                          const std::set<int>* selectedNoteIds,
                          NoteProcessScope scope)
@@ -642,6 +796,7 @@ ResolvedClip resolveClip(const StepClip& clip, const ClipEdit& e,
     out.notes.reserve(clip.notes.size());
     const int srcOct = clipReferenceOctave(clip);
     const int tgtOct = e.octave >= 0 ? juce::jlimit(0, 6, e.octave) : srcOct;
+    const int drumShift = e.drumMap ? drumKickToC1Shift(clip.notes) : 0;
 
     // Loop brackets live in the post-trim roll. Decide scope with that start,
     // even while the notes below still carry pre-trim positions.
@@ -690,7 +845,12 @@ ResolvedClip resolveClip(const StepClip& clip, const ClipEdit& e,
         const int useDelta = (useTgt - srcOct) * 12;
 
         int pitch = n.pitch + mv.dPitch;
-        if (hit)
+        if (e.drumMap)
+        {
+            // Whole kit moves together. Scale, octave, and the key filter stay off.
+            pitch += drumShift;
+        }
+        else if (hit)
         {
             pitch += useShift;
             // Octave Range owns the register: the window is absolute, so a second
@@ -724,7 +884,7 @@ ResolvedClip resolveClip(const StepClip& clip, const ClipEdit& e,
     }
 
     // Octave Range: wrap or clamp every note into N octaves starting at the target C.
-    if (!e.notePitch.empty())
+    if (!e.drumMap && !e.notePitch.empty())
     {
         for (auto& n : out.notes)
         {
@@ -735,7 +895,7 @@ ResolvedClip resolveClip(const StepClip& clip, const ClipEdit& e,
             n.pitch = mapPitchToOctaveWindow(n.pitch, tgt, it->second.octaveRange, it->second.outsideRange);
         }
     }
-    else if (e.octaveRange > 0 && !out.notes.empty())
+    else if (!e.drumMap && e.octaveRange > 0 && !out.notes.empty())
     {
         for (auto& n : out.notes)
         {
@@ -746,7 +906,7 @@ ResolvedClip resolveClip(const StepClip& clip, const ClipEdit& e,
     }
 
     // Pitch Range: wrap notes into [pitchMin, pitchMax] by octave folds.
-    if (!e.notePitch.empty())
+    if (!e.drumMap && !e.notePitch.empty())
     {
         for (auto& n : out.notes)
         {
@@ -766,7 +926,7 @@ ResolvedClip resolveClip(const StepClip& clip, const ClipEdit& e,
                                    : (p < lo || p > hi ? juce::jlimit(lo, hi, n.pitch) : p);
         }
     }
-    else if (e.hasPitchRange() && !out.notes.empty())
+    else if (!e.drumMap && e.hasPitchRange() && !out.notes.empty())
     {
         int lo = juce::jlimit(0, 127, e.pitchMin);
         int hi = juce::jlimit(0, 127, e.pitchMax);
@@ -797,7 +957,7 @@ ResolvedClip resolveClip(const StepClip& clip, const ClipEdit& e,
     }
 
     // Octave Range remaps chromatically and can pull notes out of scale — re-snap.
-    if (!e.notePitch.empty())
+    if (!e.drumMap && !e.notePitch.empty())
     {
         for (auto& n : out.notes)
         {
@@ -807,22 +967,24 @@ ResolvedClip resolveClip(const StepClip& clip, const ClipEdit& e,
             n.pitch = juce::jlimit(0, 127, fitToScale(n.pitch, it->second.root, it->second.mode));
         }
     }
-    else if (e.fitScale && e.root >= 0)
+    else if (!e.drumMap && e.fitScale && e.root >= 0)
     {
         for (auto& n : out.notes)
             if (inScope(n, false))
                 n.pitch = juce::jlimit(0, 127, fitToScale(n.pitch, e.root, e.mode));
     }
 
-    // Note Filter: Mute drops disabled pitch-classes; Fold remaps to nearest kept.
-    if (!e.notePitch.empty())
+    // Note Filter: Off keeps every pitch. Mute drops disabled classes; Fold remaps them.
+    if (!e.drumMap && !e.notePitch.empty())
     {
         std::vector<RollNote> kept;
         kept.reserve(out.notes.size());
         for (auto n : out.notes)
         {
             const auto it = e.notePitch.find(n.id);
-            if (it == e.notePitch.end() || (it->second.noteFilterMask & 0x0FFF) == 0x0FFF)
+            if (it == e.notePitch.end()
+                || it->second.noteFilterType == NoteFilterType::Off
+                || (it->second.noteFilterMask & 0x0FFF) == 0x0FFF)
             {
                 kept.push_back(n);
                 continue;
@@ -849,7 +1011,7 @@ ResolvedClip resolveClip(const StepClip& clip, const ClipEdit& e,
         }
         out.notes = std::move(kept);
     }
-    else if (e.hasNoteFilter() && !out.notes.empty())
+    else if (!e.drumMap && e.noteFilterType != NoteFilterType::Off && e.hasNoteFilter() && !out.notes.empty())
     {
         if (e.noteFilterType == NoteFilterType::Mute)
         {
@@ -891,7 +1053,7 @@ ResolvedClip resolveClip(const StepClip& clip, const ClipEdit& e,
     };
 
     // Invert: mirror pitches around the midpoint of the (targeted) range.
-    if (!e.notePitch.empty())
+    if (!e.drumMap && !e.notePitch.empty())
     {
         int lo = 127, hi = 0, count = 0;
         for (const auto& n : out.notes)
@@ -914,7 +1076,7 @@ ResolvedClip resolveClip(const StepClip& clip, const ClipEdit& e,
             }
         }
     }
-    else if (e.invert && !out.notes.empty())
+    else if (!e.drumMap && e.invert && !out.notes.empty())
     {
         int lo = 127, hi = 0;
         int count = 0;
@@ -1076,13 +1238,17 @@ std::vector<EditBadge> editBadges(const StepClip& clip, const ClipEdit& e)
     if (e.hasPitchRange())
         out.push_back({ "range", pitchName(e.pitchMin) + "-" + pitchName(e.pitchMax) });
 
-    if (e.hasNoteFilter())
+    if (e.drumMap)
+        out.push_back({ "drums", "Drums → C1" });
+
+    if (e.noteFilterType != NoteFilterType::Off && e.hasNoteFilter())
     {
         int off = 0;
         for (int pc = 0; pc < 12; ++pc)
             if (!e.isNoteFilterEnabled(pc))
                 ++off;
-        const char* kind = e.noteFilterType == NoteFilterType::Fold ? "Fold" : "Mute";
+        const char* kind = e.noteFilterType == NoteFilterType::Fold ? "Fold"
+                          : e.noteFilterType == NoteFilterType::Mute ? "Mute" : "Off";
         out.push_back({ "noteFilter", juce::String(kind) + " " + juce::String(off) });
     }
 
@@ -1831,53 +1997,10 @@ StepClip scanMidiBrowseMeta(const juce::File& file)
     juce::MidiFile midiFile;
     if (!midiFile.readFrom(stream))
         return s;
-    midiFile.convertTimestampTicksToSeconds();
-
-    double bpm = 120.0;
-    int timeSigNum = 4;
-    int timeSigDen = 4;
-    if (midiFile.getNumTracks() > 0)
-    {
-        if (auto* track = midiFile.getTrack(0))
-        {
-            for (int i = 0; i < track->getNumEvents(); ++i)
-            {
-                auto& ev = track->getEventPointer(i)->message;
-                if (ev.isTempoMetaEvent())
-                {
-                    bpm = 60.0 / ev.getTempoSecondsPerQuarterNote();
-                    break;
-                }
-            }
-        }
-        for (int t = 0; t < midiFile.getNumTracks(); ++t)
-        {
-            auto* tr = midiFile.getTrack(t);
-            if (tr == nullptr)
-                continue;
-            bool found = false;
-            for (int i = 0; i < tr->getNumEvents(); ++i)
-            {
-                auto& ev = tr->getEventPointer(i)->message;
-                if (ev.isTimeSignatureMetaEvent())
-                {
-                    int num = 4, den = 4;
-                    ev.getTimeSignatureInfo(num, den);
-                    timeSigNum = juce::jmax(1, num);
-                    timeSigDen = juce::jmax(1, den);
-                    found = true;
-                    break;
-                }
-            }
-            if (found)
-                break;
-        }
-    }
-
-    s.bpm = bpm;
-    s.timeSigNum = timeSigNum;
-    s.timeSigDen = timeSigDen;
-    const double secPerBeat = 60.0 / bpm;
+    const auto timing = inspectMidiTiming(midiFile);
+    s.bpm = timing.bpm;
+    s.timeSigNum = timing.timeSigNum;
+    s.timeSigDen = timing.timeSigDen;
 
     std::vector<NoteEvent> spans;
     double maxBeat = 0.0;
@@ -1897,9 +2020,10 @@ StepClip scanMidiBrowseMeta(const juce::File& file)
             NoteEvent ne;
             ne.noteNumber = msg.getNoteNumber();
             ne.channel = msg.getChannel();
-            ne.startBeat = msg.getTimeStamp() / secPerBeat;
+            ne.startBeat = midiTimestampToBeats(msg.getTimeStamp(), timing);
             if (holder->noteOffObject != nullptr)
-                ne.lengthBeats = (holder->noteOffObject->message.getTimeStamp() - msg.getTimeStamp()) / secPerBeat;
+                ne.lengthBeats = midiTimestampToBeats(
+                    holder->noteOffObject->message.getTimeStamp() - msg.getTimeStamp(), timing);
             else
                 ne.lengthBeats = 0.25;
             if (ne.lengthBeats < 0.0)
@@ -1907,14 +2031,14 @@ StepClip scanMidiBrowseMeta(const juce::File& file)
             spans.push_back(ne);
             maxBeat = std::max(maxBeat, ne.startBeat + ne.lengthBeats);
         }
-        maxBeat = std::max(maxBeat, track.getEndTime() / secPerBeat);
+        maxBeat = std::max(maxBeat, midiTimestampToBeats(track.getEndTime(), timing));
     }
 
     MidiClip shell;
-    shell.bpm = bpm;
+    shell.bpm = timing.bpm;
     shell.lengthBeats = maxBeat > 0.0 ? maxBeat : 4.0;
-    shell.timeSigNum = timeSigNum;
-    shell.timeSigDen = timeSigDen;
+    shell.timeSigNum = timing.timeSigNum;
+    shell.timeSigDen = timing.timeSigDen;
     shell.notes = std::move(spans);
     auto full = makeStepClip(shell);
     full.name = s.name;

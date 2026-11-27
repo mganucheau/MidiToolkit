@@ -3,6 +3,7 @@
 #include "PluginProcessor.h"
 #include "Theme.h"
 #include "TestHelpers.h"
+#include <set>
 
 using namespace pflow;
 using Catch::Approx;
@@ -157,6 +158,57 @@ TEST_CASE("Free-run loop wrap does not flush the last note", "[Processor][qa]")
         }
     }
     REQUIRE(sawWrap);
+}
+
+TEST_CASE("A note ending on the loop end is released", "[Processor][empty]")
+{
+    ProcessorTestHarness harness;
+    harness.processor.syncSessionBars.store(1);
+    auto clip = test::makeClipWithNotes({ { 60, 100, 0.0, 4.0, 1 } }, 4.0);
+    harness.processor.setPreviewState(clip, true, false, false);
+
+    // One block that ends exactly where the note and the loop end.
+    harness.processor.hostBeatPos.store(0.0);
+    juce::AudioBuffer<float> buffer(2, 88200);   // 4 beats at 120 bpm, 44100 Hz
+    juce::MidiBuffer midi;
+    harness.processor.processBlock(buffer, midi);
+    REQUIRE(test::countNoteOns(midi) >= 1);
+    REQUIRE(test::countNoteOffs(midi) >= 1);
+}
+
+TEST_CASE("A note ending on a bar line stays silent through the empty bar", "[Processor][empty]")
+{
+    ProcessorTestHarness harness;
+    harness.processor.syncSessionBars.store(2);   // 8 beats, two bars
+    auto clip = test::makeClipWithNotes({ { 60, 100, 0.0, 4.0, 1 } }, 8.0);
+    harness.processor.setPreviewState(clip, true, false, false);
+
+    std::set<int> held;
+    const int samplesPerBeat = 22050;   // 120 bpm, 44100 Hz
+    for (int beat = 0; beat < 6; ++beat)
+    {
+        harness.processor.hostBeatPos.store((double) beat);
+        juce::AudioBuffer<float> buffer(2, samplesPerBeat);
+        juce::MidiBuffer midi;
+        harness.processor.processBlock(buffer, midi);
+        for (const auto meta : midi)
+        {
+            const auto& msg = meta.getMessage();
+            if (msg.isNoteOn())
+                held.insert(msg.getNoteNumber());
+            else if (msg.isNoteOff())
+                held.erase(msg.getNoteNumber());
+            else if (msg.isAllNotesOff() || (msg.isController() && msg.getControllerNumber() == 123))
+                held.clear();
+        }
+        if (beat >= 3)
+        {
+            // [3,4] releases the note at the bar line. [4,5] and [5,6] are empty.
+            REQUIRE(held.count(60) == 0);
+            if (beat > 3)
+                REQUIRE(test::countNoteOns(midi) == 0);
+        }
+    }
 }
 
 TEST_CASE("Synced preview auto-arms when host transport starts", "[Processor][qa]")

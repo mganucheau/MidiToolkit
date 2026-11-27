@@ -487,9 +487,33 @@ void MidiToolkitProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                 const int firstSamples = juce::jlimit(1, numSamples,
                     (int) std::lround(firstLen / blockBeats * (double) numSamples));
                 generatePreviewMidi(previewClip, pStart, loopEnd, generated, firstSamples, 0);
-                // Partial loop regions hard-cut hanging notes at the boundary.
+                const int boundarySample = juce::jmax(0, firstSamples - 1);
                 if (customLoop)
-                    flushActiveNotes(generated, juce::jmax(0, firstSamples - 1));
+                {
+                    // Partial loop regions hard-cut hanging notes at the boundary.
+                    flushActiveNotes(generated, boundarySample);
+                }
+                else
+                {
+                    // Full-clip wrap: release anything whose written end has arrived.
+                    // A note that still has length left keeps going; its end is
+                    // moved into the next pass so the empty bars after it stay silent
+                    // without chopping a sustain that crosses the loop.
+                    for (int ch = 0; ch < 16; ++ch)
+                        for (int n = 0; n < 128; ++n)
+                        {
+                            if (!activeNotes_[ch][n]) continue;
+                            if (activeNoteEnd_[ch][n] <= loopEnd + 1.0e-9)
+                            {
+                                generated.addEvent(juce::MidiMessage::noteOff(ch + 1, n), boundarySample);
+                                activeNotes_[ch][n] = false;
+                            }
+                            else
+                            {
+                                activeNoteEnd_[ch][n] -= loopLen;
+                            }
+                        }
+                }
                 const double remain = pEnd - loopEnd;
                 const int secondSamples = numSamples - firstSamples;
                 if (secondSamples > 0 && remain > 1.0e-12)
@@ -711,9 +735,20 @@ void MidiToolkitProcessor::generatePreviewMidi(const MidiClip& clip, double star
     const double blockLen = endBeat - startBeat;
     if (blockLen <= 0.0) return;
 
-    auto emitAt = [&](double globalBeat, const juce::MidiMessage& msg)
+    // includeEnd keeps a note-off that lands on the block end (last sample).
+    // Dropping it used to leave the note held through later empty bars, and
+    // through the next loop whenever the playhead wrapped away from that time.
+    auto emitAt = [&](double globalBeat, const juce::MidiMessage& msg, bool includeEnd = false)
     {
-        if (globalBeat < startBeat || globalBeat >= endBeat) return;
+        if (globalBeat < startBeat) return;
+        if (includeEnd)
+        {
+            if (globalBeat > endBeat + 1.0e-12) return;
+        }
+        else if (globalBeat >= endBeat)
+        {
+            return;
+        }
         const double fraction = (globalBeat - startBeat) / blockLen;
         const int sampleOffset = sampleOffsetBase
             + juce::jlimit(0, numSamples - 1, (int) (fraction * (double) numSamples));
@@ -763,15 +798,32 @@ void MidiToolkitProcessor::generatePreviewMidi(const MidiClip& clip, double star
                 emitAt(globalStart,
                        juce::MidiMessage::noteOn(note.channel, pitch, (juce::uint8) note.velocity));
                 activeNotes_[chIdx][pitch] = true;
+                // Clip-local end (not k * length). A tail past the loop is
+                // rebased onto the next pass when the playhead wraps.
+                activeNoteEnd_[chIdx][pitch] = noteEnd;
             }
-            if (globalEnd >= startBeat && globalEnd <= endBeat + 1.0e-12)
+            // The off belongs to the block that ends at this time, so it is
+            // not also fired at the first sample of the next block.
+            if (globalEnd > startBeat && globalEnd <= endBeat + 1.0e-12)
             {
                 const int pitch = juce::jlimit(0, 127, basePitch + previewNoteShift_[chIdx][basePitch]);
-                emitAt(globalEnd, juce::MidiMessage::noteOff(note.channel, pitch));
+                emitAt(globalEnd, juce::MidiMessage::noteOff(note.channel, pitch), true);
                 activeNotes_[chIdx][pitch] = false;
             }
         }
     }
+
+    // Tails that crossed the loop were rebased into this pass. Release them
+    // when their new end falls in this block.
+    for (int ch = 0; ch < 16; ++ch)
+        for (int n = 0; n < 128; ++n)
+            if (activeNotes_[ch][n]
+                && activeNoteEnd_[ch][n] > startBeat
+                && activeNoteEnd_[ch][n] <= endBeat + 1.0e-12)
+            {
+                emitAt(activeNoteEnd_[ch][n], juce::MidiMessage::noteOff(ch + 1, n), true);
+                activeNotes_[ch][n] = false;
+            }
 }
 
 void MidiToolkitProcessor::flushActiveNotes(juce::MidiBuffer& output, int samplePosition)
@@ -950,6 +1002,7 @@ void MidiToolkitProcessor::getStateInformation(juce::MemoryBlock& dest)
     xml.setAttribute("lockMode", (int) lockedEdit.mode);
     xml.setAttribute("lockNoteFilterMask", (int) lockedEdit.noteFilterMask);
     xml.setAttribute("lockNoteFilterType", (int) lockedEdit.noteFilterType);
+    xml.setAttribute("lockDrumMap", lockedEdit.drumMap ? 1 : 0);
     xml.setAttribute("lockSwing", lockedGroove.swing);
     xml.setAttribute("lockPocket", lockedGroove.pocket);
     xml.setAttribute("lockHumanize", lockedGroove.humanize);
@@ -1107,6 +1160,7 @@ void MidiToolkitProcessor::getStateInformation(juce::MemoryBlock& dest)
         e->setAttribute("mode", (int) edit.mode);
         e->setAttribute("noteFilterMask", (int) edit.noteFilterMask);
         e->setAttribute("noteFilterType", (int) edit.noteFilterType);
+        e->setAttribute("drumMap", edit.drumMap ? 1 : 0);
         if (!edit.removedBars.empty())
         {
             juce::StringArray parts;
@@ -1414,8 +1468,13 @@ void MidiToolkitProcessor::setStateInformation(const void* data, int sizeInBytes
                 lockedEdit.noteFilterMask = (uint16_t) juce::jlimit(1, 0x0FFF, mask & 0x0FFF);
                 if (lockedEdit.noteFilterMask == 0)
                     lockedEdit.noteFilterMask = 0x0FFF;
-                lockedEdit.noteFilterType = xml->getIntAttribute("lockNoteFilterType", 0) != 0
-                    ? NoteFilterType::Fold : NoteFilterType::Mute;
+                {
+                    const int raw = xml->getIntAttribute("lockNoteFilterType", (int) NoteFilterType::Off);
+                    lockedEdit.noteFilterType = raw == (int) NoteFilterType::Mute ? NoteFilterType::Mute
+                                              : raw == (int) NoteFilterType::Fold ? NoteFilterType::Fold
+                                                                                 : NoteFilterType::Off;
+                }
+                lockedEdit.drumMap = xml->getIntAttribute("lockDrumMap", 0) != 0;
             }
             lockedGroove = GrooveParams();
             lockedGroove.set(0, xml->getIntAttribute("lockSwing", 0));
@@ -1635,8 +1694,13 @@ void MidiToolkitProcessor::setStateInformation(const void* data, int sizeInBytes
                         e.noteFilterMask = (uint16_t) juce::jlimit(1, 0x0FFF, mask & 0x0FFF);
                         if (e.noteFilterMask == 0)
                             e.noteFilterMask = 0x0FFF;
-                        e.noteFilterType = child->getIntAttribute("noteFilterType", 0) != 0
-                            ? NoteFilterType::Fold : NoteFilterType::Mute;
+                        {
+                            const int raw = child->getIntAttribute("noteFilterType", (int) NoteFilterType::Off);
+                            e.noteFilterType = raw == (int) NoteFilterType::Mute ? NoteFilterType::Mute
+                                             : raw == (int) NoteFilterType::Fold ? NoteFilterType::Fold
+                                                                                : NoteFilterType::Off;
+                        }
+                        e.drumMap = child->getIntAttribute("drumMap", 0) != 0;
                     }
                     const auto removedAttr = child->getStringAttribute("removedBars");
                     if (removedAttr.isNotEmpty())

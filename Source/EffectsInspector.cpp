@@ -80,6 +80,7 @@ EffectsInspector::EffectsInspector()
     , modeRow("Mode", modePopup)
     , pitchRangeSl("Range", 0, 127, 0, 127)
     , filterTypeRow("Filter Type", filterTypePopup)
+    , drumMapRow("Drums", drumMapSwitch)
     , trimRow("Trim", trimSwitch)
     , fitRow("Fit to Scale", fitSwitch)
     , mapRow("Map to Root", mapSwitch)
@@ -374,11 +375,21 @@ EffectsInspector::EffectsInspector()
         notifyEdit();
     };
 
-    filterTypePopup.setItems({ "Mute", "Fold" }, 0);
-    filterTypePopup.setTooltip("Mute removes filtered pitches; Fold maps them into enabled ones");
+    filterTypePopup.setItems({ "Off", "Mute", "Fold" }, 0);
+    filterTypePopup.setTooltip("Off keeps every note. Mute removes filtered pitches. Fold maps them into enabled ones");
     filterTypePopup.onChange = [this](int idx)
     {
-        edit.noteFilterType = idx == 1 ? NoteFilterType::Fold : NoteFilterType::Mute;
+        edit.noteFilterType = idx == 1 ? NoteFilterType::Mute
+                            : idx == 2 ? NoteFilterType::Fold
+                                       : NoteFilterType::Off;
+        notifyEdit();
+    };
+
+    drumMapSwitch.setTooltip("Map the kick to C1 and bypass pitch, scale, and the key filter. A snare-and-hat break with no kick stays where it is");
+    drumMapSwitch.onClick = [this]
+    {
+        edit.drumMap = drumMapSwitch.getToggleState();
+        refreshDependentEnables();
         notifyEdit();
     };
 
@@ -509,6 +520,7 @@ EffectsInspector::EffectsInspector()
     pitchSec.addRow(&pitchRangeSl, [this] { return pitchRangeSl.idealHeight(); },
                     [this] { return edit.hasPitchRange(); });
     pitchSec.addRow(&filterTypeRow, kRowMinH, [] { return true; });
+    pitchSec.addRow(&drumMapRow, kRowMinH, [] { return true; });
 
     formSec.addRow(&complexitySl, kSliderRowH, [this] { return groove.complexityTarget >= 0; });
     formSec.addRow(&variationsSl, kSliderRowH, [this] { return groove.variationIndex > 0; });
@@ -1131,7 +1143,8 @@ void EffectsInspector::resetPitchEditFields()
     edit.root = -1;
     edit.mode = Mode::Ionian;
     edit.noteFilterMask = 0x0FFF;
-    edit.noteFilterType = NoteFilterType::Fold;
+    edit.noteFilterType = NoteFilterType::Off;
+    edit.drumMap = false;
 }
 
 void EffectsInspector::resetPlaybackSection()
@@ -1305,6 +1318,21 @@ void EffectsInspector::refreshDependentEnables()
     filterTypeRow.setEnabled(true);
     filterTypePopup.setEnabled(true);
     filterTypeRow.setAlpha(1.0f);
+
+    const bool drums = edit.drumMap;
+    pitchSec.setRowForcedHidden(&octaveRow, drums);
+    pitchSec.setRowForcedHidden(&pitchRow, drums);
+    pitchSec.setRowForcedHidden(&pitchInputRow, drums);
+    pitchSec.setRowForcedHidden(&octaveRangeRow, drums);
+    pitchSec.setRowForcedHidden(&outsideRangeRow, drums);
+    pitchSec.setRowForcedHidden(&pitchDividerA, drums);
+    pitchSec.setRowForcedHidden(&keyGrid, drums);
+    pitchSec.setRowForcedHidden(&modeRow, drums);
+    pitchSec.setRowForcedHidden(&fitRow, drums);
+    pitchSec.setRowForcedHidden(&mapRow, drums);
+    pitchSec.setRowForcedHidden(&pitchDividerB, drums);
+    pitchSec.setRowForcedHidden(&noteFilter, drums);
+    pitchSec.setRowForcedHidden(&pitchRangeSl, drums);
 
     // Form tiles four sections — hide below 4 bars even when the section is open.
     const int four = (int) GeneratorLength::FourBars;
@@ -1612,8 +1640,10 @@ void EffectsInspector::setEdit(const ClipEdit& e, juce::NotificationType)
     fitSwitch.setToggleState(e.fitScale, juce::dontSendNotification);
     mapSwitch.setToggleState(e.mapToRoot, juce::dontSendNotification);
     noteFilter.setState(e.noteFilterMask, juce::dontSendNotification);
-    filterTypePopup.setIndex(e.noteFilterType == NoteFilterType::Fold ? 1 : 0,
+    filterTypePopup.setIndex(e.noteFilterType == NoteFilterType::Mute ? 1
+                             : e.noteFilterType == NoteFilterType::Fold ? 2 : 0,
                              juce::dontSendNotification);
+    drumMapSwitch.setToggleState(e.drumMap, juce::dontSendNotification);
     syncNoteFilterScale();
     refreshPitchAnnotation();
     refreshDirtySections();

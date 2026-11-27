@@ -3,6 +3,8 @@
 #include <catch2/catch_test_macros.hpp>
 #include <cmath>
 #include <cstring>
+#include <set>
+#include <utility>
 #include <vector>
 
 using namespace pflow;
@@ -245,4 +247,135 @@ TEST_CASE("genre pack json is the source the plugin loads", "[genre]")
     CHECK(house.hat[0].velocity == 0);
     CHECK(house.ghost[7].velocity > 0);
     CHECK(house.ghost[7].velocity < house.snare[4].velocity);
+}
+
+namespace {
+
+using HitKey = std::set<std::pair<int, int>>;
+
+HitKey hitKeys(const std::vector<Event>& events)
+{
+    HitKey keys;
+    for (const auto& e : events)
+    {
+        if (e.velocity <= 0 || e.ppq < 0.0 || e.ppq >= 4.0) continue;
+        keys.insert({ (int) std::lround(e.ppq / 0.25), e.note });
+    }
+    return keys;
+}
+
+int downbeatKicks(const std::vector<Event>& events)
+{
+    const auto ons = noteOns(events, 0.0, 4.0);
+    return countNear(ons, 36, 0.0, 0.08) + countNear(ons, 36, 1.0, 0.08)
+         + countNear(ons, 36, 2.0, 0.08) + countNear(ons, 36, 3.0, 0.08);
+}
+
+template <typename Render>
+bool findsDifferentSeed(Render render)
+{
+    const auto base = render(1);
+    for (int nonce = 2; nonce <= 24; ++nonce)
+        if (render(nonce) != base)
+            return true;
+    return false;
+}
+
+} // namespace
+
+TEST_CASE("a generate nonce rolls a different in-style groove", "[genre][generate]")
+{
+    CHECK(findsDifferentSeed([](int nonce)
+    {
+        auto g = drums(DrumStyle::House);
+        g.drumNonce = nonce;
+        g.drumVariation = 4;
+        std::vector<Event> ev;
+        renderDrums(g, 0.0, 4.0, ev);
+        return hitKeys(ev);
+    }));
+
+    for (int raw = 0; raw < (int) DrumStyle::Count; ++raw)
+    {
+        const auto style = (DrumStyle) raw;
+        const bool different = findsDifferentSeed([style](int nonce)
+        {
+            auto g = drums(style);
+            g.drumNonce = nonce;
+            g.drumVariation = 4;
+            std::vector<Event> ev;
+            renderDrums(g, 0.0, 4.0, ev);
+            return hitKeys(ev);
+        });
+        CHECK(different);
+    }
+
+    for (int nonce = 1; nonce <= 12; ++nonce)
+    {
+        for (auto style : { DrumStyle::House, DrumStyle::Techno })
+        {
+            auto g = drums(style);
+            g.drumNonce = nonce;
+            g.drumVariation = 4;
+            std::vector<Event> ev;
+            renderDrums(g, 0.0, 4.0, ev);
+            CHECK(downbeatKicks(ev) == 4);
+        }
+    }
+
+    bool reggaeOneDrop = false;
+    for (int nonce = 1; nonce <= 24 && !reggaeOneDrop; ++nonce)
+    {
+        auto g = drums(DrumStyle::Reggae);
+        g.drumNonce = nonce;
+        g.drumVariation = 4;
+        std::vector<Event> ev;
+        renderDrums(g, 0.0, 4.0, ev);
+        reggaeOneDrop = downbeatKicks(ev) < 4;
+    }
+    CHECK(reggaeOneDrop);
+
+    CHECK(findsDifferentSeed([](int nonce)
+    {
+        GrooveParams g;
+        g.melodyEnabled = true;
+        g.melodyNonce = nonce;
+        g.melodyVariation = 4;
+        std::vector<Event> ev;
+        renderMelody(g, 0.0, 4.0, nullptr, 0, 0, Mode::Ionian, ev);
+        return hitKeys(ev);
+    }));
+
+    CHECK(findsDifferentSeed([](int nonce)
+    {
+        GrooveParams g;
+        g.bassEnabled = true;
+        g.bassNonce = nonce;
+        g.bassVariation = 4;
+        std::vector<Event> ev;
+        renderBass(g, 0.0, 4.0, nullptr, 0, 0, Mode::Ionian, ev);
+        return hitKeys(ev);
+    }));
+
+    CHECK(findsDifferentSeed([](int nonce)
+    {
+        GrooveParams g;
+        g.chordsEnabled = true;
+        g.chordNonce = nonce;
+        g.chordVariation = 4;
+        std::vector<Event> ev;
+        renderChords(g, 0.0, 4.0, nullptr, 0, 0, Mode::Ionian, ev);
+        return hitKeys(ev);
+    }));
+
+    CHECK(findsDifferentSeed([](int nonce)
+    {
+        GrooveParams g;
+        g.arpEnabled = true;
+        g.arpNonce = nonce;
+        g.arpVariation = 4;
+        std::vector<Event> ev;
+        renderArp(g, 0.0, 4.0, nullptr, 0, 0, Mode::Ionian, ev);
+        return hitKeys(ev);
+    }));
 }

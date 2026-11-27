@@ -59,6 +59,20 @@ struct MidiClip
     std::vector<int> getDistinctPitches() const;
 };
 
+/** Tempo and time signature read from every track. Tick files keep musical
+    beats (ticks / PPQ) so a tempo that is not on track 0 cannot slide the grid.
+    SMPTE files set ticksPerBeat to 0 and timestamps are seconds. */
+struct MidiFileTiming
+{
+    double bpm = 120.0;
+    int timeSigNum = 4;
+    int timeSigDen = 4;
+    double ticksPerBeat = 480.0;
+};
+
+MidiFileTiming inspectMidiTiming(juce::MidiFile& file);
+double midiTimestampToBeats(double timestamp, const MidiFileTiming& timing);
+
 // ── Parse a standard MIDI file ───────────────────────────────────────────────
 MidiClip parseMidiFile(const juce::File& file);
 

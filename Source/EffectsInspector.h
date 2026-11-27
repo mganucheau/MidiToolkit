@@ -322,6 +322,8 @@ private:
     fx::FlatRangeSliderRow pitchRangeSl;
     fx::FlatPopup filterTypePopup;
     fx::InlineRow filterTypeRow;
+    fx::FlatSwitch drumMapSwitch;
+    fx::InlineRow drumMapRow;
 
     fx::InlineRow trimRow;
     fx::InlineRow fitRow;
