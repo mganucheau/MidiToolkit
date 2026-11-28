@@ -415,3 +415,54 @@ TEST_CASE("funk drums keep a syncopated backbeat pocket", "[genre][funk]")
     check(1);
     check(7);
 }
+
+TEST_CASE("acid arp is a low 303 line with slides and accents", "[genre][acid]")
+{
+    auto render = [](int nonce)
+    {
+        GrooveParams g;
+        g.arpEnabled = true;
+        g.arpShapeIndex = (int) ArpShape::Acid;
+        g.arpDensity = 80;
+        g.arpNonce = nonce;
+        g.arpVariation = 2;
+        std::vector<Event> ev;
+        renderArp(g, 0.0, 4.0, nullptr, 0, 0, Mode::Aeolian, ev);
+        return ev;
+    };
+
+    const auto ev = render(3);
+    const auto ons = noteOns(ev, 0.0, 4.0);
+    REQUIRE(ons.size() >= 8);
+    int accents = 0, body = 0;
+    for (const auto& h : ons)
+    {
+        CHECK(h.note >= 36);
+        CHECK(h.note <= 64);
+        if (h.velocity >= 120) ++accents;
+        else ++body;
+    }
+    CHECK(accents >= 1);
+    CHECK(body >= 1);
+
+    bool slide = false;
+    for (size_t i = 0; i < ev.size(); ++i)
+    {
+        if (ev[i].velocity <= 0) continue;
+        double off = -1.0;
+        for (size_t j = i + 1; j < ev.size(); ++j)
+        {
+            if (ev[j].note == ev[i].note && ev[j].velocity == 0)
+            {
+                off = ev[j].ppq;
+                break;
+            }
+        }
+        if (off < 0.0) continue;
+        for (size_t j = i + 1; j < ev.size() && ev[j].ppq < off - 1.0e-6; ++j)
+            if (ev[j].velocity > 0)
+                slide = true;
+    }
+    CHECK(slide);
+    CHECK(hitKeys(render(1)) != hitKeys(render(4)));
+}

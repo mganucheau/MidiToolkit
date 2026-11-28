@@ -1142,6 +1142,8 @@ public:
                 ++n;
                 parts.add(labels[i]);
             }
+        if (multiSelect && labels.size() > 0 && n >= labels.size())
+            return "All";
         if (countSummary)
         {
             if (n <= 0)

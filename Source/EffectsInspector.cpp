@@ -507,20 +507,22 @@ EffectsInspector::EffectsInspector()
     pitchSec.addRow(&pitchInputRow, kRowMinH, [this] { return edit.pitchInput; });
     pitchSec.addRow(&octaveRangeRow, kRowMinH, [this] { return edit.octaveRange != 0; });
     pitchSec.addRow(&outsideRangeRow, kRowMinH, [this] { return edit.octaveRange != 0; });
-    pitchSec.addRow(&pitchDividerA, [this] { return pitchDividerA.idealHeight(); });
-    pitchSec.addRow(&keyGrid, [this] { return keyGrid.idealHeight(); },
+
+    scaleSec.addRow(&pitchDividerA, [this] { return pitchDividerA.idealHeight(); });
+    scaleSec.addRow(&keyGrid, [this] { return keyGrid.idealHeight(); },
                     [this] { return edit.root >= 0; });
-    pitchSec.addRow(&modeRow, kRowMinH,
+    scaleSec.addRow(&modeRow, kRowMinH,
                     [this] { return edit.root >= 0 || edit.mode != Mode::Ionian; });
-    pitchSec.addRow(&fitRow, kRowMinH, [this] { return edit.fitScale; });
-    pitchSec.addRow(&mapRow, kRowMinH, [this] { return edit.mapToRoot; });
-    pitchSec.addRow(&pitchDividerB, [this] { return pitchDividerB.idealHeight(); });
-    pitchSec.addRow(&noteFilter, [this] { return noteFilter.idealHeight(); },
+    scaleSec.addRow(&fitRow, kRowMinH, [this] { return edit.fitScale; });
+    scaleSec.addRow(&mapRow, kRowMinH, [this] { return edit.mapToRoot; });
+    scaleSec.addRow(&pitchDividerB, [this] { return pitchDividerB.idealHeight(); });
+    scaleSec.addRow(&noteFilter, [this] { return noteFilter.idealHeight(); },
                     [this] { return edit.hasNoteFilter(); });
-    pitchSec.addRow(&pitchRangeSl, [this] { return pitchRangeSl.idealHeight(); },
+    scaleSec.addRow(&pitchRangeSl, [this] { return pitchRangeSl.idealHeight(); },
                     [this] { return edit.hasPitchRange(); });
-    pitchSec.addRow(&filterTypeRow, kRowMinH, [] { return true; });
-    pitchSec.addRow(&drumMapRow, kRowMinH, [] { return true; });
+    scaleSec.addRow(&filterTypeRow, kRowMinH,
+                    [this] { return edit.noteFilterType != NoteFilterType::Off; });
+    scaleSec.addRow(&drumMapRow, kRowMinH, [this] { return edit.drumMap; });
 
     formSec.addRow(&complexitySl, kSliderRowH, [this] { return groove.complexityTarget >= 0; });
     formSec.addRow(&variationsSl, kSliderRowH, [this] { return groove.variationIndex > 0; });
@@ -1016,7 +1018,7 @@ EffectsInspector::EffectsInspector()
     }
 
     playback.onToggle = formSec.onToggle = timing.onToggle = performance.onToggle
-        = pitchSec.onToggle = effectsSec.onToggle = [this] { layoutSections(); };
+        = pitchSec.onToggle = scaleSec.onToggle = effectsSec.onToggle = [this] { layoutSections(); };
     // Generators are an accordion: opening one folds the other four and is the
     // only active part (others stop sounding until Generate rolls them).
     auto wireGeneratorFold = [this](fx::Section& self)
@@ -1069,6 +1071,14 @@ EffectsInspector::EffectsInspector()
     };
     pitchSec.onLockToggle = [this] { toggleSectionLock(toolkitLock::Pitch); };
 
+    scaleSec.onReset = [this]
+    {
+        resetScaleEditFields();
+        setEdit(edit, juce::dontSendNotification);
+        notifyEdit();
+    };
+    scaleSec.onLockToggle = [this] { toggleSectionLock(toolkitLock::Pitch); };
+
     formSec.onReset = [this] { resetFormSection(); };
     formSec.onLockToggle = [this] { toggleSectionLock(toolkitLock::Effects); };
 
@@ -1079,6 +1089,7 @@ EffectsInspector::EffectsInspector()
     timing.sectionId = "timing";
     performance.sectionId = "performance";
     pitchSec.sectionId = "pitch";
+    scaleSec.sectionId = "scale";
     formSec.sectionId = "form";
     effectsSec.sectionId = "effects";
     arpSec.sectionId = "arp";
@@ -1086,9 +1097,9 @@ EffectsInspector::EffectsInspector()
     chordsSec.sectionId = "chords";
     bassSec.sectionId = "bass";
     drumSec.sectionId = "drums";
-    sectionOrder = { &playback, &formSec, &timing, &performance, &pitchSec, &effectsSec };
+    sectionOrder = { &playback, &formSec, &timing, &performance, &pitchSec, &scaleSec, &effectsSec };
     for (auto* sec : { &arpSec, &melodySec, &chordsSec, &bassSec, &drumSec,
-                       &playback, &timing, &performance, &pitchSec, &formSec, &effectsSec })
+                       &playback, &timing, &performance, &pitchSec, &scaleSec, &formSec, &effectsSec })
     {
         body.addAndMakeVisible(*sec);
         sec->onDragStart = [this, sec] { beginSectionDrag(sec); };
@@ -1100,6 +1111,7 @@ EffectsInspector::EffectsInspector()
     timing.setOpen(true);
     performance.setOpen(false);
     pitchSec.setOpen(false);
+    scaleSec.setOpen(false);
     formSec.setOpen(false);
     effectsSec.setOpen(false);
     arpSec.setOpen(false);
@@ -1135,9 +1147,13 @@ void EffectsInspector::resetPitchEditFields()
     edit.pitchInput = false;
     edit.octaveRange = 0;
     edit.outsideRange = OutsideRangeMode::Fold;
+    edit.extendMult = 1;
+}
+
+void EffectsInspector::resetScaleEditFields()
+{
     edit.pitchMin = 0;
     edit.pitchMax = 127;
-    edit.extendMult = 1;
     edit.fitScale = false;
     edit.mapToRoot = false;
     edit.root = -1;
@@ -1225,6 +1241,7 @@ void EffectsInspector::setSectionLocks(uint32_t locks)
     timing.setLocked((sectionLocks & toolkitLock::Timing) != 0);
     performance.setLocked((sectionLocks & toolkitLock::Performance) != 0);
     pitchSec.setLocked((sectionLocks & toolkitLock::Pitch) != 0);
+    scaleSec.setLocked((sectionLocks & toolkitLock::Pitch) != 0);
     formSec.setLocked((sectionLocks & toolkitLock::Effects) != 0);
     effectsSec.setLocked((sectionLocks & toolkitLock::Effects) != 0);
     refreshHeaderLockButton();
@@ -1261,6 +1278,7 @@ void EffectsInspector::resetUnlockedSections()
     if ((sectionLocks & toolkitLock::Pitch) == 0)
     {
         resetPitchEditFields();
+        resetScaleEditFields();
         setEdit(edit, juce::dontSendNotification);
         notifyEdit();
     }
@@ -1325,14 +1343,14 @@ void EffectsInspector::refreshDependentEnables()
     pitchSec.setRowForcedHidden(&pitchInputRow, drums);
     pitchSec.setRowForcedHidden(&octaveRangeRow, drums);
     pitchSec.setRowForcedHidden(&outsideRangeRow, drums);
-    pitchSec.setRowForcedHidden(&pitchDividerA, drums);
-    pitchSec.setRowForcedHidden(&keyGrid, drums);
-    pitchSec.setRowForcedHidden(&modeRow, drums);
-    pitchSec.setRowForcedHidden(&fitRow, drums);
-    pitchSec.setRowForcedHidden(&mapRow, drums);
-    pitchSec.setRowForcedHidden(&pitchDividerB, drums);
-    pitchSec.setRowForcedHidden(&noteFilter, drums);
-    pitchSec.setRowForcedHidden(&pitchRangeSl, drums);
+    scaleSec.setRowForcedHidden(&pitchDividerA, drums);
+    scaleSec.setRowForcedHidden(&keyGrid, drums);
+    scaleSec.setRowForcedHidden(&modeRow, drums);
+    scaleSec.setRowForcedHidden(&fitRow, drums);
+    scaleSec.setRowForcedHidden(&mapRow, drums);
+    scaleSec.setRowForcedHidden(&pitchDividerB, drums);
+    scaleSec.setRowForcedHidden(&noteFilter, drums);
+    scaleSec.setRowForcedHidden(&pitchRangeSl, drums);
 
     // Form tiles four sections — hide below 4 bars even when the section is open.
     const int four = (int) GeneratorLength::FourBars;
@@ -1379,7 +1397,7 @@ void EffectsInspector::refreshComplexitySlider()
 
 void EffectsInspector::refreshDirtySections()
 {
-    for (auto* sec : { &playback, &timing, &performance, &pitchSec, &formSec, &effectsSec })
+    for (auto* sec : { &playback, &timing, &performance, &pitchSec, &scaleSec, &formSec, &effectsSec })
         sec->refreshDirtyRows();
     refreshDependentEnables();
     layoutSections();
@@ -1754,15 +1772,32 @@ void EffectsInspector::refreshChangedButton()
 
 void EffectsInspector::setSectionOrder(const juce::String& ids)
 {
-    std::vector<fx::Section*> all { &playback, &formSec, &timing, &performance, &pitchSec, &effectsSec };
+    std::vector<fx::Section*> all { &playback, &formSec, &timing, &performance, &pitchSec, &scaleSec, &effectsSec };
     std::vector<fx::Section*> next;
+    bool namedScale = false;
     for (const auto& id : juce::StringArray::fromTokens(ids, ",", {}))
+    {
+        if (id.trim() == "scale")
+            namedScale = true;
         for (auto* sec : all)
             if (sec->sectionId == id.trim() && std::find(next.begin(), next.end(), sec) == next.end())
                 next.push_back(sec);
+    }
     for (auto* sec : all)
         if (std::find(next.begin(), next.end(), sec) == next.end())
             next.push_back(sec);
+    // Older layouts have no Scale id. Keep it under Pitch instead of after Delay.
+    if (!namedScale)
+    {
+        auto scale = std::find(next.begin(), next.end(), &scaleSec);
+        if (scale != next.end())
+            next.erase(scale);
+        auto pitch = std::find(next.begin(), next.end(), &pitchSec);
+        if (pitch != next.end())
+            next.insert(pitch + 1, &scaleSec);
+        else
+            next.push_back(&scaleSec);
+    }
     sectionOrder = next;
     layoutSections();
 }
@@ -1875,6 +1910,7 @@ int EffectsInspector::defaultFoldHeight() const
     y += timing.idealHeightForState(true) + gap;
     y += performance.idealHeightForState(true) + gap;
     y += pitchSec.idealHeightForState(false) + gap;
+    y += scaleSec.idealHeightForState(false) + gap;
     y += effectsSec.idealHeightForState(false) + gap;
     return y + pad - gap;
 }
@@ -1940,7 +1976,7 @@ bool EffectsInspector::anySectionOpen() const
     if (paneTab == 0)
         return arpSec.open || melodySec.open || chordsSec.open || bassSec.open || drumSec.open;
     if (!liveStream && (playback.open || formSec.open)) return true;
-    return timing.open || performance.open || pitchSec.open || effectsSec.open;
+    return timing.open || performance.open || pitchSec.open || scaleSec.open || effectsSec.open;
 }
 
 void EffectsInspector::foldAllSections()

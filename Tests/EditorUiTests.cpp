@@ -530,6 +530,15 @@ TEST_CASE("Header logo tracks the traffic-light zone and drops Toolkit before MI
     REQUIRE(sawGlyph);
 }
 
+TEST_CASE("browser name search matches file names", "[editorui]")
+{
+    REQUIRE(browserNameMatches("Techno Groove", "techno"));
+    REQUIRE(browserNameMatches("techno", "TECH"));
+    REQUIRE_FALSE(browserNameMatches("House Loop", "techno"));
+    REQUIRE(browserNameMatches("House Loop", "  "));
+    REQUIRE(browserNameMatches("House Loop", {}));
+}
+
 TEST_CASE("writeFilesToZip stores every file and renames duplicates", "[editorui]")
 {
     auto root = juce::File::getSpecialLocation(juce::File::tempDirectory)

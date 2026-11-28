@@ -7,7 +7,7 @@
 
 namespace pflow {
 
-/** Flat macOS-style effects inspector (Playback / Timing / Performance / Pitch & Scale / Effects). */
+/** Flat macOS-style effects inspector (Playback / Timing / Performance / Pitch / Scale / Effects). */
 class EffectsInspector : public juce::Component, public juce::SettableTooltipClient,
                          private juce::Timer
 {
@@ -83,6 +83,7 @@ public:
     fx::Section& timingSection() { return timing; }
     fx::Section& performanceSection() { return performance; }
     fx::Section& pitchSection() { return pitchSec; }
+    fx::Section& scaleSection() { return scaleSec; }
     fx::Section& formSection() { return formSec; }
     fx::Section& effectsSection() { return effectsSec; }
     fx::Section& arpSection() { return arpSec; }
@@ -112,6 +113,7 @@ private:
     int displayedOctave() const;
     int resolvedPitchMidi() const;
     void resetPitchEditFields();
+    void resetScaleEditFields();
     void resetPlaybackSection();
     void resetTimingSection();
     void resetPerformanceSection();
@@ -167,7 +169,8 @@ private:
     fx::Section playback { "Playback" };
     fx::Section timing { "Timing" };
     fx::Section performance { "Performance" };
-    fx::Section pitchSec { "Pitch & Scale" };
+    fx::Section pitchSec { "Pitch" };
+    fx::Section scaleSec { "Scale" };
     fx::Section formSec { "Form" };
     fx::Section effectsSec { "Delay" };
 

@@ -38,6 +38,7 @@ inline int sidebarHeaderToRows() { return metrics::scaled(kHeaderToRows); }
 inline int sidebarBodyPadT() { return metrics::scaled(kBodyPadT); }
 inline int sidebarPadH() { return metrics::scaled(kPadH); }
 inline int sidebarRowPadX() { return metrics::scaled(kRowPadX); }
+inline uint16_t allKeyMask() { return (uint16_t) ((1u << 12) - 1); }
 inline int sidebarIconCol() { return metrics::scaled(kIconCol); }
 inline int sidebarRowIconGap() { return metrics::scaled(kRowIconGap); }
 /** Folded rail icons match the Files-row sidebar fold toggle. */
@@ -110,6 +111,7 @@ FavoritesSidebar::FilterPanel::FilterPanel()
     keyGrid.contentBottomPad = 7;
     wireCollapse(keyGrid);
     keyGrid.setItems(keys);
+    keyGrid.setSelectedMask(allKeyMask(), juce::dontSendNotification);
     keyGrid.onChange = [this]
     {
         applyShowChangedVisibility();
@@ -214,6 +216,10 @@ FavoritesSidebar::FilterPanel::FilterPanel()
     {
         if (onSearchReturn) onSearchReturn();
     };
+    queryField.onTextChange = [this]
+    {
+        if (onQueryChanged) onQueryChanged();
+    };
     addAndMakeVisible(queryField);
 
     searchBtn.setTooltip("Search");
@@ -295,6 +301,13 @@ void FavoritesSidebar::FilterPanel::setSortColumn(BrowserSortColumn col)
     sortPopup.setIndex(idx, juce::dontSendNotification);
 }
 
+void FavoritesSidebar::FilterPanel::setSortAscending(bool on)
+{
+    sortAscending = on;
+    sortDirBtn.icon = on ? icons::caretUp : icons::caretDown;
+    sortDirBtn.repaint();
+}
+
 void FavoritesSidebar::FilterPanel::hideKind(ClipKind kind)
 {
     uint16_t mask = kindGrid.getSelectedMask();
@@ -319,6 +332,8 @@ bool FavoritesSidebar::FilterPanel::sectionIsChanged(const fx::ChipGrid& g) cons
         const uint8_t all = (uint8_t) ((1u << kNumClipKinds) - 1);
         return (uint8_t) g.getSelectedMask() != all;
     }
+    if (&g == &keyGrid)
+        return g.getSelectedMask() != allKeyMask();
     return g.getSelectedMask() != 0;
 }
 
@@ -359,7 +374,7 @@ void FavoritesSidebar::FilterPanel::applyShowChangedVisibility()
 
 int FavoritesSidebar::FilterPanel::idealHeight() const
 {
-    const int gap = metrics::scaled(8);
+    const int gap = metrics::scaled(4);
     const int rowH = metrics::chromeIconButton();
     int h = rowH + gap; // search
     if (subdirRow.isVisible()) h += rowH + gap;
@@ -379,7 +394,8 @@ int FavoritesSidebar::FilterPanel::idealHeight() const
     addSec(barsRange);
     addSec(complexityRange);
     addSec(timeSigGrid);
-    return h + metrics::scaled(12) * 2;
+    // addSec includes a gap after the last section; the 8px pad is the margin.
+    return h + metrics::scaled(8) * 2 - gap;
 }
 
 void FavoritesSidebar::FilterPanel::setIncludeSubdirs(bool on)
@@ -420,7 +436,9 @@ void FavoritesSidebar::FilterPanel::applyTo(BrowserSearch& s) const
         s.complexityMin = complexityRange.getLo();
         s.complexityMax = complexityRange.getHi();
     }
-    s.keyMask = keyGrid.getSelectedMask();
+    const auto keySel = keyGrid.getSelectedMask();
+    // Every key on is the same as no key filter.
+    s.keyMask = (keySel == allKeyMask()) ? 0 : keySel;
     s.keyRoot = -1;
     if (s.keyMask != 0)
     {
@@ -446,12 +464,13 @@ void FavoritesSidebar::FilterPanel::applyTo(BrowserSearch& s) const
     s.tagMask = 0; // Tags filter removed from UI
     s.timeSigMask = timeSigGrid.getSelectedMask();
     s.removeDuplicates = hideDuplicates;
+    s.subdirs = includeSubdirs;
 }
 
 int FavoritesSidebar::FilterPanel::activeGroupCount() const
 {
     int n = 0;
-    if (keyGrid.getSelectedMask() != 0) ++n;
+    if (keyGrid.getSelectedMask() != 0 && keyGrid.getSelectedMask() != allKeyMask()) ++n;
     {
         const uint8_t all = (uint8_t) ((1u << kNumClipKinds) - 1);
         if ((uint8_t) kindGrid.getSelectedMask() != all) ++n;
@@ -461,13 +480,14 @@ int FavoritesSidebar::FilterPanel::activeGroupCount() const
     if (!barsRange.isFullRange()) ++n;
     if (!complexityRange.isFullRange()) ++n;
     if (!hideDuplicates) ++n;
+    if (queryField.getText().trim().isNotEmpty()) ++n;
     return n;
 }
 
 juce::String FavoritesSidebar::FilterPanel::describeActiveFilters() const
 {
     juce::StringArray parts;
-    if (keyGrid.getSelectedMask() != 0)
+    if (keyGrid.getSelectedMask() != 0 && keyGrid.getSelectedMask() != allKeyMask())
     {
         juce::StringArray keys;
         for (int i = 0; i < 12; ++i)
@@ -504,6 +524,8 @@ juce::String FavoritesSidebar::FilterPanel::describeActiveFilters() const
                   + "–" + juce::String(complexityRange.getHi()));
     if (!hideDuplicates)
         parts.add("Showing duplicates");
+    if (queryField.getText().trim().isNotEmpty())
+        parts.add("Name: " + queryField.getText().trim());
     if (includeSubdirs)
         parts.add("Include subdirectories");
     if (parts.isEmpty())
@@ -535,6 +557,8 @@ void FavoritesSidebar::FilterPanel::loadFrom(const BrowserSearch& s)
     uint16_t mask = s.keyMask;
     if (mask == 0 && s.keyRoot >= 0 && s.keyRoot < 12)
         mask = (uint16_t) (1u << s.keyRoot);
+    else if (mask == 0)
+        mask = allKeyMask();
     keyGrid.setSelectedMask(mask, juce::dontSendNotification);
     {
         const uint8_t all = (uint8_t) ((1u << kNumClipKinds) - 1);
@@ -551,7 +575,7 @@ void FavoritesSidebar::FilterPanel::resetFilters()
     bpmRange.setRange(40, 240, juce::dontSendNotification);
     barsRange.setRange(1, 64, juce::dontSendNotification);
     complexityRange.setRange(0, 100, juce::dontSendNotification);
-    keyGrid.setSelectedMask(0, juce::dontSendNotification);
+    keyGrid.setSelectedMask(allKeyMask(), juce::dontSendNotification);
     kindGrid.setSelectedMask((uint16_t) ((1u << kNumClipKinds) - 1), juce::dontSendNotification);
     timeSigGrid.setSelectedMask(0, juce::dontSendNotification);
     hideDuplicates = true;
@@ -617,9 +641,10 @@ void FavoritesSidebar::FilterPanel::paint(juce::Graphics& g)
 
 void FavoritesSidebar::FilterPanel::resized()
 {
-    // Toolkit-like outer pad; section gap matches card breathing room.
-    auto r = getLocalBounds().reduced(metrics::scaled(12));
-    const int gap = metrics::scaled(8);
+    // Same inset and gap as toolkit sections (layoutSections).
+    const int pad = metrics::scaled(8);
+    const int gap = metrics::scaled(4);
+    auto r = getLocalBounds().reduced(pad);
     const int chipH = metrics::chromeIconButton();
     const int rowH = chipH;
     tagGrid.setBounds({});
@@ -700,6 +725,7 @@ FavoritesSidebar::SearchQueryPanel::SearchQueryPanel()
     {
         updateTrailingVisible();
         repaint();
+        if (onQueryChanged) onQueryChanged();
     };
     queryField.onFocused = [this]
     {
@@ -911,15 +937,12 @@ FavoritesSidebar::FavoritesSidebar()
     {
         scheduleFilterApply();
         searchQuery.setFilterActive(filterOpen || activeFilterGroupCount() > 0);
-        if (onFilterLayoutChanged) onFilterLayoutChanged();
         repaint();
     };
     filterPanel.onLayoutChanged = [this] { if (onFilterLayoutChanged) onFilterLayoutChanged(); };
-    filterPanel.onSubdirsChanged = [this](bool on)
+    filterPanel.onSubdirsChanged = [this](bool)
     {
-        includeSubdirs = on;
-        if (onScanSubdirs)
-            onScanSubdirs();
+        scheduleFilterApply();
     };
     filterPanel.onSortChanged = [this](BrowserSortColumn col)
     {
@@ -939,19 +962,30 @@ FavoritesSidebar::FavoritesSidebar()
     {
         if (onSaveCurrentSearch) onSaveCurrentSearch();
     };
+    searchQuery.onQueryChanged = [this]
+    {
+        filterPanel.setQuery(searchQuery.getQuery());
+        scheduleFilterApply();
+    };
     searchQuery.onReturn = [this]
     {
-        if (onRunSearch) onRunSearch(getCriteria());
+        filterPanel.setQuery(searchQuery.getQuery());
+        scheduleFilterApply();
     };
     searchQuery.onToggleFilter = [this] { setFilterOpen(!filterOpen); };
     filterPanel.onSortDirectionChanged = [this](bool ascending)
     {
         if (onSortDirectionChanged) onSortDirectionChanged(ascending);
     };
+    filterPanel.onQueryChanged = [this]
+    {
+        searchQuery.setQuery(filterPanel.getQuery());
+        scheduleFilterApply();
+    };
     filterPanel.onSearchReturn = [this]
     {
         searchQuery.setQuery(filterPanel.getQuery());
-        if (onRunSearch) onRunSearch(getCriteria());
+        scheduleFilterApply();
     };
     addChildComponent(searchQuery);
 
@@ -968,8 +1002,33 @@ void FavoritesSidebar::notifyHeightChanged()
 juce::Component& FavoritesSidebar::searchComponent() { return searchQuery; }
 juce::Component& FavoritesSidebar::filterComponent() { return filterPanel; }
 int FavoritesSidebar::filterIdealHeight() const { return filterPanel.idealHeight(); }
-int FavoritesSidebar::activeFilterCount() const { return filterPanel.activeGroupCount(); }
-juce::String FavoritesSidebar::describeActiveFilters() const { return filterPanel.describeActiveFilters(); }
+int FavoritesSidebar::activeFilterCount() const
+{
+    return listingCommitted ? committedFilterCount : filterPanel.activeGroupCount();
+}
+juce::String FavoritesSidebar::describeActiveFilters() const
+{
+    return listingCommitted ? committedFilterDescription : filterPanel.describeActiveFilters();
+}
+
+BrowserSearch FavoritesSidebar::listingFilter() const
+{
+    return listingCommitted ? committedListing : getFilter();
+}
+
+void FavoritesSidebar::commitListingFilter()
+{
+    committedListing = getFilter();
+    committedFilterDescription = filterPanel.describeActiveFilters();
+    committedFilterCount = filterPanel.activeGroupCount();
+    listingCommitted = true;
+    searchQuery.setFilterActive(filterOpen || committedFilterCount > 0);
+}
+
+void FavoritesSidebar::setSortAscending(bool on)
+{
+    filterPanel.setSortAscending(on);
+}
 void FavoritesSidebar::resetFilters() { filterPanel.resetFilters(); }
 void FavoritesSidebar::setFilterShowChangedOnly(bool on) { filterPanel.setShowChangedOnly(on); }
 void FavoritesSidebar::setSortColumn(BrowserSortColumn col) { filterPanel.setSortColumn(col); }
@@ -1008,8 +1067,14 @@ BrowserSearch FavoritesSidebar::getFilter() const
 {
     BrowserSearch s;
     filterPanel.applyTo(s);
-    s.subdirs = includeSubdirs;
+    s.query = filterPanel.getQuery();
     return s;
+}
+
+void FavoritesSidebar::noteCommittedSubdirs(bool on)
+{
+    if (listingCommitted)
+        committedListing.subdirs = on;
 }
 
 void FavoritesSidebar::setIncludeSubdirs(bool on)
@@ -1122,7 +1187,8 @@ void FavoritesSidebar::timerCallback()
     if (filterApplyPending)
     {
         filterApplyPending = false;
-        if (onFilterChanged) onFilterChanged();
+        if (onFilterDraftChanged)
+            onFilterDraftChanged();
     }
 }
 
@@ -1133,7 +1199,7 @@ bool FavoritesSidebar::isCurrentFolderFavorited() const
 
 int FavoritesSidebar::activeFilterGroupCount() const
 {
-    return filterPanel.activeGroupCount();
+    return listingCommitted ? committedFilterCount : filterPanel.activeGroupCount();
 }
 
 int FavoritesSidebar::folderCardHeight() const
@@ -2381,57 +2447,109 @@ void FileListPanel::setSort(SortColumn column, bool ascending)
     repaint();
 }
 
+void FileListPanel::setSortKey(SortColumn column, bool ascending)
+{
+    sortColumn = column;
+    sortAscending = ascending;
+}
+
+bool fileListEntryComesBefore(const FileListEntry& a, const FileListEntry& b,
+                              BrowserSortColumn column, bool ascending, bool precise)
+{
+    if (a.isDirectory != b.isDirectory)
+        return a.isDirectory && !b.isDirectory;
+
+    int cmp = 0;
+    switch (column)
+    {
+        case BrowserSortColumn::Name:
+            cmp = precise ? a.name.compareNatural(b.name) : a.name.compareIgnoreCase(b.name);
+            break;
+        case BrowserSortColumn::Key:
+            cmp = precise ? a.rootName.compareNatural(b.rootName)
+                          : a.rootName.compareIgnoreCase(b.rootName);
+            break;
+        case BrowserSortColumn::Tempo:
+            cmp = (a.bpm < b.bpm) ? -1 : (a.bpm > b.bpm ? 1 : 0);
+            break;
+        case BrowserSortColumn::Bars:
+            cmp = a.bars - b.bars;
+            break;
+        case BrowserSortColumn::Kind:
+            if (precise)
+                cmp = juce::String(clipKindName(a.kind))
+                          .compareNatural(juce::String(clipKindName(b.kind)));
+            else
+                cmp = (int) a.kind - (int) b.kind;
+            break;
+        case BrowserSortColumn::Complexity:
+            cmp = a.complexity - b.complexity;
+            break;
+        case BrowserSortColumn::DifNotes:
+            cmp = a.difNotes - b.difNotes;
+            break;
+        case BrowserSortColumn::TimeSig:
+            cmp = (a.timeSigNum * 100 + a.timeSigDen) - (b.timeSigNum * 100 + b.timeSigDen);
+            break;
+        case BrowserSortColumn::Notes:
+            cmp = a.noteCount - b.noteCount;
+            break;
+    }
+    if (cmp == 0)
+        cmp = precise ? a.name.compareNatural(b.name) : a.name.compareIgnoreCase(b.name);
+    return ascending ? cmp < 0 : cmp > 0;
+}
+
+void FileListPanel::setEntriesInOrder(std::vector<FileListEntry> e, std::vector<int> order)
+{
+    entries = std::move(e);
+    metaWidthsDirty = true;
+    selected = juce::jlimit(-1, (int) entries.size() - 1, selected);
+    selectedEntries.clear();
+    selectingRange = false;
+    content.clearDragState();
+    if (order.size() == entries.size())
+    {
+        sortOrder = std::move(order);
+        displayOfEntry.assign(entries.size(), -1);
+        for (int i = 0; i < (int) sortOrder.size(); ++i)
+            displayOfEntry[(size_t) sortOrder[(size_t) i]] = i;
+        setScrollRow(scrollRow);
+    }
+    else
+    {
+        rebuildSortOrder();
+    }
+    if (selected >= 0 && selected < (int) entries.size() && !entries[(size_t) selected].isDirectory)
+        selectedEntries.insert(selected);
+    rangeAnchorDisplay = entryToDisplay(selected);
+    if (getWidth() > 0 && getHeight() > 0)
+        resized();
+    else
+        updateContentSize();
+    content.repaint();
+    repaint();
+    if (onEntriesChanged) onEntriesChanged();
+}
+
 void FileListPanel::rebuildSortOrder()
 {
     sortOrder.resize(entries.size());
     for (int i = 0; i < (int) entries.size(); ++i)
         sortOrder[(size_t) i] = i;
 
-    std::stable_sort(sortOrder.begin(), sortOrder.end(), [this](int a, int b)
+    const bool precise = entries.size() <= 20000;
+    const auto column = sortColumn;
+    const bool ascending = sortAscending;
+    auto before = [&](int a, int b)
     {
-        const auto& ea = entries[(size_t) a];
-        const auto& eb = entries[(size_t) b];
-        // Folders always first.
-        if (ea.isDirectory != eb.isDirectory)
-            return ea.isDirectory && !eb.isDirectory;
-
-        int cmp = 0;
-        switch (sortColumn)
-        {
-            case SortColumn::Name:
-                cmp = ea.name.compareNatural(eb.name);
-                break;
-            case SortColumn::Key:
-                cmp = ea.rootName.compareNatural(eb.rootName);
-                break;
-            case SortColumn::Tempo:
-                cmp = (ea.bpm < eb.bpm) ? -1 : (ea.bpm > eb.bpm ? 1 : 0);
-                break;
-            case SortColumn::Bars:
-                cmp = ea.bars - eb.bars;
-                break;
-            case SortColumn::Kind:
-                cmp = juce::String(clipKindName(ea.kind))
-                          .compareNatural(juce::String(clipKindName(eb.kind)));
-                break;
-            case SortColumn::Complexity:
-                cmp = ea.complexity - eb.complexity;
-                break;
-            case SortColumn::DifNotes:
-                cmp = ea.difNotes - eb.difNotes;
-                break;
-            case SortColumn::TimeSig:
-                cmp = (ea.timeSigNum * 100 + ea.timeSigDen)
-                    - (eb.timeSigNum * 100 + eb.timeSigDen);
-                break;
-            case SortColumn::Notes:
-                cmp = ea.noteCount - eb.noteCount;
-                break;
-        }
-        if (cmp == 0)
-            cmp = ea.name.compareNatural(eb.name);
-        return sortAscending ? cmp < 0 : cmp > 0;
-    });
+        return fileListEntryComesBefore(entries[(size_t) a], entries[(size_t) b],
+                                        column, ascending, precise);
+    };
+    if (precise)
+        std::stable_sort(sortOrder.begin(), sortOrder.end(), before);
+    else
+        std::sort(sortOrder.begin(), sortOrder.end(), before);
 
     displayOfEntry.assign(entries.size(), -1);
     for (int i = 0; i < (int) sortOrder.size(); ++i)
@@ -2501,13 +2619,70 @@ void FileListPanel::scrollBarMoved(juce::ScrollBar*, double newRangeStart)
     updateScrollTopButton();
 }
 
-void FileListPanel::selectAdjacent(int direction)
+void FileListPanel::selectAdjacent(int direction, bool extend)
 {
     if (sortOrder.empty()) return;
     int disp = entryToDisplay(selected);
     if (disp < 0) disp = direction > 0 ? -1 : (int) sortOrder.size();
-    disp = juce::jlimit(0, (int) sortOrder.size() - 1, disp + direction);
-    setSelectedIndex(displayToEntry(disp));
+    const int next = juce::jlimit(0, (int) sortOrder.size() - 1, disp + direction);
+    if (!extend)
+    {
+        setSelectedIndex(displayToEntry(next));
+        return;
+    }
+    int anchor = rangeAnchorDisplay;
+    if (anchor < 0)
+        anchor = disp >= 0 ? disp : next;
+    replaceSelectionWithRange(anchor, next);
+    ensureRowVisible(next);
+    if (onSelect && selected >= 0)
+        onSelect(selected);
+    // Auditioning the end row rewrites the anchor. Shift-extend keeps the start.
+    rangeAnchorDisplay = anchor;
+}
+
+void FileListPanel::setSelectedEntries(const std::vector<int>& indices, int primary)
+{
+    selectedEntries.clear();
+    for (int i : indices)
+    {
+        if (!juce::isPositiveAndBelow(i, (int) entries.size()))
+            continue;
+        if (entries[(size_t) i].isDirectory)
+            continue;
+        selectedEntries.insert(i);
+    }
+    if (selectedEntries.count(primary) == 0)
+        primary = selectedEntries.empty() ? -1 : *selectedEntries.begin();
+    selected = primary;
+    selectingRange = selectedEntries.size() > 1;
+    rangeAnchorDisplay = entryToDisplay(selected);
+    ensureRowVisible(entryToDisplay(selected));
+    content.repaint();
+    repaint();
+    if (onSelect && selected >= 0)
+        onSelect(selected);
+}
+
+void FileListPanel::selectAllFiles()
+{
+    std::vector<int> ids;
+    ids.reserve(entries.size());
+    int primary = selected;
+    for (int i = 0; i < (int) entries.size(); ++i)
+    {
+        if (entries[(size_t) i].isDirectory)
+            continue;
+        if (primary < 0)
+            primary = i;
+        ids.push_back(i);
+    }
+    setSelectedEntries(ids, primary);
+}
+
+bool FileListPanel::isEntrySelected(int index) const
+{
+    return selectedEntries.count(index) != 0;
 }
 
 bool FileListPanel::keyPressed(const juce::KeyPress& key)
@@ -2523,8 +2698,9 @@ bool FileListPanel::keyPressed(const juce::KeyPress& key)
         if (!hasKeyboardFocus(true))
             grabKeyboardFocus();
 
-        if (key == juce::KeyPress::upKey)    { selectAdjacent(-1); return true; }
-        if (key == juce::KeyPress::downKey)  { selectAdjacent(1); return true; }
+        const bool extend = key.getModifiers().isShiftDown();
+        if (key == juce::KeyPress::upKey)    { selectAdjacent(-1, extend); return true; }
+        if (key == juce::KeyPress::downKey)  { selectAdjacent(1, extend); return true; }
         if (key == juce::KeyPress::leftKey)
         {
             if (onEnterParent) onEnterParent();
@@ -2541,8 +2717,8 @@ bool FileListPanel::keyPressed(const juce::KeyPress& key)
         }
 
         const int pageRows = juce::jmax(1, viewport.getMaximumVisibleHeight() / metrics::listRowH());
-        if (key == juce::KeyPress::pageUpKey)   { selectAdjacent(-pageRows); return true; }
-        if (key == juce::KeyPress::pageDownKey) { selectAdjacent(pageRows); return true; }
+        if (key == juce::KeyPress::pageUpKey)   { selectAdjacent(-pageRows, extend); return true; }
+        if (key == juce::KeyPress::pageDownKey) { selectAdjacent(pageRows, extend); return true; }
         return true;
     }
 
@@ -3539,7 +3715,7 @@ void FileListPanel::ListContent::mouseDown(const juce::MouseEvent& e)
                 m.addItem(100 + i, "Show in Finder Location " + juce::String(i + 1));
         }
         m.addItem(2, "Copy to Folder...");
-        m.addItem(3, "Save as Zip", owner.onExportFilesAsZip != nullptr && !zipFiles.empty());
+        m.addItem(3, "Export Selection", owner.onExportSelection != nullptr && !zipFiles.empty());
         juce::PopupMenu kinds;
         for (int i = 0; i < kNumClipKinds; ++i)
         {
@@ -3559,8 +3735,8 @@ void FileListPanel::ListContent::mouseDown(const juce::MouseEvent& e)
                     owner.onRevealFile(juce::File(locs[result - 100]));
                 else if (result == 2 && owner.onCopyFileToFolder)
                     owner.onCopyFileToFolder(file);
-                else if (result == 3 && owner.onExportFilesAsZip)
-                    owner.onExportFilesAsZip(zipFiles);
+                else if (result == 3 && owner.onExportSelection)
+                    owner.onExportSelection();
                 else if (result >= 20 && result < 20 + kNumClipKinds && owner.onSetKind)
                     owner.onSetKind(file, (ClipKind) (result - 20));
             });
@@ -3579,11 +3755,14 @@ void FileListPanel::ListContent::mouseDown(const juce::MouseEvent& e)
     rangeDragDisplay = -1;
     if (e.mods.isShiftDown() && owner.rangeAnchorDisplay >= 0)
     {
-        owner.replaceSelectionWithRange(owner.rangeAnchorDisplay, disp);
+        const int anchor = owner.rangeAnchorDisplay;
+        owner.replaceSelectionWithRange(anchor, disp);
         owner.selectingRange = false;
         clearDragState();
+        rangeDragDisplay = anchor;
         if (owner.onSelect && owner.selected >= 0)
             owner.onSelect(owner.selected);
+        owner.rangeAnchorDisplay = anchor;
     }
     else if (e.mods.isCommandDown() && !entry.isDirectory)
     {
@@ -3695,7 +3874,8 @@ void FileListPanel::ListContent::mouseDrag(const juce::MouseEvent& e)
     {
         const int dy = std::abs(e.getDistanceFromDragStartY());
         const int dx = std::abs(e.getDistanceFromDragStartX());
-        if (dy >= 4 && dy >= dx)
+        const bool shiftDrag = e.mods.isShiftDown() && (dx + dy) >= 4;
+        if (shiftDrag || (dy >= 4 && dy >= dx))
         {
             const int edge = 8;
             if (e.y >= getHeight() - edge)
@@ -3841,7 +4021,7 @@ void BrowserToolbar::setLibraryFolder(bool on)
     if (libraryFolder == on) return;
     libraryFolder = on;
     btnReveal.icon = on ? icons::download : icons::finder;
-    btnReveal.setTooltip(on ? "Export library folder" : "Show in Finder");
+    btnReveal.setTooltip(on ? "Export selection" : "Show in Finder");
     btnReveal.repaint();
     resized();
 }
@@ -3860,6 +4040,8 @@ void BrowserToolbar::setSubfolders(bool on)
 
 void BrowserToolbar::setFiltersActive(bool open, int activeCount, const juce::String& summary)
 {
+    if (filtersOpen == open && filtersActiveCount == activeCount && filtersSummary == summary)
+        return;
     filtersOpen = open;
     filtersActiveCount = activeCount;
     filtersSummary = summary;
@@ -3921,8 +4103,14 @@ void BrowserToolbar::resized()
 
 void BrowserToolbar::mouseDown(const juce::MouseEvent& e)
 {
-    if (e.mods.isPopupMenu() && countBounds.contains(e.getPosition()))
+    if (countBounds.contains(e.getPosition()))
     {
+        if (!e.mods.isPopupMenu())
+        {
+            if (onSelectAllFiles)
+                onSelectAllFiles();
+            return;
+        }
         juce::PopupMenu m;
         m.addItem(1, "Export as Zip", onExportListedFiles != nullptr && shownCount > 0);
         m.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(this).withMousePosition(),
@@ -4041,16 +4229,14 @@ void FilterPopover::setShowChanged(bool on)
 
 int FilterPopover::idealHeight() const
 {
-    // Header + body; actions live in the header (no footer chrome).
     const int header = metrics::scaled(40);
-    const int pad = metrics::scaled(8);
+    const int footer = metrics::scaled(40);
     const int bodyIdeal = panelHeight ? panelHeight() : 0;
     const int body = maxBodyH > 0 ? juce::jmin(bodyIdeal, maxBodyH) : bodyIdeal;
     const int inset = themeDepth() == ThemeDepth::Brutal
                           ? 2 * (int) std::ceil(juce::jmax(1.5f, themeBorderPx()) + 1.0f)
                           : 0;
-    const int countH = countText.isNotEmpty() ? metrics::scaled(24) : 0;
-    return header + pad + body + pad + countH + inset;
+    return header + body + footer + inset;
 }
 
 void FilterPopover::resized()
@@ -4061,24 +4247,29 @@ void FilterPopover::resized()
     auto r = getLocalBounds().reduced(inset);
     auto header = r.removeFromTop(metrics::scaled(40)).reduced(metrics::scaled(12), 0);
     const int chipH = metrics::chromeIconButton();
-    // Right → left: X · Make default · reset · show-changed
+    // Right → left: X · Apply · reset · show-changed
     closeBounds = header.removeFromRight(chipH).withSizeKeepingCentre(chipH, chipH);
     header.removeFromRight(metrics::scaled(4));
-    const int saveW = juce::jmax(metrics::scaled(88),
-                                 (int) std::ceil(juce::GlyphArrangement::getStringWidth(
-                                     uiFontFixed(12.0f, true), "Make default")) + metrics::scaled(16));
-    saveDefaultBounds = header.removeFromRight(saveW).withSizeKeepingCentre(saveW, chipH);
+    const int applyW = juce::jmax(metrics::scaled(64),
+                                  (int) std::ceil(juce::GlyphArrangement::getStringWidth(
+                                      uiFontFixed(12.0f, true), "Apply")) + metrics::scaled(16));
+    applyBounds = header.removeFromRight(applyW).withSizeKeepingCentre(applyW, chipH);
     header.removeFromRight(metrics::scaled(4));
     resetBounds = header.removeFromRight(chipH).withSizeKeepingCentre(chipH, chipH);
     header.removeFromRight(metrics::scaled(4));
     changedBounds = header.removeFromRight(chipH).withSizeKeepingCentre(chipH, chipH);
 
-    const int countH = countText.isNotEmpty() ? metrics::scaled(24) : 0;
-    if (countH > 0)
-        r.removeFromBottom(countH);
+    auto footer = r.removeFromBottom(metrics::scaled(40)).reduced(metrics::scaled(12), 0);
+    const int makeW = juce::jmax(metrics::scaled(96),
+                                 (int) std::ceil(juce::GlyphArrangement::getStringWidth(
+                                     uiFontFixed(12.0f, true), "Make default")) + metrics::scaled(16));
+    makeDefaultBounds = footer.removeFromRight(makeW).withSizeKeepingCentre(makeW, chipH);
+    footer.removeFromRight(metrics::scaled(8));
+    countBounds = footer;
 
-    const int pad = metrics::scaled(8);
-    auto body = r.reduced(pad, pad);
+    // Vertical breathing only. Horizontal inset lives in the filter panel,
+    // matching toolkit section margins.
+    auto body = r;
     bodyViewport.setBounds(body);
     if (panel != nullptr)
     {
@@ -4176,16 +4367,15 @@ void FilterPopover::paint(juce::Graphics& g)
 
     paintIconBtn(changedBounds, icons::foldRows, changedHover, showChanged);
     paintIconBtn(resetBounds, icons::undo, resetHover, false);
-    paintChip(saveDefaultBounds, "Make default", saveDefaultHover, true);
+    paintChip(applyBounds, "Apply", applyHover, true);
     paintIconBtn(closeBounds, icons::x, closeHover, false);
+    paintChip(makeDefaultBounds, "Make default", makeDefaultHover, false);
 
-    if (countText.isNotEmpty())
+    if (countText.isNotEmpty() && !countBounds.isEmpty())
     {
-        auto countR = b.toNearestInt().removeFromBottom(metrics::scaled(24))
-                           .reduced(metrics::scaled(12), 0);
         g.setColour(ds::inkMuted());
         g.setFont(monoFontFixed(12.0f));
-        g.drawText(countText, countR, juce::Justification::centredLeft, true);
+        g.drawText(countText, countBounds, juce::Justification::centredLeft, true);
     }
 }
 
@@ -4208,7 +4398,12 @@ void FilterPopover::mouseDown(const juce::MouseEvent& e)
         onReset();
         return;
     }
-    if (saveDefaultBounds.contains(e.getPosition()) && onSaveDefault)
+    if (applyBounds.contains(e.getPosition()) && onApply)
+    {
+        onApply();
+        return;
+    }
+    if (makeDefaultBounds.contains(e.getPosition()) && onSaveDefault)
         onSaveDefault();
 }
 
@@ -4216,8 +4411,9 @@ void FilterPopover::mouseMove(const juce::MouseEvent& e)
 {
     const bool closeHot = closeBounds.contains(e.getPosition());
     const bool resetHot = resetBounds.contains(e.getPosition());
-    const bool saveHot = saveDefaultBounds.contains(e.getPosition());
+    const bool applyHot = applyBounds.contains(e.getPosition());
     const bool changedHot = changedBounds.contains(e.getPosition());
+    const bool makeHot = makeDefaultBounds.contains(e.getPosition());
     if (closeHot != closeHover)
     {
         closeHover = closeHot;
@@ -4230,11 +4426,17 @@ void FilterPopover::mouseMove(const juce::MouseEvent& e)
         if (resetHot) setTooltip("Reset filters");
         repaint(resetBounds.expanded(2));
     }
-    if (saveHot != saveDefaultHover)
+    if (applyHot != applyHover)
     {
-        saveDefaultHover = saveHot;
-        if (saveHot) setTooltip("Make default");
-        repaint(saveDefaultBounds.expanded(2));
+        applyHover = applyHot;
+        if (applyHot) setTooltip("Apply filters");
+        repaint(applyBounds.expanded(2));
+    }
+    if (makeHot != makeDefaultHover)
+    {
+        makeDefaultHover = makeHot;
+        if (makeHot) setTooltip("Make default");
+        repaint(makeDefaultBounds.expanded(2));
     }
     if (changedHot != changedHover)
     {
@@ -4242,7 +4444,7 @@ void FilterPopover::mouseMove(const juce::MouseEvent& e)
         if (changedHot) setTooltip("Show changes only");
         repaint(changedBounds.expanded(2));
     }
-    setMouseCursor((closeHot || resetHot || saveHot || changedHot)
+    setMouseCursor((closeHot || resetHot || applyHot || changedHot || makeHot)
                        ? juce::MouseCursor::PointingHandCursor
                        : juce::MouseCursor::NormalCursor);
 }
@@ -4259,10 +4461,15 @@ void FilterPopover::mouseExit(const juce::MouseEvent&)
         resetHover = false;
         repaint(resetBounds.expanded(2));
     }
-    if (saveDefaultHover)
+    if (applyHover)
     {
-        saveDefaultHover = false;
-        repaint(saveDefaultBounds.expanded(2));
+        applyHover = false;
+        repaint(applyBounds.expanded(2));
+    }
+    if (makeDefaultHover)
+    {
+        makeDefaultHover = false;
+        repaint(makeDefaultBounds.expanded(2));
     }
     if (changedHover)
     {
@@ -4521,13 +4728,47 @@ void KindGridView::selectAt(int col, int row)
     if (!juce::isPositiveAndBelow(col, numVisibleCols())) return;
     const auto& list = cols[(size_t) col].entries;
     if (!juce::isPositiveAndBelow(row, (int) list.size())) return;
+    anchorCol = col;
+    anchorRow = row;
     const int entry = list[(size_t) row];
     if (onSelect) onSelect(entry);
     ensureSelectedVisible();
     repaint();
 }
 
-void KindGridView::moveSelection(int dCol, int dRow)
+void KindGridView::selectSpan(int colA, int rowA, int colB, int rowB, int primary)
+{
+    if (!onSelectEntries || numVisibleCols() <= 0)
+        return;
+    if (!juce::isPositiveAndBelow(colA, numVisibleCols())
+        || !juce::isPositiveAndBelow(colB, numVisibleCols()))
+        return;
+    std::vector<int> ids;
+    if (colA == colB)
+    {
+        const auto& list = cols[(size_t) colA].entries;
+        if (list.empty())
+            return;
+        const int lo = juce::jlimit(0, (int) list.size() - 1, juce::jmin(rowA, rowB));
+        const int hi = juce::jlimit(0, (int) list.size() - 1, juce::jmax(rowA, rowB));
+        for (int r = lo; r <= hi; ++r)
+            ids.push_back(list[(size_t) r]);
+    }
+    else
+    {
+        const int lo = juce::jmin(colA, colB);
+        const int hi = juce::jmax(colA, colB);
+        for (int c = lo; c <= hi; ++c)
+            for (int entry : cols[(size_t) c].entries)
+                ids.push_back(entry);
+    }
+    if (ids.empty())
+        return;
+    onSelectEntries(ids, primary);
+    repaint();
+}
+
+void KindGridView::moveSelection(int dCol, int dRow, bool extend)
 {
     if (source == nullptr || numVisibleCols() <= 0) return;
     int col = columnIndexForEntry(source->getSelectedIndex());
@@ -4554,7 +4795,19 @@ void KindGridView::moveSelection(int dCol, int dRow)
                 break;
             const auto& list = cols[(size_t) c].entries;
             if (list.empty()) continue;
-            selectAt(c, juce::jmin(row, (int) list.size() - 1));
+            const int destRow = juce::jmin(row, (int) list.size() - 1);
+            if (!extend)
+                selectAt(c, destRow);
+            else
+            {
+                if (anchorCol < 0)
+                {
+                    anchorCol = col;
+                    anchorRow = row;
+                }
+                selectSpan(anchorCol, anchorRow, c, destRow, list[(size_t) destRow]);
+                ensureSelectedVisible();
+            }
             return;
         }
         return;
@@ -4564,8 +4817,20 @@ void KindGridView::moveSelection(int dCol, int dRow)
     {
         const auto& list = cols[(size_t) col].entries;
         const int next = row + dRow;
-        if (juce::isPositiveAndBelow(next, (int) list.size()))
+        if (!juce::isPositiveAndBelow(next, (int) list.size()))
+            return;
+        if (!extend)
             selectAt(col, next);
+        else
+        {
+            if (anchorCol < 0)
+            {
+                anchorCol = col;
+                anchorRow = row;
+            }
+            selectSpan(anchorCol, anchorRow, col, next, list[(size_t) next]);
+            ensureSelectedVisible();
+        }
     }
 }
 
@@ -4641,8 +4906,8 @@ void KindGridView::paint(juce::Graphics& g)
                 {
                     const int entryIdx = col.entries[(size_t) r];
                     const auto* e = source->entryAt(entryIdx);
-                    const bool isSel = entryIdx == selected;
-                    const bool isPlayingSel = isSel && playing;
+                    const bool isSel = source->isEntrySelected(entryIdx);
+                    const bool isPlayingSel = entryIdx == selected && playing;
 
                     // Levels: kind-tinted cell (kind hue at 10% over surface), ink text.
                     // Selected = violet tint + 1.5px violet border; playing = success bar.
@@ -4716,7 +4981,26 @@ void KindGridView::mouseDown(const juce::MouseEvent& e)
     {
         const int headH = metrics::scaled(kGridHeadH);
         if (e.y >= headH)
+        {
+            const int idx = entryAt(e.getPosition());
+            if (idx < 0)
+                return;
+            if (source != nullptr && !source->isEntrySelected(idx) && onSelect)
+                onSelect(idx);
+            if (onExportSelection == nullptr)
+                return;
+            juce::PopupMenu menu;
+            menu.addItem(1, "Export Selection");
+            const auto screenPos = e.getScreenPosition();
+            menu.showMenuAsync(juce::PopupMenu::Options().withTargetScreenArea(
+                                   { screenPos.x, screenPos.y, 1, 1 }),
+                               [this](int result)
+                               {
+                                   if (result == 1 && onExportSelection)
+                                       onExportSelection();
+                               });
             return;
+        }
         int hit = -1;
         for (int c = 0; c < numVisibleCols(); ++c)
         {
@@ -4798,6 +5082,25 @@ void KindGridView::mouseDown(const juce::MouseEvent& e)
                 return;
             }
         }
+        if (e.mods.isShiftDown() && anchorCol >= 0 && onSelectEntries)
+        {
+            const int col = columnIndexForEntry(pressedEntry);
+            const int row = rowOfEntry(col, pressedEntry);
+            if (col >= 0 && row >= 0)
+            {
+                dragAnchorCol = anchorCol;
+                dragAnchorRow = anchorRow;
+                shiftDragging = true;
+                selectSpan(anchorCol, anchorRow, col, row, pressedEntry);
+                ensureSelectedVisible();
+                return;
+            }
+        }
+        anchorCol = columnIndexForEntry(pressedEntry);
+        anchorRow = rowOfEntry(anchorCol, pressedEntry);
+        dragAnchorCol = anchorCol;
+        dragAnchorRow = anchorRow;
+        shiftDragging = false;
         if (onSelect) onSelect(pressedEntry);
     }
     ensureSelectedVisible();
@@ -4819,6 +5122,24 @@ void KindGridView::mouseDrag(const juce::MouseEvent& e)
         }
         return;
     }
+    if (e.mods.isShiftDown() && (shiftDragging || dragAnchorCol >= 0) && e.getDistanceFromDragStart() >= 4)
+    {
+        const int idx = entryAt(e.getPosition());
+        if (idx < 0)
+            return;
+        const int col = columnIndexForEntry(idx);
+        const int row = rowOfEntry(col, idx);
+        if (col < 0 || row < 0)
+            return;
+        if (dragAnchorCol < 0)
+        {
+            dragAnchorCol = col;
+            dragAnchorRow = row;
+        }
+        shiftDragging = true;
+        selectSpan(dragAnchorCol, dragAnchorRow, col, row, idx);
+        return;
+    }
     if (dragStarted || pressedEntry < 0 || e.getDistanceFromDragStart() < 4 || source == nullptr)
         return;
     if (const auto* entry = source->entryAt(pressedEntry); entry != nullptr && onDragFile)
@@ -4832,6 +5153,7 @@ void KindGridView::mouseUp(const juce::MouseEvent&)
 {
     pressedEntry = -1;
     dragStarted = false;
+    shiftDragging = false;
     resizingCol = false;
     resizeColIndex = -1;
 }
@@ -4869,6 +5191,28 @@ void KindGridView::mouseExit(const juce::MouseEvent&)
 
 void KindGridView::mouseDoubleClick(const juce::MouseEvent& e)
 {
+    const int headH = metrics::scaled(kGridHeadH);
+    if (e.y < headH)
+    {
+        for (int c = 0; c < numVisibleCols(); ++c)
+        {
+            const auto colR = columnBounds(c);
+            if (e.x < colR.getX() || e.x >= colR.getRight())
+                continue;
+            anchorCol = c;
+            anchorRow = 0;
+            if (onSelectEntries)
+            {
+                const int primary = cols[(size_t) c].entries.empty()
+                                        ? -1
+                                        : cols[(size_t) c].entries.front();
+                onSelectEntries(cols[(size_t) c].entries, primary);
+            }
+            repaint();
+            return;
+        }
+        return;
+    }
     const int idx = entryAt(e.getPosition());
     if (idx >= 0 && onOpen)
         onOpen(idx);
@@ -4887,10 +5231,11 @@ void KindGridView::mouseWheelMove(const juce::MouseEvent&, const juce::MouseWhee
 
 bool KindGridView::keyPressed(const juce::KeyPress& key)
 {
-    if (key == juce::KeyPress::leftKey)  { moveSelection(-1, 0); return true; }
-    if (key == juce::KeyPress::rightKey) { moveSelection(1, 0);  return true; }
-    if (key == juce::KeyPress::upKey)    { moveSelection(0, -1); return true; }
-    if (key == juce::KeyPress::downKey)  { moveSelection(0, 1);  return true; }
+    const bool extend = key.getModifiers().isShiftDown();
+    if (key == juce::KeyPress::leftKey)  { moveSelection(-1, 0, extend); return true; }
+    if (key == juce::KeyPress::rightKey) { moveSelection(1, 0, extend);  return true; }
+    if (key == juce::KeyPress::upKey)    { moveSelection(0, -1, extend); return true; }
+    if (key == juce::KeyPress::downKey)  { moveSelection(0, 1, extend);  return true; }
     return false;
 }
 

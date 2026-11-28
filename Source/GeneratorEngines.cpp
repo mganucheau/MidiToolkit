@@ -533,10 +533,223 @@ bool stepInDensity(int densityPct, int step)
     return active[s];
 }
 
+/** TB-303 step: gate, accent, slide (legato into the next gate), and a small
+    octave jump. Repeats and neighbour slides make the line talk; rests break
+    the slide. Register stays in synth-bass range. */
+static void renderAcidArp(const GrooveParams& g, double startPpq, double endPpq,
+                          const int* chordNotes, int chordCount, int keyRoot, Mode mode,
+                          std::vector<Event>& out)
+{
+    out.clear();
+    if (!(endPpq > startPpq) || !g.arpEnabled) return;
+
+    int pc = juce::jlimit(0, 11, keyRoot);
+    if (chordNotes != nullptr && chordCount > 0)
+    {
+        int lowest = 127;
+        for (int i = 0; i < chordCount; ++i)
+            if (chordNotes[i] >= 0 && chordNotes[i] <= 127)
+                lowest = std::min(lowest, chordNotes[i]);
+        if (lowest < 127)
+            pc = lowest % 12;
+    }
+    const int rootMidi = 36 + pc;
+    const int ceilMidi = juce::jmin(76, rootMidi + 24);
+
+    int degreeCount = 0;
+    const int* degrees = scaleDegrees(mode, degreeCount);
+    int tones[5];
+    int nTones = 0;
+    auto pushTone = [&](int semi)
+    {
+        if (nTones >= 5) return;
+        tones[nTones++] = juce::jlimit(rootMidi, ceilMidi, rootMidi + semi);
+    };
+    pushTone(0);
+    if (degreeCount > 2) pushTone(degrees[2]);
+    if (degreeCount > 4) pushTone(degrees[4]);
+    if (degreeCount > 6) pushTone(degrees[6]);
+    pushTone(12);
+
+    const std::uint32_t seed = partSeed(g.arpVariation, g.arpNonce, g.arpGenreIndex, 11);
+    const int want = juce::jlimit(4, 16, 4 + (g.arpDensity * 12) / 100);
+
+    struct Step { bool gate = false; int note = 60; bool accent = false; bool slide = false; };
+    Step pat[3][kArpPatternSteps];
+
+    // Classic 16-step acid rhythms (bit 0 = step 1). Runs of gates are where slides live.
+    static constexpr std::uint16_t kRhythms[] = {
+        0b0101001100110101,
+        0b1000110101101101,
+        0b1101011001011001,
+        0b1011001001010101,
+        0b0110100100100111,
+        0b1000110101001101,
+        0b0101101001011010,
+        0b1010011010010110
+    };
+
+    for (int letter = 0; letter < 3; ++letter)
+    {
+        const std::uint32_t pseed = seed ^ (std::uint32_t) (letter * 0x9E3779B9u);
+        bool gate[kArpPatternSteps] = {};
+        const auto mask = kRhythms[mix(pseed) % (std::uint32_t) (sizeof(kRhythms) / sizeof(kRhythms[0]))];
+        int count = 0;
+        for (int i = 0; i < kArpPatternSteps; ++i)
+        {
+            gate[i] = ((mask >> i) & 1u) != 0;
+            if (gate[i]) ++count;
+        }
+        if (!gate[0])
+        {
+            gate[0] = true;
+            ++count;
+        }
+
+        int guard = 0;
+        while (count < want && guard++ < 48)
+        {
+            bool placed = false;
+            for (int t = 0; t < kArpPatternSteps && !placed; ++t)
+            {
+                const int i = (int) (unit(pseed, t, letter, 17) * kArpPatternSteps) % kArpPatternSteps;
+                const int prev = (i + kArpPatternSteps - 1) % kArpPatternSteps;
+                const int next = (i + 1) % kArpPatternSteps;
+                if (!gate[i] && (gate[prev] || gate[next]))
+                {
+                    gate[i] = true;
+                    ++count;
+                    placed = true;
+                }
+            }
+            if (!placed)
+            {
+                for (int i = 0; i < kArpPatternSteps; ++i)
+                    if (!gate[i])
+                    {
+                        gate[i] = true;
+                        ++count;
+                        break;
+                    }
+            }
+        }
+        guard = 0;
+        while (count > want && guard++ < 48)
+        {
+            bool removed = false;
+            for (int i = kArpPatternSteps - 1; i >= 1 && !removed; --i)
+            {
+                const int prev = i - 1;
+                const int next = (i + 1) % kArpPatternSteps;
+                if (gate[i] && !gate[prev] && !gate[next])
+                {
+                    gate[i] = false;
+                    --count;
+                    removed = true;
+                }
+            }
+            if (!removed)
+            {
+                for (int i = kArpPatternSteps - 1; i >= 1; --i)
+                    if (gate[i])
+                    {
+                        gate[i] = false;
+                        --count;
+                        break;
+                    }
+            }
+        }
+
+        int prevNote = tones[0];
+        for (int i = 0; i < kArpPatternSteps; ++i)
+        {
+            auto& s = pat[letter][i];
+            s.gate = gate[i];
+            if (!gate[i])
+                continue;
+            const float roll = unit(pseed, i, letter, 3);
+            int note = prevNote;
+            if (roll >= 0.46f)
+            {
+                const int idx = (int) (unit(pseed, i, letter, 5) * (float) nTones) % nTones;
+                note = tones[idx];
+                const float oct = unit(pseed, i, letter, 7);
+                if (oct < 0.16f)
+                    note += 12;
+                else if (oct < 0.22f)
+                    note -= 12;
+                if (std::abs(note - prevNote) > 12)
+                    note = prevNote + (note > prevNote ? 12 : -12);
+            }
+            note = juce::jlimit(rootMidi, ceilMidi, note);
+            s.note = note;
+            prevNote = note;
+            const bool downbeat = (i % 4) == 0;
+            const bool afterRest = !gate[(i + kArpPatternSteps - 1) % kArpPatternSteps];
+            s.accent = downbeat || (afterRest && unit(pseed, i, letter, 11) < 0.55f)
+                    || unit(pseed, i, letter, 19) < 0.12f;
+        }
+        bool anySlide = false;
+        for (int i = 0; i < kArpPatternSteps; ++i)
+        {
+            if (!gate[i] || !gate[(i + 1) % kArpPatternSteps])
+                continue;
+            const bool same = pat[letter][i].note == pat[letter][(i + 1) % kArpPatternSteps].note;
+            const float p = same ? 0.82f : 0.58f;
+            if (unit(pseed, i, letter, 13) < p)
+            {
+                pat[letter][i].slide = true;
+                anySlide = true;
+            }
+        }
+        if (!anySlide)
+        {
+            for (int i = 0; i < kArpPatternSteps; ++i)
+                if (gate[i] && gate[(i + 1) % kArpPatternSteps])
+                {
+                    pat[letter][i].slide = true;
+                    break;
+                }
+        }
+    }
+
+    const double stepLength = juce::jmax(1.0 / 48.0, delayPeriodBeats(g.arpRate()));
+    const int phraseBars = generatorLengthBars(g.arpLength());
+    const GeneratorForm form = resolveForm(g.arpForm(), seed);
+    const int firstStep = (int) std::floor(startPpq / stepLength + 1.0e-9);
+    const int lastStep = (int) std::ceil(endPpq / stepLength - 1.0e-9);
+
+    for (int k = firstStep; k < lastStep; ++k)
+    {
+        if (k < 0) continue;
+        const double onPpq = (double) k * stepLength;
+        if (onPpq < startPpq || onPpq >= endPpq)
+            continue;
+        const int patternStep = ((k % kArpPatternSteps) + kArpPatternSteps) % kArpPatternSteps;
+        const int absBar = (int) std::floor(onPpq / 4.0);
+        int letter = 0, local = 0;
+        mapFormBar(phraseBars, form, wrapBar(juce::jmax(0, absBar), phraseBars), letter, local);
+        juce::ignoreUnused(local);
+        const auto& s = pat[juce::jlimit(0, 2, letter)][patternStep];
+        if (!s.gate)
+            continue;
+        const int velocity = s.accent ? 127 : (84 + (patternStep % 3) * 4);
+        const double gateMul = s.slide ? 1.2 : 0.45;
+        out.push_back({ onPpq, s.note, velocity });
+        out.push_back({ onPpq + stepLength * gateMul, s.note, 0 });
+    }
+    sortEvents(out);
+}
+
 void renderArp(const GrooveParams& g, double startPpq, double endPpq,
                const int* chordNotes, int chordCount, int keyRoot, Mode mode,
                std::vector<Event>& out)
 {
+    if (g.arpShape() == ArpShape::Acid)
+    {
+        renderAcidArp(g, startPpq, endPpq, chordNotes, chordCount, keyRoot, mode, out);
+        return;
+    }
     out.clear();
     if (!(endPpq > startPpq) || !g.arpEnabled) return;
     if (g.arpInput && (chordNotes == nullptr || chordCount <= 0)) return;

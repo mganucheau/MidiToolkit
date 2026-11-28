@@ -61,6 +61,13 @@ inline int timeSigFilterBit(int num, int den)
     return -1;
 }
 
+/** Filename search. Empty query matches everything. */
+inline bool browserNameMatches(const juce::String& name, const juce::String& query)
+{
+    const auto q = query.trim();
+    return q.isEmpty() || name.containsIgnoreCase(q);
+}
+
 struct SavedSearchEntry
 {
     juce::String name;
@@ -112,8 +119,14 @@ public:
 
     /** Combined criteria (query + filter) for saved searches / Enter. */
     BrowserSearch getCriteria() const;
-    /** Filter fields only (key/bpm/bars/complexity/dedupe) — no query. */
+    /** Filter fields only (key/bpm/bars/complexity/dedupe) plus the name query. Live draft. */
     BrowserSearch getFilter() const;
+    /** Last filter passed to Apply. The file list uses this, not the open draft. */
+    BrowserSearch listingFilter() const;
+    bool hasCommittedListingFilter() const { return listingCommitted; }
+    void commitListingFilter();
+    /** Toolbar subfolder toggle already scanned. Keep dismiss from reverting it. */
+    void noteCommittedSubdirs(bool on);
     void setCriteria(const BrowserSearch&);
 
     std::function<void()> onClaimKeys;
@@ -151,6 +164,8 @@ public:
     std::function<void(const BrowserSearch&)> onRunSearch;
     /** Filter controls changed — refilter already-loaded clips (no rescan). */
     std::function<void()> onFilterChanged;
+    /** Draft controls moved. Update the popover file count only. */
+    std::function<void()> onFilterDraftChanged;
     std::function<void(int)> onPickSavedSearch;
     std::function<void(int)> onRemoveSavedSearch;
     std::function<void()> onSaveCurrentSearch;
@@ -181,6 +196,7 @@ public:
     std::function<void(BrowserSortColumn)> onSortChanged;
     std::function<void(bool)> onSortDirectionChanged;
     void setSortColumn(BrowserSortColumn col);
+    void setSortAscending(bool on);
     BrowserSortColumn getSortColumn() const;
     bool sortIsAscending() const;
     void hideKindColumn(ClipKind kind);
@@ -287,6 +303,10 @@ private:
     juce::String scanPhase;
     int scanProgressTotal = 0;
     bool filterOpen = false;
+    bool listingCommitted = false;
+    BrowserSearch committedListing;
+    juce::String committedFilterDescription;
+    int committedFilterCount = 0;
     bool filterApplyPending = false;
     float scanAngle = 0.0f;
     int currentClipCount = 0;
@@ -321,12 +341,15 @@ private:
         void setHideDuplicates(bool on);
         void toggleHideDuplicates();
         void setSortColumn(BrowserSortColumn col);
+        void setSortAscending(bool on);
         BrowserSortColumn getSortColumn() const { return sortColumn; }
         bool sortIsAscending() const { return sortAscending; }
         void hideKind(ClipKind kind);
         juce::String getQuery() const { return queryField.getText().trim(); }
         void setQuery(const juce::String& q);
         std::function<void()> onSearchReturn;
+        /** Search text changed. Does not mean the other filter controls moved. */
+        std::function<void()> onQueryChanged;
         std::function<void()> onCriteriaChanged;
         std::function<void(bool)> onSubdirsChanged;
         std::function<void()> onLayoutChanged;
@@ -387,7 +410,8 @@ private:
         std::function<void()> onClear;
         std::function<void()> onDeactivate;
         std::function<void()> onSave;
-        std::function<void()> onReturn; // Enter → run search
+        std::function<void()> onQueryChanged;
+        std::function<void()> onReturn; // Enter → filter the current list by filename
     private:
         void styleEditors();
         void updateTrailingVisible();
@@ -467,6 +491,10 @@ struct FileListEntry
     juce::StringArray locations;
 };
 
+/** a comes before b. precise uses natural name order; large lists use a cheaper compare. */
+bool fileListEntryComesBefore(const FileListEntry& a, const FileListEntry& b,
+                              BrowserSortColumn column, bool ascending, bool precise);
+
 class FileListPanel : public juce::Component,
                       private juce::Timer,
                       private juce::ScrollBar::Listener
@@ -505,7 +533,11 @@ public:
     /** Replaces the ANALYZING title. Empty restores it. */
     void setScanPhase(const juce::String& phase);
 
-    void selectAdjacent(int direction);
+    void selectAdjacent(int direction, bool extend = false);
+    /** Every file row, folders excluded. */
+    void selectAllFiles();
+    void setSelectedEntries(const std::vector<int>& indices, int primary);
+    bool isEntrySelected(int index) const;
     void grabBrowseFocus();
 
     void setColumnVisibility(const BrowserColumnVisibility& v);
@@ -541,6 +573,8 @@ public:
     std::function<void(const juce::File&, ClipKind)> onSetKind;
     /** Right-click a file row: zip the current multi-selection, or that file. */
     std::function<void(std::vector<juce::File>)> onExportFilesAsZip;
+    /** Right-click a selection: same export as the toolbar button, selection only. */
+    std::function<void()> onExportSelection;
     /** Right-click a column title: zip every file in the list. */
     std::function<void()> onExportListedAsZip;
 
@@ -549,6 +583,12 @@ public:
     bool hasListedMidiFiles() const;
 
     void setSort(SortColumn column, bool ascending);
+    /** Remember the sort without sorting the current rows. The next setEntries sorts once. */
+    void setSortKey(SortColumn column, bool ascending);
+    SortColumn getSortColumn() const { return sortColumn; }
+    bool isSortAscending() const { return sortAscending; }
+    /** Install rows whose display order was already computed (possibly off the message thread). */
+    void setEntriesInOrder(std::vector<FileListEntry> e, std::vector<int> order);
 
     const FileListEntry* entryAt(int index) const
     {
@@ -731,6 +771,9 @@ public:
     std::function<void()> onActivated;                  // sticky browser key-nav
     std::function<void(BrowserSortColumn)> onSortBy;
     std::function<void(ClipKind)> onHideColumn;
+    /** Double-click a column title, or shift-drag / shift-arrows: entry indices. */
+    std::function<void(const std::vector<int>&, int primary)> onSelectEntries;
+    std::function<void()> onExportSelection;
 
 private:
     struct Column { ClipKind kind; std::vector<int> entries; };
@@ -743,12 +786,13 @@ private:
     int columnDividerAt(juce::Point<int> p) const; // column whose right edge is hit, or -1
     int columnIndexForEntry(int entryIdx) const;
     int rowOfEntry(int col, int entryIdx) const;
+    void selectSpan(int colA, int rowA, int colB, int rowB, int primary);
+    void moveSelection(int dCol, int dRow, bool extend);
     ClipKind selectedColumnKind() const;
     int defaultColWidth() const;
     int gridBodyWidth() const;
     void syncScrollBar();
     void selectAt(int col, int row);
-    void moveSelection(int dCol, int dRow);
     void scrollBarMoved(juce::ScrollBar*, double newRangeStart) override;
 
     const FileListPanel* source = nullptr;
@@ -762,6 +806,11 @@ private:
     float phase = 0.0f;
     int pressedEntry = -1;
     bool dragStarted = false;
+    bool shiftDragging = false;
+    int anchorCol = -1;
+    int anchorRow = -1;
+    int dragAnchorCol = -1;
+    int dragAnchorRow = -1;
     bool resizingCol = false;
     int resizeColIndex = -1;
     int resizeStartX = 0;
@@ -805,6 +854,8 @@ public:
     std::function<void()> onToggleStarFolder;
     std::function<void()> onRevealInFinder;
     std::function<void()> onExportLibraryFolder;
+    /** Left-click the file-count label: select every clip in the list. */
+    std::function<void()> onSelectAllFiles;
     /** Right-click the file-count label: zip every file in the current listing. */
     std::function<void()> onExportListedFiles;
 
@@ -833,7 +884,8 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(BrowserToolbar)
 };
 
-/** Floating filter menu. Header: show-changed · reset · Make default · X. */
+/** Floating filter menu. Header: show-changed · reset · Apply · X.
+    Footer: file count · Make default. */
 class FilterPopover : public juce::Component,
                       public juce::SettableTooltipClient
 {
@@ -855,7 +907,8 @@ public:
 
     std::function<void()> onDone;   // close the popover
     std::function<void()> onSaveSearch; // retained for editor wiring
-    std::function<void()> onReset;  // clear filters
+    std::function<void()> onReset;  // clear the draft
+    std::function<void()> onApply;  // commit the draft onto the file list
     std::function<void()> onSaveDefault; // write criteria onto current library folder
     std::function<void(bool)> onShowChanged; // hide unchanged filter sections
 
@@ -864,11 +917,13 @@ private:
     std::function<int()> panelHeight;
     juce::Viewport bodyViewport;
     juce::String countText;
-    juce::Rectangle<int> closeBounds, resetBounds, saveDefaultBounds, changedBounds;
+    juce::Rectangle<int> closeBounds, resetBounds, applyBounds, changedBounds;
+    juce::Rectangle<int> countBounds, makeDefaultBounds;
     bool closeHover = false;
     bool resetHover = false;
-    bool saveDefaultHover = false;
+    bool applyHover = false;
     bool changedHover = false;
+    bool makeDefaultHover = false;
     bool showChanged = false;
     int maxBodyH = 0;
 

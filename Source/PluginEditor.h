@@ -4,6 +4,8 @@
 #include <memory>
 #include <map>
 #include <set>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_gui_extra/juce_gui_extra.h>
@@ -72,6 +74,24 @@ private:
     void handleTrimClicked();
     /** Refilter the already-loaded clip list (no disk rescan). */
     void applyBrowserFilter();
+    /** Commit the open filter draft, then rebuild or rescan. */
+    void applyFilterDraft();
+    /** Put the filter widgets back to the last applied filter. */
+    void revertFilterDraft();
+    /** Restore selection and save the folder filter after the list is rebuilt. */
+    void finishBrowserFilterApply(const juce::String& previousPath);
+    /** Draft file count. Large libraries advance a slice per timer tick. */
+    void kickFilterCount();
+    void pumpFilterCount();
+    void cancelFilterCount();
+    /** Apply across timer ticks so a huge library does not freeze the host. */
+    void beginCooperativeFilterApply(const juce::String& previousPath);
+    void pumpFilterApply();
+    void cancelCooperativeFilterApply();
+    void installFilteredEntries(std::vector<FileListEntry> entries, std::vector<int> order);
+    void noteListedFileCount();
+    void publishListedFilterCount();
+    bool isStarredFast(const juce::String& path) const;
     int displayForClip(int clipIdx) const;
     void selectIndex(int index);
     void enterFolderAtDisplay(int displayIdx);
@@ -357,6 +377,36 @@ private:
     void setBrowseScanPhase(const juce::String& phase);
     /** True after "Scan all folders" — flat recursive MIDI list, no subfolder rows. */
     bool recursiveBrowse = false;
+    /** Sort last pushed from Apply or a column header. Apply leaves it alone when the popup didn't move. */
+    BrowserSortColumn appliedSortColumn = BrowserSortColumn::Name;
+    bool appliedSortAscending = true;
+    bool revertingFilter = false;
+    /** File rows last installed in the list. The 30 Hz timer reads this instead of walking the list. */
+    int listedFileCount = 0;
+    juce::String filterPopoverCount;
+    int filterCountGen = 0;
+    bool filterCountActive = false;
+    int filterCountCursor = 0;
+    int filterCountMatched = 0;
+    int filterCountTotal = 0;
+    BrowserSearch filterCountDraft;
+    juce::String filterCountQuery;
+    std::unordered_set<uint64_t> filterCountSeen;
+    int filterApplyGen = 0;
+    bool filterApplyActive = false;
+    bool filterApplyOverlay = false;
+    bool filterApplyNamesOnly = false;
+    int filterApplyPhase = 0;
+    int filterApplyCursor = 0;
+    juce::String filterApplyPreviousPath;
+    BrowserSearch filterApplyFilter;
+    juce::String filterApplyQuery;
+    std::vector<int> filterApplyPassing;
+    std::unordered_map<uint64_t, int> filterApplyFirst;
+    std::unordered_set<int> filterApplyHidden;
+    std::unordered_map<int, juce::StringArray> filterApplyLocs;
+    std::vector<FileListEntry> filterApplyEntries;
+    std::unordered_set<uint32_t> filterApplyStars;
     struct DisplayRow
     {
         bool isDirectory = false;
@@ -364,6 +414,7 @@ private:
         juce::File file;
     };
     std::vector<DisplayRow> displayRows;
+    std::vector<DisplayRow> filterApplyRows;
     int browseMode = 0;   // 0 folder, 1 starred files, 2 search, 3 starred folders
     bool starredFilter = false;
     BrowserSearch activeSearch;

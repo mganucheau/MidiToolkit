@@ -5,6 +5,9 @@
 #include <thread>
 #include <atomic>
 #include <algorithm>
+#include <numeric>
+#include <unordered_map>
+#include <unordered_set>
 #include "BuildInfo.h"
 #include "NativeWindowChrome.h"
 #include <set>
@@ -88,6 +91,21 @@ bool clipMatchesFilter(const StepClip& clip, const BrowserSearch& s)
     return true;
 }
 
+uint64_t clipDedupeKey(const StepClip& clip)
+{
+    if (!clip.fileMetaKnown)
+        return 0;
+    uint64_t h = (uint64_t) clip.fileBytes;
+    h ^= (uint64_t) clip.fileModMs * 0x9E3779B97F4A7C15ull;
+    h ^= (uint64_t) (uint32_t) clip.name.hashCode() * 0xBF58476D1CE4E5B9ull;
+    return h == 0 ? 1 : h;
+}
+
+bool clipNameMatchesQuery(const StepClip& clip, const juce::String& trimmedQuery)
+{
+    return trimmedQuery.isEmpty() || clip.name.containsIgnoreCase(trimmedQuery);
+}
+
 int visibleWorkspaceWidth(bool sidebarCollapsed, bool editorOpen, bool effectsOpen, int browserW,
                           bool generatorPane = false)
 {
@@ -109,9 +127,7 @@ int visibleWorkspaceWidth(bool sidebarCollapsed, bool editorOpen, bool effectsOp
 
 bool clipMatchesQuery(const juce::File& file, const BrowserSearch& s)
 {
-    if (s.query.isEmpty())
-        return true;
-    return file.getFileNameWithoutExtension().containsIgnoreCase(s.query);
+    return browserNameMatches(file.getFileNameWithoutExtension(), s.query);
 }
 
 bool clipMatches(const StepClip& clip, const juce::File& file, const BrowserSearch& s)
@@ -548,7 +564,7 @@ MidiToolkitEditor::MidiToolkitEditor(MidiToolkitProcessor& p)
             SavedLibraryFolder folder;
             folder.path = path;
             folder.scanSubdirs = sidebar.getIncludeSubdirs();
-            folder.filter = sidebar.getFilter();
+            folder.filter = sidebar.listingFilter();
             folder.filter.subdirs = folder.scanSubdirs;
             processorRef.saveLibraryFolder(folder, true);
         }
@@ -598,7 +614,7 @@ MidiToolkitEditor::MidiToolkitEditor(MidiToolkitProcessor& p)
             SavedLibraryFolder folder;
             folder.path = rootDir.getFullPathName();
             folder.scanSubdirs = subdirs;
-            folder.filter = sidebar.getFilter();
+            folder.filter = sidebar.listingFilter();
             folder.filter.subdirs = subdirs;
             processorRef.saveLibraryFolder(folder, true);
         }
@@ -662,7 +678,12 @@ MidiToolkitEditor::MidiToolkitEditor(MidiToolkitProcessor& p)
         sidebar.setSearchFormOpen(!sidebar.isSearchFormOpen());
     };
     sidebar.onRunSearch = [this](const BrowserSearch& s) { runSearchAsync(s); };
-    sidebar.onFilterChanged = [this] { applyBrowserFilter(); };
+    sidebar.onFilterChanged = [this] { applyFilterDraft(); };
+    sidebar.onFilterDraftChanged = [this]
+    {
+        if (sidebar.isFilterOpen())
+            kickFilterCount();
+    };
     sidebar.onExitSearch = [this]
     {
         // × clears criteria, collapses the form, and leaves search results.
@@ -797,17 +818,23 @@ MidiToolkitEditor::MidiToolkitEditor(MidiToolkitProcessor& p)
             rootDir.revealToUser();
     };
     browserBar.onExportLibraryFolder = [this] { exportLibraryFolder(); };
+    browserBar.onSelectAllFiles = [this]
+    {
+        fileList.selectAllFiles();
+        kindGrid.repaint();
+    };
     browserBar.onExportListedFiles = [this] { exportListedFilesAsZip(); };
     browserBar.onResetFilters = [this]
     {
         sidebar.resetFilters();
-        refreshBrowserBar();
+        applyFilterDraft();
         layoutContent();
     };
     browserBar.onToggleSubfolders = [this]
     {
         const bool on = !sidebar.getIncludeSubdirs();
         sidebar.setIncludeSubdirs(on);
+        sidebar.noteCommittedSubdirs(on);
         processorRef.includeSubdirs = on;
         browserBar.setSubfolders(on);
         if (sidebar.onScanSubdirs)
@@ -819,7 +846,7 @@ MidiToolkitEditor::MidiToolkitEditor(MidiToolkitProcessor& p)
     {
         gridView = !gridView;
         browserBar.setGrid(gridView);
-        kindGrid.setKindMask(sidebar.getCriteria().kindMask);
+        kindGrid.setKindMask(sidebar.listingFilter().kindMask);
         kindGrid.refresh();
         if (gridView)
             kindGrid.scrollSelectionToTop();
@@ -827,18 +854,10 @@ MidiToolkitEditor::MidiToolkitEditor(MidiToolkitProcessor& p)
         layoutContent();
         if (gridView) kindGrid.grabKeyboardFocus();
     };
-    sidebar.onSortChanged = [this](BrowserSortColumn col)
-    {
-        fileList.setSort(col, sidebar.sortIsAscending());
-        kindGrid.refresh();
-    };
-    sidebar.onSortDirectionChanged = [this](bool ascending)
-    {
-        fileList.setSort(sidebar.getSortColumn(), ascending);
-        kindGrid.refresh();
-    };
+    sidebar.onSortChanged = [](BrowserSortColumn) {};
+    sidebar.onSortDirectionChanged = [](bool) {};
     kindGrid.setSource(&fileList);
-    kindGrid.setKindMask(sidebar.getCriteria().kindMask);
+    kindGrid.setKindMask(sidebar.listingFilter().kindMask);
     kindGrid.onSelect = [this](int idx)
     {
         claimKeyNav(KeyNavTarget::Browser);
@@ -846,6 +865,13 @@ MidiToolkitEditor::MidiToolkitEditor(MidiToolkitProcessor& p)
         kindGrid.ensureSelectedVisible();
         kindGrid.repaint();
     };
+    kindGrid.onSelectEntries = [this](const std::vector<int>& ids, int primary)
+    {
+        claimKeyNav(KeyNavTarget::Browser);
+        fileList.setSelectedEntries(ids, primary);
+        kindGrid.repaint();
+    };
+    kindGrid.onExportSelection = [this] { exportLibraryFolder(); };
     kindGrid.onToggleStar = [this](int idx)
     {
         if (fileList.onToggleStar) fileList.onToggleStar(idx);
@@ -858,6 +884,8 @@ MidiToolkitEditor::MidiToolkitEditor(MidiToolkitProcessor& p)
     {
         sidebar.setSortColumn(col);
         fileList.setSort(col, sidebar.sortIsAscending());
+        appliedSortColumn = col;
+        appliedSortAscending = sidebar.sortIsAscending();
         kindGrid.refresh();
     };
     kindGrid.onHideColumn = [this](ClipKind kind)
@@ -875,6 +903,7 @@ MidiToolkitEditor::MidiToolkitEditor(MidiToolkitProcessor& p)
 
     filterPopover.setContent(&sidebar.filterComponent(), [this] { return sidebar.filterIdealHeight(); });
     filterPopover.onDone = [this] { sidebar.setFilterOpen(false); };
+    filterPopover.onApply = [this] { applyFilterDraft(); };
     filterPopover.onReset = [this]
     {
         sidebar.resetFilters();
@@ -884,6 +913,7 @@ MidiToolkitEditor::MidiToolkitEditor(MidiToolkitProcessor& p)
     };
     filterPopover.onSaveDefault = [this]
     {
+        applyFilterDraft();
         const auto path = rootDir.isDirectory() ? rootDir.getFullPathName()
                                                 : processorRef.lastBrowserDir;
         if (path.isNotEmpty())
@@ -891,7 +921,7 @@ MidiToolkitEditor::MidiToolkitEditor(MidiToolkitProcessor& p)
             SavedLibraryFolder folder;
             folder.path = path;
             folder.scanSubdirs = sidebar.getIncludeSubdirs();
-            folder.filter = sidebar.getCriteria();
+            folder.filter = sidebar.listingFilter();
             folder.filter.subdirs = folder.scanSubdirs;
             processorRef.saveLibraryFolder(folder, true);
         }
@@ -908,6 +938,11 @@ MidiToolkitEditor::MidiToolkitEditor(MidiToolkitProcessor& p)
     content.addChildComponent(filterPopover);
     sidebar.onFilterOpenChanged = [this](bool open)
     {
+        if (!open)
+        {
+            cancelFilterCount();
+            revertFilterDraft();
+        }
         const bool show = open && leftPaneTab == 0;
         filterDismissShield.setVisible(show);
         filterPopover.setVisible(show);
@@ -917,6 +952,7 @@ MidiToolkitEditor::MidiToolkitEditor(MidiToolkitProcessor& p)
             filterDismissShield.toFront(false);
             filterPopover.toFront(false);
             filterPopover.grabKeyboardFocus();
+            kickFilterCount();
         }
         refreshBrowserBar();
     };
@@ -928,7 +964,7 @@ MidiToolkitEditor::MidiToolkitEditor(MidiToolkitProcessor& p)
     };
     fileList.onEntriesChanged = [this]
     {
-        kindGrid.setKindMask(sidebar.getCriteria().kindMask);
+        kindGrid.setKindMask(sidebar.listingFilter().kindMask);
         kindGrid.refresh();
         refreshBrowserBar();
     };
@@ -1014,6 +1050,7 @@ MidiToolkitEditor::MidiToolkitEditor(MidiToolkitProcessor& p)
     {
         exportFilesAsZip(std::move(files), "Save as Zip");
     };
+    fileList.onExportSelection = [this] { exportLibraryFolder(); };
     fileList.onExportListedAsZip = [this] { exportListedFilesAsZip(); };
     fileList.onSetKind = [this](const juce::File& file, ClipKind kind)
     {
@@ -1412,7 +1449,7 @@ MidiToolkitEditor::MidiToolkitEditor(MidiToolkitProcessor& p)
         gridView = !gridView;
         leftPaneTabs.setGrid(gridView);
         browserBar.setGrid(gridView);
-        kindGrid.setKindMask(sidebar.getCriteria().kindMask);
+        kindGrid.setKindMask(sidebar.listingFilter().kindMask);
         kindGrid.refresh();
         if (gridView)
             kindGrid.scrollSelectionToTop();
@@ -1439,6 +1476,9 @@ MidiToolkitEditor::MidiToolkitEditor(MidiToolkitProcessor& p)
     content.addChildComponent(passthroughVeil);
 
     restoreBrowserSession();
+    sidebar.commitListingFilter();
+    appliedSortColumn = sidebar.getSortColumn();
+    appliedSortAscending = sidebar.sortIsAscending();
 #if MIDITOOLKIT_MIDI_FX
     processorRef.editorOpen = false;
     if (!processorRef.hasDefaultView)
@@ -1784,8 +1824,7 @@ void MidiToolkitEditor::persistBrowserSession()
     processorRef.browseMode = browseMode;
     processorRef.starredFilter = starredFilter;
     processorRef.includeSubdirs = sidebar.getIncludeSubdirs();
-    // Live sidebar criteria (query + filters) — not a stale search snapshot.
-    processorRef.browserSessionSearch = sidebar.getCriteria();
+    processorRef.browserSessionSearch = sidebar.listingFilter();
     if (browseMode == 2)
         activeSearch = processorRef.browserSessionSearch;
     processorRef.activeSavedSearchIdx = activeSavedSearchIdx;
@@ -2298,6 +2337,173 @@ void MidiToolkitEditor::scanAllFolders()
     }
 }
 
+void MidiToolkitEditor::applyFilterDraft()
+{
+    const bool subdirs = sidebar.getFilter().subdirs;
+    const bool subdirsChanged = subdirs != recursiveBrowse;
+    const auto sortCol = sidebar.getSortColumn();
+    const bool sortAsc = sidebar.sortIsAscending();
+    const bool sortChanged = sortCol != appliedSortColumn || sortAsc != appliedSortAscending;
+
+    sidebar.commitListingFilter();
+    if (subdirsChanged)
+        sidebar.setIncludeSubdirs(subdirs);
+
+    if (sortChanged)
+    {
+        appliedSortColumn = sortCol;
+        appliedSortAscending = sortAsc;
+        // The rebuild sorts once. Sorting the current huge list first freezes the host.
+        fileList.setSortKey(sortCol, sortAsc);
+    }
+
+    if (subdirsChanged)
+    {
+        if (sidebar.onScanSubdirs)
+            sidebar.onScanSubdirs();
+    }
+    else
+    {
+        const bool namesOnly = browseMode == 0 && !recursiveBrowse
+                               && (clips.empty() || !folderScanned);
+        const int n = browseMode == 3 ? 0
+                      : (namesOnly ? (int) cachedMidiFiles.size() : (int) clips.size());
+        if (n > 30000)
+        {
+            const juce::String previousPath =
+                (selectedIdx >= 0 && selectedIdx < (int) clips.size())
+                    ? clips[(size_t) selectedIdx].filePath : juce::String();
+            beginCooperativeFilterApply(previousPath);
+        }
+        else
+            applyBrowserFilter();
+    }
+
+    refreshBrowserBar();
+}
+
+void MidiToolkitEditor::revertFilterDraft()
+{
+    if (revertingFilter)
+        return;
+    const juce::ScopedValueSetter<bool> guard(revertingFilter, true);
+    sidebar.setCriteria(sidebar.listingFilter());
+    sidebar.setSortColumn(appliedSortColumn);
+    sidebar.setSortAscending(appliedSortAscending);
+}
+
+void MidiToolkitEditor::kickFilterCount()
+{
+    ++filterCountGen;
+    filterCountActive = false;
+    filterCountCursor = 0;
+    filterCountMatched = 0;
+    filterCountTotal = 0;
+    filterCountSeen.clear();
+    if (!sidebar.isFilterOpen() || filterApplyActive)
+        return;
+
+    filterCountDraft = sidebar.getFilter();
+    filterCountQuery = filterCountDraft.query.trim();
+    const bool namesOnly = browseMode == 0 && !recursiveBrowse
+                           && (clips.empty() || !folderScanned);
+    const int n = browseMode == 3 ? (int) processorRef.starredFolders.size()
+                  : (namesOnly ? (int) cachedMidiFiles.size() : (int) clips.size());
+    if (filterCountDraft.removeDuplicates && !namesOnly && browseMode != 3)
+        filterCountSeen.reserve((size_t) juce::jmin(n, 65536));
+
+    filterCountActive = true;
+    if (n <= 12000)
+    {
+        while (filterCountActive)
+            pumpFilterCount();
+        return;
+    }
+    filterPopover.setCountText("Counting…");
+}
+
+void MidiToolkitEditor::cancelFilterCount()
+{
+    ++filterCountGen;
+    filterCountActive = false;
+    filterCountSeen.clear();
+}
+
+void MidiToolkitEditor::pumpFilterCount()
+{
+    if (!filterCountActive || !sidebar.isFilterOpen())
+    {
+        filterCountActive = false;
+        return;
+    }
+
+    const int gen = filterCountGen;
+    const bool namesOnly = browseMode == 0 && !recursiveBrowse
+                           && (clips.empty() || !folderScanned);
+    const int n = browseMode == 3 ? (int) processorRef.starredFolders.size()
+                  : (namesOnly ? (int) cachedMidiFiles.size() : (int) clips.size());
+    const auto start = juce::Time::getMillisecondCounter();
+    while (filterCountCursor < n && juce::Time::getMillisecondCounter() - start < 8)
+    {
+        const int end = juce::jmin(n, filterCountCursor + 512);
+        for (int i = filterCountCursor; i < end; ++i)
+        {
+            if (browseMode == 3)
+            {
+                const auto& path = processorRef.starredFolders[(size_t) i];
+                const juce::File d(path);
+                if (!d.isDirectory())
+                    continue;
+                ++filterCountTotal;
+                const auto folderName = d.getFileName().isNotEmpty() ? d.getFileName() : path;
+                if (filterCountQuery.isEmpty() || folderName.containsIgnoreCase(filterCountQuery))
+                    ++filterCountMatched;
+            }
+            else if (namesOnly)
+            {
+                ++filterCountTotal;
+                const auto stem = cachedMidiFiles[(size_t) i].getFileNameWithoutExtension();
+                if (filterCountQuery.isEmpty() || stem.containsIgnoreCase(filterCountQuery))
+                    ++filterCountMatched;
+            }
+            else
+            {
+                const auto& clip = clips[(size_t) i];
+                if (starredFilter && browseMode != 1 && !processorRef.isStarred(clip.filePath))
+                    continue;
+                ++filterCountTotal;
+                if (browseMode != 1 && !clipMatchesFilter(clip, filterCountDraft))
+                    continue;
+                if (!clipNameMatchesQuery(clip, filterCountQuery))
+                    continue;
+                if (filterCountDraft.removeDuplicates && clip.fileMetaKnown)
+                {
+                    if (!filterCountSeen.insert(clipDedupeKey(clip)).second)
+                        continue;
+                }
+                ++filterCountMatched;
+            }
+        }
+        filterCountCursor = end;
+    }
+
+    if (gen != filterCountGen)
+        return;
+    if (filterCountCursor < n)
+    {
+        filterPopover.setCountText("Counting " + juce::String(filterCountCursor)
+                                   + " / " + juce::String(n));
+        return;
+    }
+
+    filterCountActive = false;
+    filterCountSeen.clear();
+    const int shownTotal = juce::jmax(filterCountTotal, filterCountMatched);
+    filterPopoverCount = juce::String(filterCountMatched) + " of " + juce::String(shownTotal)
+                       + (shownTotal == 1 ? " file" : " files");
+    filterPopover.setCountText(filterPopoverCount);
+}
+
 void MidiToolkitEditor::applyBrowserFilter()
 {
     const juce::String previousPath =
@@ -2306,16 +2512,26 @@ void MidiToolkitEditor::applyBrowserFilter()
 
     rebuildEntries();
 
+    finishBrowserFilterApply(previousPath);
+}
+
+void MidiToolkitEditor::finishBrowserFilterApply(const juce::String& previousPath)
+{
     int nextSel = selectedIdx;
     if (nextSel >= 0 && displayForClip(nextSel) < 0)
         nextSel = -1;
     if (nextSel < 0 && previousPath.isNotEmpty())
+    {
+        int clipIdx = -1;
         for (int i = 0; i < (int) clips.size(); ++i)
-            if (clips[(size_t) i].filePath == previousPath && displayForClip(i) >= 0)
+            if (clips[(size_t) i].filePath == previousPath)
             {
-                nextSel = i;
+                clipIdx = i;
                 break;
             }
+        if (clipIdx >= 0 && displayForClip(clipIdx) >= 0)
+            nextSel = clipIdx;
+    }
     if (nextSel < 0)
     {
         for (const auto& row : displayRows)
@@ -2342,11 +2558,332 @@ void MidiToolkitEditor::applyBrowserFilter()
         SavedLibraryFolder folder;
         folder.path = rootDir.getFullPathName();
         folder.scanSubdirs = sidebar.getIncludeSubdirs();
-        folder.filter = sidebar.getFilter();
+        folder.filter = sidebar.listingFilter();
         folder.filter.subdirs = folder.scanSubdirs;
         processorRef.saveLibraryFolder(folder, true);
     }
     persistBrowserSession();
+    publishListedFilterCount();
+}
+
+void MidiToolkitEditor::noteListedFileCount()
+{
+    listedFileCount = 0;
+    for (const auto& row : displayRows)
+        if (!row.isDirectory)
+            ++listedFileCount;
+}
+
+void MidiToolkitEditor::publishListedFilterCount()
+{
+    const int files = listedFileCount;
+    const int total = juce::jmax(files, (int) clips.size());
+    filterPopoverCount = juce::String(files) + " of " + juce::String(total)
+                       + (total == 1 ? " file" : " files");
+    if (sidebar.isFilterOpen())
+        filterPopover.setCountText(filterPopoverCount);
+}
+
+bool MidiToolkitEditor::isStarredFast(const juce::String& path) const
+{
+    if (filterApplyStars.empty() || filterApplyStars.count((uint32_t) path.hashCode()) == 0)
+        return false;
+    return processorRef.starredFiles.contains(path);
+}
+
+void MidiToolkitEditor::cancelCooperativeFilterApply()
+{
+    ++filterApplyGen;
+    filterApplyActive = false;
+    if (filterApplyOverlay)
+    {
+        filterApplyOverlay = false;
+        fileList.setSearching(false);
+    }
+}
+
+void MidiToolkitEditor::beginCooperativeFilterApply(const juce::String& previousPath)
+{
+    cancelFilterCount();
+    ++filterApplyGen;
+    filterApplyActive = true;
+    filterApplyOverlay = true;
+    filterApplyPreviousPath = previousPath;
+    filterApplyFilter = sidebar.listingFilter();
+    filterApplyQuery = filterApplyFilter.query.trim();
+    filterApplyNamesOnly = browseMode == 0 && !recursiveBrowse
+                           && (clips.empty() || !folderScanned);
+    filterApplyPhase = filterApplyNamesOnly ? 2 : 0;
+    filterApplyCursor = 0;
+    filterApplyPassing.clear();
+    filterApplyEntries.clear();
+    filterApplyRows.clear();
+    filterApplyFirst.clear();
+    filterApplyHidden.clear();
+    filterApplyLocs.clear();
+    filterApplyStars.clear();
+    searchDuplicateLocations.clear();
+    filterApplyStars.reserve((size_t) processorRef.starredFiles.size());
+    for (const auto& path : processorRef.starredFiles)
+        filterApplyStars.insert((uint32_t) path.hashCode());
+    const int n = filterApplyNamesOnly ? (int) cachedMidiFiles.size() : (int) clips.size();
+    if (!filterApplyNamesOnly)
+        filterApplyPassing.reserve((size_t) juce::jmin(n, 65536));
+    fileList.setScanPhase("Filtering");
+    fileList.setScanProgress(0, juce::jmax(1, n));
+    fileList.setSearching(true);
+}
+
+void MidiToolkitEditor::installFilteredEntries(std::vector<FileListEntry> entries,
+                                               std::vector<int> order)
+{
+    noteListedFileCount();
+    if (browseMode == 0)
+        sidebar.setCurrentClipCount(listedFileCount);
+    sidebar.setFilterHistograms(clips);
+    if (filterApplyOverlay)
+    {
+        filterApplyOverlay = false;
+        fileList.setSearching(false);
+    }
+    if (order.size() == entries.size())
+        fileList.setEntriesInOrder(std::move(entries), std::move(order));
+    else
+        fileList.setEntries(std::move(entries));
+}
+
+void MidiToolkitEditor::pumpFilterApply()
+{
+    if (!filterApplyActive)
+        return;
+
+    const int gen = filterApplyGen;
+    const int n = filterApplyNamesOnly ? (int) cachedMidiFiles.size() : (int) clips.size();
+    const auto start = juce::Time::getMillisecondCounter();
+    const bool pitchLocked = (processorRef.sectionLocks & toolkitLock::Pitch) != 0;
+    auto budget = [&] { return juce::Time::getMillisecondCounter() - start < 8; };
+
+    if (filterApplyPhase == 0)
+    {
+        while (filterApplyCursor < n && budget())
+        {
+            const int end = juce::jmin(n, filterApplyCursor + 400);
+            for (int i = filterApplyCursor; i < end; ++i)
+            {
+                const auto& clip = clips[(size_t) i];
+                if (starredFilter && browseMode != 1 && !isStarredFast(clip.filePath))
+                    continue;
+                if (browseMode != 1 && !clipMatchesFilter(clip, filterApplyFilter))
+                    continue;
+                if (!clipNameMatchesQuery(clip, filterApplyQuery))
+                    continue;
+                filterApplyPassing.push_back(i);
+            }
+            filterApplyCursor = end;
+        }
+        fileList.setScanProgress(filterApplyCursor, juce::jmax(1, n));
+        if (gen != filterApplyGen)
+            return;
+        if (filterApplyCursor < n)
+            return;
+        filterApplyPhase = 1;
+        filterApplyCursor = 0;
+        filterApplyFirst.reserve(filterApplyPassing.size());
+    }
+
+    if (filterApplyPhase == 1)
+    {
+        if (!filterApplyFilter.removeDuplicates)
+        {
+            filterApplyPhase = 2;
+            filterApplyCursor = 0;
+        }
+        else
+        {
+            const int pn = (int) filterApplyPassing.size();
+            while (filterApplyCursor < pn && budget())
+            {
+                const int end = juce::jmin(pn, filterApplyCursor + 400);
+                for (int p = filterApplyCursor; p < end; ++p)
+                {
+                    const int i = filterApplyPassing[(size_t) p];
+                    const auto& clip = clips[(size_t) i];
+                    if (!clip.fileMetaKnown)
+                        continue;
+                    const auto key = clipDedupeKey(clip);
+                    const auto [it, inserted] = filterApplyFirst.emplace(key, i);
+                    if (inserted)
+                        continue;
+                    const auto& prim = clips[(size_t) it->second];
+                    if (prim.fileBytes != clip.fileBytes || prim.fileModMs != clip.fileModMs
+                        || !prim.name.equalsIgnoreCase(clip.name))
+                        continue;
+                    filterApplyHidden.insert(i);
+                    auto& locs = filterApplyLocs[it->second];
+                    if (locs.isEmpty())
+                        locs.add(prim.filePath);
+                    locs.add(clip.filePath);
+                    searchDuplicateLocations[prim.filePath] = locs;
+                }
+                filterApplyCursor = end;
+            }
+            fileList.setScanProgress(filterApplyCursor, juce::jmax(1, pn));
+            if (gen != filterApplyGen)
+                return;
+            if (filterApplyCursor < pn)
+                return;
+            filterApplyPhase = 2;
+            filterApplyCursor = 0;
+        }
+    }
+
+    if (filterApplyPhase == 2)
+    {
+        if (browseMode == 0 && rootDir.isDirectory() && !recursiveBrowse)
+        {
+            for (const auto& d : cachedSubdirs)
+            {
+                if (filterApplyQuery.isNotEmpty() && !d.getFileName().containsIgnoreCase(filterApplyQuery))
+                    continue;
+                FileListEntry e;
+                e.file = d;
+                e.name = d.getFileName();
+                e.isDirectory = true;
+                e.starred = processorRef.isStarredFolder(d.getFullPathName());
+                filterApplyEntries.push_back(e);
+                filterApplyRows.push_back({ true, -1, d });
+            }
+        }
+        filterApplyPhase = 3;
+        filterApplyCursor = 0;
+        const int keep = filterApplyNamesOnly ? n : (int) filterApplyPassing.size();
+        filterApplyEntries.reserve(filterApplyEntries.size() + (size_t) keep);
+        filterApplyRows.reserve(filterApplyRows.size() + (size_t) keep);
+    }
+
+    if (filterApplyPhase == 3)
+    {
+        if (filterApplyNamesOnly)
+        {
+            while (filterApplyCursor < n && budget())
+            {
+                const int end = juce::jmin(n, filterApplyCursor + 200);
+                for (int i = filterApplyCursor; i < end; ++i)
+                {
+                    const auto& f = cachedMidiFiles[(size_t) i];
+                    const auto stem = f.getFileNameWithoutExtension();
+                    if (filterApplyQuery.isNotEmpty() && !stem.containsIgnoreCase(filterApplyQuery))
+                        continue;
+                    FileListEntry e;
+                    e.file = f;
+                    e.name = stem;
+                    e.starred = isStarredFast(f.getFullPathName());
+                    e.kind = ClipKind::Unsure;
+                    filterApplyEntries.push_back(std::move(e));
+                    filterApplyRows.push_back({ false, -1, f });
+                }
+                filterApplyCursor = end;
+            }
+            fileList.setScanProgress(filterApplyCursor, juce::jmax(1, n));
+            if (filterApplyCursor < n)
+                return;
+        }
+        else
+        {
+            const int pn = (int) filterApplyPassing.size();
+            while (filterApplyCursor < pn && budget())
+            {
+                const int end = juce::jmin(pn, filterApplyCursor + 200);
+                for (int p = filterApplyCursor; p < end; ++p)
+                {
+                    const int i = filterApplyPassing[(size_t) p];
+                    if (filterApplyHidden.count(i) != 0)
+                        continue;
+                    const auto& clip = clips[(size_t) i];
+                    const bool edited = pitchLocked && !editIsClean(processorRef.editFor(clip.filePath));
+                    auto entry = entryForClip(clip, juce::File(clip.filePath), edited, isStarredFast(clip.filePath));
+                    if (auto it = filterApplyLocs.find(i); it != filterApplyLocs.end() && it->second.size() > 1)
+                        entry.locations = it->second;
+                    filterApplyEntries.push_back(std::move(entry));
+                    filterApplyRows.push_back({ false, i, juce::File(clip.filePath) });
+                }
+                filterApplyCursor = end;
+            }
+            fileList.setScanProgress(filterApplyCursor, juce::jmax(1, pn));
+            if (gen != filterApplyGen)
+                return;
+            if (filterApplyCursor < pn)
+                return;
+        }
+
+        filterApplyPhase = 4;
+    }
+
+    if (filterApplyPhase != 4 || gen != filterApplyGen)
+        return;
+
+    filterApplyActive = false;
+    if (filterApplyQuery.isNotEmpty())
+    {
+        bool anyFile = false;
+        for (const auto& e : filterApplyEntries)
+            if (!e.isDirectory) { anyFile = true; break; }
+        if (!anyFile)
+            fileList.setEmptyHint("No matches");
+    }
+
+    auto entries = std::move(filterApplyEntries);
+    auto rows = std::move(filterApplyRows);
+    filterApplyPassing.clear();
+    filterApplyFirst.clear();
+    filterApplyHidden.clear();
+    filterApplyLocs.clear();
+    filterApplyStars.clear();
+
+    if (entries.size() <= 20000)
+    {
+        displayRows = std::move(rows);
+        installFilteredEntries(std::move(entries), {});
+        finishBrowserFilterApply(filterApplyPreviousPath);
+        return;
+    }
+
+    fileList.setScanPhase("Sorting");
+    struct Payload
+    {
+        std::vector<FileListEntry> entries;
+        std::vector<DisplayRow> rows;
+        std::vector<int> order;
+        BrowserSortColumn column = BrowserSortColumn::Name;
+        bool ascending = true;
+    };
+    auto payload = std::make_shared<Payload>();
+    payload->entries = std::move(entries);
+    payload->rows = std::move(rows);
+    payload->column = fileList.getSortColumn();
+    payload->ascending = fileList.isSortAscending();
+    const auto previousPath = filterApplyPreviousPath;
+    juce::Component::SafePointer<MidiToolkitEditor> safe(this);
+    juce::Thread::launch([payload, safe, gen, previousPath]
+    {
+        const int count = (int) payload->entries.size();
+        payload->order.resize((size_t) count);
+        std::iota(payload->order.begin(), payload->order.end(), 0);
+        std::sort(payload->order.begin(), payload->order.end(), [&](int a, int b)
+        {
+            return fileListEntryComesBefore(payload->entries[(size_t) a],
+                                            payload->entries[(size_t) b],
+                                            payload->column, payload->ascending, false);
+        });
+        juce::MessageManager::callAsync([payload, safe, gen, previousPath]
+        {
+            if (safe == nullptr || gen != safe->filterApplyGen)
+                return;
+            safe->displayRows = std::move(payload->rows);
+            safe->installFilteredEntries(std::move(payload->entries), std::move(payload->order));
+            safe->finishBrowserFilterApply(previousPath);
+        });
+    });
 }
 
 void MidiToolkitEditor::setBrowseMode(int mode)
@@ -2883,14 +3420,25 @@ void MidiToolkitEditor::ensureAndSelectFile(const juce::File& file)
 
 void MidiToolkitEditor::rebuildEntries()
 {
+    if (filterApplyActive || filterApplyOverlay)
+        cancelCooperativeFilterApply();
+
     displayRows.clear();
     std::vector<FileListEntry> entries;
 
-    // Re-apply filename keywords so stale Lead tags (pre-lexicon scans / stubs) correct.
-    for (auto& clip : clips)
-        applyFilenameKindTag(clip);
-
-    const auto filter = sidebar.getFilter();
+    const auto filter = sidebar.listingFilter();
+    const auto query = filter.query.trim();
+    const bool pitchLocked = (processorRef.sectionLocks & toolkitLock::Pitch) != 0;
+    std::unordered_set<uint32_t> starHashes;
+    starHashes.reserve((size_t) processorRef.starredFiles.size());
+    for (const auto& path : processorRef.starredFiles)
+        starHashes.insert((uint32_t) path.hashCode());
+    const auto starred = [&](const juce::String& path)
+    {
+        if (starHashes.empty() || starHashes.count((uint32_t) path.hashCode()) == 0)
+            return false;
+        return processorRef.starredFiles.contains(path);
+    };
 
     // Build the clip pool that passes the FILTER (search already narrowed by query).
     std::vector<int> passing;
@@ -2898,31 +3446,53 @@ void MidiToolkitEditor::rebuildEntries()
     for (int i = 0; i < (int) clips.size(); ++i)
     {
         const auto& clip = clips[(size_t) i];
-        const bool starred = processorRef.isStarred(clip.filePath);
         // Starred library mode already lists only favourites — don't re-filter stars.
-        if (starredFilter && browseMode != 1 && !starred)
+        if (starredFilter && browseMode != 1 && !starred(clip.filePath))
             continue;
         // Favorites views keep every starred path; FILTER chips don't hide them.
         if (browseMode != 1 && !clipMatchesFilter(clip, filter))
             continue;
+        // Name search applies to every listing, including favorites.
+        if (!clipNameMatchesQuery(clip, query))
+            continue;
         passing.push_back(i);
     }
 
-    std::set<juce::String> hiddenDupes;
+    std::unordered_set<int> hiddenDupes;
+    std::unordered_map<int, juce::StringArray> dupeLocs;
     searchDuplicateLocations.clear();
     if (filter.removeDuplicates && !passing.empty())
     {
-        std::vector<StepClip> pool;
-        pool.reserve(passing.size());
+        std::unordered_map<uint64_t, int> firstOf;
+        firstOf.reserve(passing.size());
         for (int i : passing)
-            pool.push_back(clips[(size_t) i]);
-        searchDuplicateLocations = computeDedupeLocations(pool, hiddenDupes);
+        {
+            const auto& clip = clips[(size_t) i];
+            if (!clip.fileMetaKnown)
+                continue;
+            const auto key = clipDedupeKey(clip);
+            const auto [it, inserted] = firstOf.emplace(key, i);
+            if (inserted)
+                continue;
+            const auto& prim = clips[(size_t) it->second];
+            if (prim.fileBytes != clip.fileBytes || prim.fileModMs != clip.fileModMs
+                || !prim.name.equalsIgnoreCase(clip.name))
+                continue;
+            hiddenDupes.insert(i);
+            auto& locs = dupeLocs[it->second];
+            if (locs.isEmpty())
+                locs.add(prim.filePath);
+            locs.add(clip.filePath);
+            searchDuplicateLocations[prim.filePath] = locs;
+        }
     }
 
     if (browseMode == 0 && rootDir.isDirectory() && !recursiveBrowse)
     {
         for (const auto& d : cachedSubdirs)
         {
+            if (!browserNameMatches(d.getFileName(), filter.query))
+                continue;
             FileListEntry e;
             e.file = d;
             e.name = d.getFileName();
@@ -2938,16 +3508,22 @@ void MidiToolkitEditor::rebuildEntries()
         {
             const juce::File d(path);
             if (!d.isDirectory()) continue;
+            const auto folderName = d.getFileName().isNotEmpty() ? d.getFileName() : path;
+            if (!browserNameMatches(folderName, filter.query))
+                continue;
             FileListEntry e;
             e.file = d;
-            e.name = d.getFileName().isNotEmpty() ? d.getFileName() : path;
+            e.name = folderName;
             e.isDirectory = true;
             e.starred = true;
             entries.push_back(e);
             displayRows.push_back({ true, -1, d });
         }
+        if (query.isNotEmpty() && entries.empty())
+            fileList.setEmptyHint("No matches");
         fileList.setEntries(std::move(entries));
         fileList.setFolderName("Favorite Folders");
+        noteListedFileCount();
         return;
     }
 
@@ -2959,6 +3535,8 @@ void MidiToolkitEditor::rebuildEntries()
     {
         for (const auto& f : cachedMidiFiles)
         {
+            if (!browserNameMatches(f.getFileNameWithoutExtension(), query))
+                continue;
             const auto path = f.getFullPathName();
             int clipIdx = -1;
             for (int i = 0; i < (int) clips.size(); ++i)
@@ -2968,16 +3546,14 @@ void MidiToolkitEditor::rebuildEntries()
             if (clipIdx >= 0)
             {
                 const auto& clip = clips[(size_t) clipIdx];
-                const bool starred = processorRef.isStarred(clip.filePath);
-                const bool edited = (processorRef.sectionLocks & toolkitLock::Pitch) != 0
-                                        && !editIsClean(processorRef.editFor(clip.filePath));
-                e = entryForClip(clip, f, edited, starred);
+                const bool edited = pitchLocked && !editIsClean(processorRef.editFor(clip.filePath));
+                e = entryForClip(clip, f, edited, starred(clip.filePath));
             }
             else
             {
                 e.file = f;
                 e.name = f.getFileNameWithoutExtension();
-                e.starred = processorRef.isStarred(path);
+                e.starred = starred(path);
                 if (auto tagged = kindKeywordFromFileName(path))
                     e.kind = *tagged;
                 else if (auto tagged = kindKeywordFromFileName(e.name))
@@ -2994,22 +3570,28 @@ void MidiToolkitEditor::rebuildEntries()
         for (int i : passing)
         {
             const auto& clip = clips[(size_t) i];
-            if (hiddenDupes.count(clip.filePath) != 0)
+            if (hiddenDupes.count(i) != 0)
                 continue;
 
-            const bool starred = processorRef.isStarred(clip.filePath);
-            const bool edited = (processorRef.sectionLocks & toolkitLock::Pitch) != 0
-                                    && !editIsClean(processorRef.editFor(clip.filePath));
-            auto entry = entryForClip(clip, juce::File(clip.filePath), edited, starred);
-            if (auto it = searchDuplicateLocations.find(clip.filePath);
-                it != searchDuplicateLocations.end() && it->second.size() > 1)
+            const bool edited = pitchLocked && !editIsClean(processorRef.editFor(clip.filePath));
+            auto entry = entryForClip(clip, juce::File(clip.filePath), edited, starred(clip.filePath));
+            if (auto it = dupeLocs.find(i); it != dupeLocs.end() && it->second.size() > 1)
                 entry.locations = it->second;
             entries.push_back(std::move(entry));
             displayRows.push_back({ false, i, juce::File(clip.filePath) });
         }
     }
 
+    if (query.isNotEmpty())
+    {
+        bool anyFile = false;
+        for (const auto& row : displayRows)
+            if (!row.isDirectory) { anyFile = true; break; }
+        if (!anyFile)
+            fileList.setEmptyHint("No matches");
+    }
     fileList.setEntries(std::move(entries));
+    noteListedFileCount();
     sidebar.setFilterHistograms(clips);
     if (browseMode == 0)
     {
@@ -4064,12 +4646,13 @@ void MidiToolkitEditor::exportFilesAsZip(std::vector<juce::File> files, const ju
 
 void MidiToolkitEditor::exportLibraryFolder()
 {
-    if (!rootDir.isDirectory())
+    const auto selected = fileList.selectedMidiFiles();
+    if (selected.empty() || !rootDir.isDirectory())
         return;
 
     struct ExportPanel : juce::Component
     {
-        juce::Label title { {}, "Export library folder" };
+        juce::Label title { {}, "Export selection" };
         juce::Label destLabel { {}, "Destination" };
         juce::Label destPath;
         IconBtn chooseBtn { icons::folder, "Choose folder" };
@@ -4177,52 +4760,45 @@ void MidiToolkitEditor::exportLibraryFolder()
         return;
 
     panel->onCancel = [window] { window->exitModalState(0); };
-    panel->onExport = [this, window](juce::File dest, bool asZip)
+    const auto folderName = rootDir.getFileName();
+    panel->onExport = [window, selected, folderName](juce::File dest, bool asZip)
     {
-        juce::Array<juce::File> midis;
-        for (int i = 0; i < fileList.getNumEntries(); ++i)
+        window->exitModalState(1);
+        juce::Thread::launch([dest, asZip, selected, folderName]
         {
-            const auto* e = fileList.entryAt(i);
-            if (e == nullptr || e->isDirectory) continue;
-            if (e->file.existsAsFile())
-                midis.add(e->file);
-        }
-        if (midis.isEmpty())
-        {
-            for (const auto& clip : clips)
+            const auto leaf = juce::File::createLegalFileName(
+                folderName.isEmpty() ? "Selection" : folderName);
+            if (asZip)
             {
-                const juce::File f(clip.filePath);
-                if (f.existsAsFile())
-                    midis.add(f);
+                writeFilesToZip(dest.getChildFile(leaf + ".zip"), selected);
+                return;
             }
-        }
-
-        if (asZip)
-        {
-            const auto zipFile = dest.getChildFile(
-                juce::File::createLegalFileName(rootDir.getFileName() + ".zip"));
-            if (zipFile.existsAsFile())
-                zipFile.deleteFile();
-            juce::ZipFile::Builder builder;
-            for (const auto& f : midis)
-                builder.addFile(f, 9, f.getFileName());
-            if (auto out = zipFile.createOutputStream())
-                builder.writeToStream(*out, nullptr);
-        }
-        else
-        {
-            const auto outDir = dest.getChildFile(
-                juce::File::createLegalFileName(rootDir.getFileName()));
+            const auto outDir = dest.getChildFile(leaf);
             outDir.createDirectory();
-            for (const auto& f : midis)
+            std::set<juce::String> used;
+            for (const auto& f : selected)
             {
-                const auto target = outDir.getChildFile(f.getFileName());
+                if (!f.existsAsFile() || f.getParentDirectory() == outDir)
+                    continue;
+                auto name = f.getFileName();
+                if (name.isEmpty())
+                    continue;
+                if (used.count(name) != 0)
+                {
+                    const auto stem = f.getFileNameWithoutExtension();
+                    const auto ext = f.getFileExtension();
+                    int n = 2;
+                    do
+                        name = stem + " " + juce::String(n++) + ext;
+                    while (used.count(name) != 0);
+                }
+                used.insert(name);
+                const auto target = outDir.getChildFile(name);
                 if (target.existsAsFile())
                     target.deleteFile();
                 f.copyFileTo(target);
             }
-        }
-        window->exitModalState(1);
+        });
     };
 }
 
@@ -4830,12 +5406,9 @@ void MidiToolkitEditor::refreshBrowserBar()
     browserBar.setGrid(gridView);
     browserBar.setSubfolders(sidebar.getIncludeSubdirs());
     leftPaneTabs.setGrid(gridView);
-    kindGrid.setKindMask(sidebar.getCriteria().kindMask);
+    kindGrid.setKindMask(sidebar.listingFilter().kindMask);
     previewHeader.refresh();
-    int files = 0;
-    for (int i = 0; i < fileList.getNumEntries(); ++i)
-        if (const auto* e = fileList.entryAt(i); e != nullptr && !e->isDirectory)
-            ++files;
+    const int files = listedFileCount;
     const int barH = browserBar.idealHeight();
     juce::String folderTitle = fileList.getFolderName();
     juce::File folderForTitle = rootDir;
@@ -4866,9 +5439,10 @@ void MidiToolkitEditor::refreshBrowserBar()
                                   sidebar.describeActiveFilters());
     browserBar.setFiltersActive(sidebar.isFilterOpen(), sidebar.activeFilterCount(),
                                 sidebar.describeActiveFilters());
-    // Levels FilterPopover footer: "20 of 64 files".
-    filterPopover.setCountText(juce::String(files) + " of " + juce::String(total)
-                               + (total == 1 ? " file" : " files"));
+    // The open filter owns its footer. Recounting here ran on every 30 Hz tick.
+    if (!sidebar.isFilterOpen())
+        filterPopover.setCountText(juce::String(files) + " of " + juce::String(total)
+                                   + (total == 1 ? " file" : " files"));
     // Filter summary strip changes BrowserToolbar height — reflow only when it does.
     if (browserBar.isVisible() && browserBar.idealHeight() != barH)
         layoutContent();
@@ -5080,10 +5654,9 @@ void MidiToolkitEditor::layoutContent()
 
     if (showFiles && sidebar.isFilterOpen())
     {
-        // Slightly wider than the toolkit column so section padding has room.
-        const int w = metrics::effectsPaneWidth() + metrics::scaled(24);
+        const int w = metrics::effectsPaneWidth();
         const int room = juce::jmax(120, content.getHeight() - metrics::scaled(16));
-        const int chrome = metrics::scaled(40) + metrics::scaled(8) * 2 + metrics::scaled(24);
+        const int chrome = metrics::scaled(40) + metrics::scaled(40);
         filterPopover.setMaxBodyHeight(juce::jmax(80, room - chrome));
         const int h = juce::jmin(filterPopover.idealHeight(), room);
         const int x = juce::jlimit(metrics::scaled(4),
@@ -5118,6 +5691,12 @@ void MidiToolkitEditor::layoutContent()
     {
         miniRoll.toFront(false);
         previewHeader.toFront(false);
+    }
+    // A relayout (chip edits call this) must not let the preview cover the filter.
+    if (filterPopover.isVisible())
+    {
+        filterDismissShield.toFront(false);
+        filterPopover.toFront(false);
     }
     // Column rules are painted by the file list. Keep Settings above them.
     if (auto* settings = content.findChildWithID("settingsOverlay"))
@@ -5842,6 +6421,11 @@ void MidiToolkitEditor::syncTooltipHighlight()
 
 void MidiToolkitEditor::timerCallback()
 {
+    if (filterApplyActive)
+        pumpFilterApply();
+    else if (filterCountActive)
+        pumpFilterCount();
+
     syncTooltipHighlight();
     refreshBrowserBar();
 
