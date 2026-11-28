@@ -5991,6 +5991,7 @@ public:
         addAndMakeVisible(saveDefaultBtn);
 
         setSize(kPanelW, contentHeight(aboutTab));
+        setOpaque(false);
     }
 
     void refreshThemePopup()
@@ -6032,11 +6033,8 @@ public:
     void paint(juce::Graphics& g) override
     {
         auto bounds = getLocalBounds().toFloat();
-        g.fillAll(ds::surface100());
         g.setColour(ds::surface100());
         g.fillRoundedRectangle(bounds, 10.0f);
-        g.setColour(ds::edge());
-        g.drawRoundedRectangle(bounds.reduced(0.5f), 10.0f, 1.0f);
 
         // Header tabs: SETTINGS | ABOUT — keep the existing 11pt semibold style.
         auto header = getLocalBounds().removeFromTop(kHeaderH).reduced(kPadX, 0);
@@ -6098,6 +6096,12 @@ public:
             g.drawText(label, row, juce::Justification::centredLeft, false);
             body.removeFromTop(kRowGap);
         }
+    }
+
+    void paintOverChildren(juce::Graphics& g) override
+    {
+        g.setColour(ds::edge());
+        g.drawRoundedRectangle(getLocalBounds().toFloat().reduced(0.5f), 10.0f, 1.0f);
     }
 
     void mouseDown(const juce::MouseEvent& e) override
@@ -6226,7 +6230,7 @@ void MidiToolkitEditor::showTweaksMenu()
             view.setViewedComponent(&panel, false);
             view.setScrollBarsShown(true, false);
             view.setScrollBarThickness(10);
-            view.setOpaque(true);
+            view.setOpaque(false);
             addAndMakeVisible(view);
         }
 

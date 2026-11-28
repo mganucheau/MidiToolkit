@@ -23,8 +23,14 @@ struct AlsSession
     std::vector<AlsClip> clips;
 };
 
-/** Last `Loading document "...als"` path in a Live Log.txt. Empty when none. */
+/** Last real set in a Live Log.txt. Track and factory templates are ignored. */
 juce::File liveSetPathFromLog(const juce::String& logText);
+
+/** Absolute .als paths embedded in CrashRecoveryInfo.cfg, in file order. */
+juce::StringArray alsPathsInRecoveryInfo(const juce::MemoryBlock& data);
+
+/** Newest existing set. When two files share a time, the one outside BaseFiles wins. */
+juce::File chooseLiveSetFile(const juce::Array<juce::File>& candidates);
 
 /** Set recorded by the newest Ableton Log.txt, including a crash-recovery copy. */
 juce::File findCurrentLiveSet();

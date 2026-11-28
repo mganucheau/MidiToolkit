@@ -222,26 +222,99 @@ juce::String legalLeaf(const juce::String& name, const juce::String& fallback)
     return leaf;
 }
 
+bool isAbletonTemplatePath(const juce::String& path)
+{
+    const auto lower = path.toLowerCase();
+    return lower.contains("/app-resources/")
+        || lower.contains(".app/contents/")
+        || lower.contains("/core library/defaults/")
+        || lower.contains("/builtin/templates/");
+}
+
+juce::String quotedAlsOnLine(const juce::String& line, const juce::String& marker)
+{
+    const int at = line.indexOf(marker);
+    if (at < 0)
+        return {};
+    const int start = at + marker.length();
+    const int end = line.indexOfChar(start, '"');
+    if (end <= start)
+        return {};
+    const auto path = line.substring(start, end);
+    if (!path.endsWithIgnoreCase(".als") || isAbletonTemplatePath(path))
+        return {};
+    return path;
+}
+
 } // namespace
 
 juce::File liveSetPathFromLog(const juce::String& logText)
 {
     juce::String last;
-    const auto marker = juce::String("Loading document \"");
     for (const auto& line : juce::StringArray::fromLines(logText))
     {
-        const int at = line.indexOf(marker);
-        if (at < 0)
-            continue;
-        const int start = at + marker.length();
-        const int end = line.indexOfChar(start, '"');
-        if (end <= start)
-            continue;
-        const auto path = line.substring(start, end);
-        if (path.endsWithIgnoreCase(".als"))
+        auto path = quotedAlsOnLine(line, "Loading document \"");
+        if (path.isEmpty())
+            path = quotedAlsOnLine(line, "Open document: \"");
+        if (path.isNotEmpty())
             last = path;
     }
     return last.isEmpty() ? juce::File() : juce::File(last);
+}
+
+juce::StringArray alsPathsInRecoveryInfo(const juce::MemoryBlock& data)
+{
+    juce::StringArray paths;
+    const auto* bytes = static_cast<const unsigned char*>(data.getData());
+    const size_t n = data.getSize();
+    size_t i = 0;
+    while (i + 1 < n)
+    {
+        if (bytes[i] != '/' || bytes[i + 1] != 0)
+        {
+            ++i;
+            continue;
+        }
+
+        juce::String path;
+        size_t j = i;
+        while (j + 1 < n)
+        {
+            const unsigned code = (unsigned) bytes[j] | ((unsigned) bytes[j + 1] << 8);
+            if (code < 32 || code > 126)
+                break;
+            path += (juce::juce_wchar) code;
+            j += 2;
+        }
+        if (path.endsWithIgnoreCase(".als"))
+            paths.addIfNotAlreadyThere(path);
+        i = j > i ? j : i + 1;
+    }
+    return paths;
+}
+
+juce::File chooseLiveSetFile(const juce::Array<juce::File>& candidates)
+{
+    juce::File best;
+    juce::Time bestTime;
+    bool bestInBaseFiles = false;
+    for (const auto& file : candidates)
+    {
+        if (!file.existsAsFile() || isAbletonTemplatePath(file.getFullPathName()))
+            continue;
+        const auto modified = file.getLastModificationTime();
+        const bool inBaseFiles = file.getParentDirectory().getFileName().equalsIgnoreCase("BaseFiles");
+        const bool newer = !best.existsAsFile() || modified > bestTime;
+        const bool sameTimePreferSaved = best.existsAsFile() && modified == bestTime
+                                       && bestInBaseFiles && !inBaseFiles;
+        if (newer || sameTimePreferSaved)
+        {
+            best = file;
+            bestTime = modified;
+            bestInBaseFiles = inBaseFiles;
+        }
+    }
+    return best;
 }
 
 juce::File findCurrentLiveSet()
@@ -267,7 +340,27 @@ juce::File findCurrentLiveSet()
     }
     if (!newestLog.existsAsFile())
         return {};
-    return liveSetPathFromLog(newestLog.loadFileAsString());
+
+    juce::Array<juce::File> candidates;
+    const auto fromLog = liveSetPathFromLog(newestLog.loadFileAsString());
+    if (fromLog.getFullPathName().isNotEmpty())
+        candidates.add(fromLog);
+
+    const auto recovery = newestLog.getSiblingFile("CrashRecoveryInfo.cfg");
+    if (recovery.existsAsFile())
+    {
+        juce::MemoryBlock block;
+        if (recovery.loadFileAsData(block))
+            for (const auto& path : alsPathsInRecoveryInfo(block))
+                candidates.add(juce::File(path));
+    }
+
+    const auto baseFiles = newestLog.getSiblingFile("BaseFiles");
+    if (baseFiles.isDirectory())
+        for (const auto& entry : juce::RangedDirectoryIterator(baseFiles, false, "*.als", juce::File::findFiles))
+            candidates.add(entry.getFile());
+
+    return chooseLiveSetFile(candidates);
 }
 
 AlsSession parseAlsSession(const juce::File& alsFile)
