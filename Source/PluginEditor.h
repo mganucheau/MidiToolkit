@@ -42,7 +42,7 @@ public:
     void darkModeSettingChanged() override;
 
     void setRootDirectory(const juce::File& dir, bool keepSelection = false,
-                          bool scanSubdirs = false);
+                          bool scanSubdirs = false, bool remember = true);
     /** Rows currently shown in the file browser (folders + MIDI files). */
     int browserEntryCount() const { return fileList.getNumEntries(); }
     /** Parse one MIDI file for preview without a full folder Scan. */
@@ -64,6 +64,7 @@ private:
     /** Load every MIDI file under the current folder tree (flat list). */
     void scanAllFolders();
     void chooseFolder();
+    void importCurrentSession();
     void rebuildEntries();
     /** Load notes for an indexed clip (metadata-only) before preview/play. */
     bool ensureClipNotesLoaded(int clipIndex);
@@ -416,6 +417,10 @@ private:
     std::vector<DisplayRow> displayRows;
     std::vector<DisplayRow> filterApplyRows;
     int browseMode = 0;   // 0 folder, 1 starred files, 2 search, 3 starred folders
+    /** Cache folder of an imported Live set. Do not store it as the library. */
+    bool showingSessionImport = false;
+    /** Bumps when a session import starts or the user opens another folder. */
+    std::atomic<int> sessionImportGen { 0 };
     bool starredFilter = false;
     BrowserSearch activeSearch;
     int activeSavedSearchIdx = -1;

@@ -1,4 +1,5 @@
 #include "PluginEditor.h"
+#include "AlsSession.h"
 #include "FolderIndex.h"
 #include "GeneratorEngines.h"
 #include <map>
@@ -533,6 +534,7 @@ MidiToolkitEditor::MidiToolkitEditor(MidiToolkitProcessor& p)
     // ── Sidebar ──
     sidebar.onClaimKeys = [this] { claimKeyNav(KeyNavTarget::Sidebar); };
     sidebar.onOpenFolder = [this] { chooseFolder(); };
+    sidebar.onImportSession = [this] { importCurrentSession(); };
     sidebar.onPickDir = [this](const juce::String& path)
     {
         const juce::File dir(path);
@@ -1703,7 +1705,8 @@ void MidiToolkitEditor::darkModeSettingChanged()
 
 // ── data ─────────────────────────────────────────────────────────────────────
 
-void MidiToolkitEditor::setRootDirectory(const juce::File& dir, bool keepSelection, bool scanSubdirs)
+void MidiToolkitEditor::setRootDirectory(const juce::File& dir, bool keepSelection, bool scanSubdirs,
+                                          bool remember)
 {
     browseMode = 0;
     starredFilter = false;
@@ -1712,7 +1715,16 @@ void MidiToolkitEditor::setRootDirectory(const juce::File& dir, bool keepSelecti
     sidebar.setIncludeSubdirs(scanSubdirs);
     recursiveBrowse = scanSubdirs;
     rootDir = dir;
-    processorRef.lastBrowserDir = dir.getFullPathName();
+    if (remember)
+    {
+        ++sessionImportGen;
+        showingSessionImport = false;
+        processorRef.lastBrowserDir = dir.getFullPathName();
+    }
+    else
+    {
+        showingSessionImport = true;
+    }
     activeSavedSearchIdx = -1;
     ++browseListGeneration;
     auto name = dir.getFileName();
@@ -1722,6 +1734,53 @@ void MidiToolkitEditor::setRootDirectory(const juce::File& dir, bool keepSelecti
     // Scan this folder immediately. Subdirectories are included only when asked.
     rescanFolder(keepSelection);
     claimKeyNav(KeyNavTarget::Browser);
+}
+
+void MidiToolkitEditor::importCurrentSession()
+{
+    const int gen = ++sessionImportGen;
+    fileList.setSearching(true);
+    fileList.setScanPhase("Importing");
+    juce::Component::SafePointer<MidiToolkitEditor> safe(this);
+    juce::Thread::launch([safe, gen]
+    {
+        const auto setFile = findCurrentLiveSet();
+        juce::File outDir;
+        juce::String title;
+        if (setFile.existsAsFile())
+        {
+            const auto session = parseAlsSession(setFile);
+            title = session.setName;
+            if (!session.clips.empty())
+                outDir = writeSessionMidiFiles(session);
+        }
+        const bool found = setFile.existsAsFile();
+        juce::MessageManager::callAsync([safe, gen, found, title, outDir]
+        {
+            if (safe == nullptr || safe->sessionImportGen.load() != gen)
+                return;
+            safe->fileList.setSearching(false);
+            if (!found)
+            {
+                juce::AlertWindow::showMessageBoxAsync(
+                    juce::MessageBoxIconType::InfoIcon,
+                    "Import Session",
+                    "Save the Live set, then import again.");
+                return;
+            }
+            if (!outDir.isDirectory())
+            {
+                juce::AlertWindow::showMessageBoxAsync(
+                    juce::MessageBoxIconType::InfoIcon,
+                    "Import Session",
+                    "This Live set has no MIDI clips.");
+                return;
+            }
+            safe->setRootDirectory(outDir, false, false, false);
+            if (title.isNotEmpty())
+                safe->fileList.setFolderName(title);
+        });
+    });
 }
 
 void MidiToolkitEditor::refreshBrowseListingAsync(const juce::String& selectPath,
@@ -1828,7 +1887,7 @@ void MidiToolkitEditor::persistBrowserSession()
     if (browseMode == 2)
         activeSearch = processorRef.browserSessionSearch;
     processorRef.activeSavedSearchIdx = activeSavedSearchIdx;
-    if (rootDir.isDirectory())
+    if (rootDir.isDirectory() && !showingSessionImport)
         processorRef.lastBrowserDir = rootDir.getFullPathName();
 
     if (juce::isPositiveAndBelow(selectedIdx, (int) clips.size()))

@@ -1241,7 +1241,7 @@ std::vector<FavoritesSidebar::LayoutItem> FavoritesSidebar::collectLayout() cons
 
     if (collapsed)
     {
-        // Rail: unfold · open · Files (star) · Folders (star) · kept dirs.
+        // Rail: unfold · open · import · Files (star) · Folders (star) · kept dirs.
         const int btn = collapsedBtnSize();
         const int gap = metrics::scaled(14); // more air between folded icons
         y += gap;
@@ -1256,6 +1256,9 @@ std::vector<FavoritesSidebar::LayoutItem> FavoritesSidebar::collectLayout() cons
         };
         for (int i = 0; i < (int) rows.size(); ++i)
             if (rows[(size_t) i].kind == RowKind::Open) placeBtn(i);
+        out.push_back({ LayoutKind::ImportBtn, -1,
+                        juce::Rectangle<int>(0, y, W, btn).withSizeKeepingCentre(btn, btn) });
+        y += btn + gap;
         for (int i = 0; i < (int) rows.size(); ++i)
             if (rows[(size_t) i].kind == RowKind::Starred) placeBtn(i);
         for (int i = 0; i < (int) rows.size(); ++i)
@@ -1280,6 +1283,17 @@ std::vector<FavoritesSidebar::LayoutItem> FavoritesSidebar::collectLayout() cons
                                        labelW);
         out.push_back({ LayoutKind::OpenBtn, -1,
                         juce::Rectangle<int>(padH, y, openW, openFolderH()) });
+    }
+    y += openFolderH() + metrics::scaled(6);
+    {
+        const auto importFont = uiFontFixed(12.0f, true);
+        const int importLabelW = (int) std::ceil(juce::GlyphArrangement::getStringWidth(importFont, "Import Session"))
+                               + metrics::scaled(12) + 15 + 6 + metrics::scaled(12);
+        const int importW = juce::jlimit(metrics::scaled(64),
+                                         juce::jmax(metrics::scaled(64), W - padH * 2),
+                                         importLabelW);
+        out.push_back({ LayoutKind::ImportBtn, -1,
+                        juce::Rectangle<int>(padH, y, importW, openFolderH()) });
     }
     y += openFolderH() + metrics::scaled(kOpenToLibrary);
 
@@ -1419,12 +1433,17 @@ void FavoritesSidebar::rebuildNavItems()
 {
     navItems.clear();
     if (!collapsed)
+    {
         navItems.push_back({ NavKind::OpenFolder, -1 });
+        navItems.push_back({ NavKind::ImportSession, -1 });
+    }
     for (int i = 0; i < (int) rows.size(); ++i)
     {
         const auto k = rows[(size_t) i].kind;
         if (collapsed || k != RowKind::Open)
             navItems.push_back({ NavKind::Row, i });
+        if (collapsed && k == RowKind::Open)
+            navItems.push_back({ NavKind::ImportSession, -1 });
     }
     if (!juce::isPositiveAndBelow(navIndex, (int) navItems.size()))
         navIndex = navItems.empty() ? -1 : 0;
@@ -1434,8 +1453,9 @@ juce::Rectangle<int> FavoritesSidebar::navItemBounds(const NavItem& item) const
 {
     switch (item.kind)
     {
-        case NavKind::OpenFolder:  return libraryPlusBounds;
-        case NavKind::Star:        return starBounds;
+        case NavKind::OpenFolder:     return libraryPlusBounds;
+        case NavKind::ImportSession:  return importSessionBounds;
+        case NavKind::Star:           return starBounds;
         case NavKind::Refresh:     return refreshBtnBounds;
         case NavKind::ScanSubdirs: return scanBtnBounds;
         case NavKind::Filters:
@@ -1457,6 +1477,9 @@ void FavoritesSidebar::activateNavItem(const NavItem& item)
     {
         case NavKind::OpenFolder:
             if (onOpenFolder) onOpenFolder();
+            break;
+        case NavKind::ImportSession:
+            if (onImportSession) onImportSession();
             break;
         case NavKind::Star:
             if (onToggleStarFolder) onToggleStarFolder();
@@ -1546,6 +1569,11 @@ void FavoritesSidebar::updateTooltipForPos(juce::Point<int> pos)
         setTooltip("open a new folder");
         return;
     }
+    if (importSessionBounds.contains(pos))
+    {
+        setTooltip("Import MIDI clips from the open Live set");
+        return;
+    }
     const auto hit = rowHitAt(pos);
     if (hit.valid && hit.removeZone)
     {
@@ -1562,6 +1590,11 @@ void FavoritesSidebar::updateTooltipForPos(juce::Point<int> pos)
             if (item.kind == LayoutKind::FoldBtn)
             {
                 setTooltip("Expand sidebar");
+                return;
+            }
+            if (item.kind == LayoutKind::ImportBtn)
+            {
+                setTooltip("Import MIDI clips from the open Live set");
                 return;
             }
             if (item.kind == LayoutKind::Row
@@ -1616,6 +1649,7 @@ void FavoritesSidebar::focusLost(FocusChangeType)
 void FavoritesSidebar::layoutChildren()
 {
     openFolderBounds = {};
+    importSessionBounds = {};
     folderCardBounds = {};
     starBounds = {};
     refreshBtnBounds = {};
@@ -1633,8 +1667,12 @@ void FavoritesSidebar::layoutChildren()
     {
         juce::Rectangle<int> foldBounds;
         for (const auto& item : collectLayout())
+        {
             if (item.kind == LayoutKind::FoldBtn)
                 foldBounds = item.bounds;
+            else if (item.kind == LayoutKind::ImportBtn)
+                importSessionBounds = item.bounds;
+        }
         if (!foldBounds.isEmpty())
             btnToggle.setBounds(foldBounds);
         else
@@ -1654,6 +1692,10 @@ void FavoritesSidebar::layoutChildren()
                                      getWidth() - sidebarPadH() - fold);
             const int y = item.bounds.getY() + (item.bounds.getHeight() - fold) / 2;
             btnToggle.setBounds(x, y, fold, fold);
+        }
+        else if (item.kind == LayoutKind::ImportBtn)
+        {
+            importSessionBounds = item.bounds;
         }
         else if (item.kind == LayoutKind::FolderCard)
         {
@@ -1704,6 +1746,7 @@ FavoritesSidebar::RowHit FavoritesSidebar::rowHitAt(juce::Point<int> pos) const
 FavoritesSidebar::ChromeHit FavoritesSidebar::chromeHitAt(juce::Point<int> pos) const
 {
     if (settingsRowBounds.contains(pos)) return ChromeHit::Settings;
+    if (importSessionBounds.contains(pos)) return ChromeHit::ImportSession;
     if (collapsed) return ChromeHit::None;
     if (libraryPlusBounds.contains(pos)) return ChromeHit::OpenFolder;
     if (starBounds.contains(pos)) return ChromeHit::Star;
@@ -1815,6 +1858,10 @@ void FavoritesSidebar::mouseDown(const juce::MouseEvent& e)
         case ChromeHit::OpenFolder:
             syncNav(NavKind::OpenFolder);
             if (onOpenFolder) onOpenFolder();
+            return;
+        case ChromeHit::ImportSession:
+            syncNav(NavKind::ImportSession);
+            if (onImportSession) onImportSession();
             return;
         case ChromeHit::Star:
             syncNav(NavKind::Star);
@@ -1948,7 +1995,8 @@ void FavoritesSidebar::paintSectionLabel(juce::Graphics& g, const juce::String& 
 }
 
 void FavoritesSidebar::paintOpenFolderButton(juce::Graphics& g, juce::Rectangle<int> r,
-                                             bool hover, bool focus)
+                                             bool hover, bool focus, const char* icon,
+                                             const juce::String& label)
 {
     if (r.isEmpty()) return;
     auto face = r.toFloat();
@@ -1959,13 +2007,12 @@ void FavoritesSidebar::paintOpenFolderButton(juce::Graphics& g, juce::Rectangle<
     g.drawRoundedRectangle(face.reduced(0.5f), ds::radius::md, 1.0f);
     auto inner = r.reduced(metrics::scaled(12), 0);
     const float glyph = 13.0f;
-    drawIcon(g, icons::folder, inner.removeFromLeft((int) glyph + 2).toFloat().withSizeKeepingCentre(glyph, glyph),
+    drawIcon(g, icon, inner.removeFromLeft((int) glyph + 2).toFloat().withSizeKeepingCentre(glyph, glyph),
              ds::ink(), 1.45f);
     inner.removeFromLeft(6);
     g.setColour(ds::ink());
     float pt = 12.0f;
     auto font = uiFontFixed(pt, true);
-    const juce::String label = "Open";
     while (pt > 9.0f
            && juce::GlyphArrangement::getStringWidth(font, label) > (float) inner.getWidth())
     {
@@ -2213,9 +2260,25 @@ void FavoritesSidebar::paint(juce::Graphics& g)
     {
         paintOpenFolderButton(g, openFolderBounds, hoverChrome == ChromeHit::OpenFolder,
                               focused != nullptr && focused->kind == NavKind::OpenFolder);
+        paintOpenFolderButton(g, importSessionBounds, hoverChrome == ChromeHit::ImportSession,
+                              focused != nullptr && focused->kind == NavKind::ImportSession,
+                              icons::download, "Import Session");
         paintFolderCard(g);
         paintSectionLabel(g, "Library", libraryHeaderBounds);
         paintSectionLabel(g, "Favorites", searchHeaderBounds);
+    }
+    else if (!importSessionBounds.isEmpty())
+    {
+        auto b = importSessionBounds.toFloat();
+        if (hoverChrome == ChromeHit::ImportSession)
+        {
+            g.setColour(ds::ink().withAlpha(0.07f));
+            g.fillRoundedRectangle(b.reduced(4.0f, 2.0f), ds::radius::md);
+        }
+        const float glyph = (float) metrics::chromeIconGlyphSize();
+        drawIcon(g, icons::download, b.withSizeKeepingCentre(glyph, glyph), ds::ink(), kSidebarIconStroke);
+        if (focused != nullptr && focused->kind == NavKind::ImportSession)
+            drawFocusRing(g, b, ds::radius::sm);
     }
 
     for (int i = 0; i < (int) rows.size(); ++i)

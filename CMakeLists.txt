@@ -146,6 +146,7 @@ set(MIDITOOLKIT_SOURCES
     Source/HostParams.cpp
     Source/PluginEditor.cpp
     Source/MidiFileData.cpp
+    Source/AlsSession.cpp
     Source/EditModel.cpp
     Source/GrooveEngine.cpp
     Source/GeneratorEngines.cpp
@@ -226,6 +227,7 @@ if(MIDITOOLKIT_BUILD_TESTS)
     add_executable(MidiToolkitTests
         Tests/main.cpp
         Tests/MidiFileDataTests.cpp
+        Tests/AlsSessionTests.cpp
         Tests/TrimTests.cpp
         Tests/PluginProcessorTests.cpp
         Tests/EditModelTests.cpp

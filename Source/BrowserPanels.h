@@ -131,6 +131,7 @@ public:
 
     std::function<void()> onClaimKeys;
     std::function<void()> onOpenFolder;
+    std::function<void()> onImportSession;
     std::function<void(const juce::String&)> onPickDir;
     std::function<void(const juce::String&)> onRemoveDir;
     /** Keep / un-keep current folder in Library. */
@@ -219,7 +220,7 @@ private:
     };
     enum class ChromeHit
     {
-        None, Settings, OpenFolder, Star, Refresh, ScanSubdirs, Filters
+        None, Settings, OpenFolder, ImportSession, Star, Refresh, ScanSubdirs, Filters
     };
 
     struct Row { RowKind kind; int index = -1; };
@@ -234,7 +235,8 @@ private:
                   bool hovered, bool removeZone, bool keyboardFocus);
     void paintSectionLabel(juce::Graphics&, const juce::String& title,
                            juce::Rectangle<int> bounds);
-    void paintOpenFolderButton(juce::Graphics&, juce::Rectangle<int> r, bool hover, bool focus);
+    void paintOpenFolderButton(juce::Graphics&, juce::Rectangle<int> r, bool hover, bool focus,
+                               const char* icon = icons::folder, const juce::String& label = "Open");
     void paintFolderCard(juce::Graphics&);
     void paintActionButton(juce::Graphics&, juce::Rectangle<int> r, bool hover, bool active,
                            bool disabled);
@@ -251,7 +253,7 @@ private:
     /** Keyboard / tooltip navigation targets in visual order. */
     enum class NavKind
     {
-        Row, OpenFolder, Star, Refresh, ScanSubdirs, Filters, Settings
+        Row, OpenFolder, ImportSession, Star, Refresh, ScanSubdirs, Filters, Settings
     };
     struct NavItem
     {
@@ -264,7 +266,7 @@ private:
     void updateTooltipForPos(juce::Point<int> pos);
     juce::Rectangle<int> navItemBounds(const NavItem&) const;
 
-    enum class LayoutKind { OpenBtn, FolderCard, FoldBtn, Section, Row, Query, Filter, End };
+    enum class LayoutKind { OpenBtn, ImportBtn, FolderCard, FoldBtn, Section, Row, Query, Filter, End };
     struct LayoutItem
     {
         LayoutKind kind = LayoutKind::End;
@@ -314,7 +316,7 @@ private:
     bool currentFolderStarred = false;
 
     juce::Rectangle<int> settingsRowBounds;
-    juce::Rectangle<int> openFolderBounds, folderCardBounds;
+    juce::Rectangle<int> openFolderBounds, importSessionBounds, folderCardBounds;
     juce::Rectangle<int> starBounds, refreshBtnBounds, scanBtnBounds, filtersBtnBounds;
     juce::Rectangle<int> libraryHeaderBounds, libraryPlusBounds, searchHeaderBounds, savedHeaderBounds;
 
